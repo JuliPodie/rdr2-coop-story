@@ -27,7 +27,7 @@ public static class AtomicFile
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var target = Path.GetFullPath(path);
         var parent = Path.GetDirectoryName(target)
-            ?? throw new LauncherException("Ścieżka pliku nie ma katalogu nadrzędnego.");
+            ?? throw new LauncherException("The file path has no parent directory.");
         Directory.CreateDirectory(parent);
 
         var temporary = Path.Combine(

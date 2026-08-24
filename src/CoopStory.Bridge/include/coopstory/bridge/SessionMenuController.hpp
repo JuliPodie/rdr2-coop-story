@@ -73,7 +73,7 @@ private:
     std::size_t selection_{};
     SessionOverlayPhase phase_{SessionOverlayPhase::WaitingForSidecar};
     std::string status_{
-        "HOST/JOIN i haslo ustawiaj w launcherze. F8 otwiera panel awaryjny."};
+        "Set HOST/JOIN and the password in the launcher. F8 opens the emergency panel."};
     MenuInputState previous_{};
 };
 

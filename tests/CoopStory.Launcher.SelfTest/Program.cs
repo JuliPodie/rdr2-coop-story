@@ -347,7 +347,7 @@ static void TestWrongGameHash()
     var report = context.Installation.Verify(context.Request);
     Assert(!report.IsValid, "Wrong game hash was accepted.");
     Assert(
-        report.Summary.Contains("Nieobsługiwany", StringComparison.Ordinal),
+        report.Summary.Contains("Unsupported", StringComparison.Ordinal),
         "Wrong game error is unclear.");
 }
 
@@ -423,7 +423,7 @@ static void TestLobbyStatus()
 static void TestNicknameConfig()
 {
     using var context = TestContext.Create();
-    var settings = context.Settings with { Nickname = "Łowca 🤠" };
+    var settings = context.Settings with { Nickname = "Ranger 🤠" };
     var bytes = SidecarConfiguration.CreateBytes(settings, context.Paths);
     using var document = JsonDocument.Parse(bytes);
     Assert(
@@ -589,7 +589,7 @@ static void TestBundledRuntimeRejected()
     var report = context.Installation.Verify(context.Request);
     Assert(!report.IsValid, "Bundled runtime was accepted.");
     Assert(
-        report.Summary.Contains("nie może zawierać", StringComparison.Ordinal),
+        report.Summary.Contains("cannot contain", StringComparison.Ordinal),
         "Bundled runtime error is unclear.");
 }
 
@@ -1210,7 +1210,7 @@ static void TestDiagnosticsTimelineAndAnomalies()
     Assert(
         timelineMarkdown.Contains("Host", StringComparison.Ordinal) &&
         timelineMarkdown.Contains("Guest", StringComparison.Ordinal) &&
-        anomaliesMarkdown.Contains("Pierwszy rozjazd", StringComparison.Ordinal) &&
+        anomaliesMarkdown.Contains("First divergence", StringComparison.Ordinal) &&
         anomaliesMarkdown.Contains("P95", StringComparison.Ordinal) &&
         markerMarkdown.Contains("281474993487873", StringComparison.Ordinal),
         "Human-readable timeline/anomaly reports are incomplete.");
@@ -1367,7 +1367,7 @@ static void TestDiagnosticsReplacement()
 static void TestEscapedWindowsPathRedaction()
 {
     const string privatePath =
-        @"C:\Users\Example User\Żółć\RDR2 Coop\logs";
+        @"C:\Users\Example User\Résumé\RDR2 Coop\logs";
     var redactor = new SecretRedactor([privatePath]);
     var jsonEscaped = JsonEncodedText.Encode(privatePath).ToString();
     var unicodeEscaped = jsonEscaped.Replace(

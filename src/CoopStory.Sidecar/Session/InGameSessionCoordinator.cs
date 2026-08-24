@@ -18,8 +18,8 @@ public static class InGameSessionCoordinator
         ArgumentNullException.ThrowIfNull(bootstrap);
         var address = SuggestedLanAddress(bootstrap.HostAddress) ??
             throw new ConfigurationException(
-                "Nie wykryto prywatnego adresu IPv4 hosta. Polacz komputer " +
-                "z siecia LAN albo Hamachi i sprobuj ponownie.");
+                "No private host IPv4 address was detected. Connect the computer " +
+                "to a LAN or Hamachi network and try again.");
         return CreateHost(bootstrap, address);
     }
 
@@ -58,8 +58,8 @@ public static class InGameSessionCoordinator
         if (string.IsNullOrWhiteSpace(inviteCode))
         {
             throw new ConfigurationException(
-                "Schowek nie zawiera kodu R2C1. Skopiuj swiezy kod od hosta " +
-                "i wybierz JOIN ponownie.");
+                "The clipboard does not contain an R2C1 code. Copy a fresh code from the host " +
+                "and select JOIN again.");
         }
         else
         {
@@ -71,7 +71,7 @@ public static class InGameSessionCoordinator
             catch (FormatException exception)
             {
                 throw new ConfigurationException(
-                    "Kod zaproszenia jest nieprawidlowy. Skopiuj caly kod zaczynajacy sie od R2C1.",
+                    "The invitation code is invalid. Copy the complete code beginning with R2C1.",
                     exception);
             }
 
@@ -159,8 +159,8 @@ public static class InGameSessionCoordinator
             !IsPrivateOrVirtualLanAddress(address))
         {
             throw new ConfigurationException(
-                "Kod R2C1 musi wskazywac prywatny adres IPv4 LAN " +
-                "albo adres IPv4 Hamachi 25.x.x.x.");
+                "The R2C1 code must point to a private LAN IPv4 address " +
+                "or a Hamachi 25.x.x.x IPv4 address.");
         }
     }
 }

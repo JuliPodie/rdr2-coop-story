@@ -68,13 +68,13 @@ void SessionMenuController::SetSidecarConnected(const bool connected) {
     if (!connected && !sessionReady_) {
         phase_ = SessionOverlayPhase::WaitingForSidecar;
         status_ =
-            "Brak sidecara. Uruchom HOST/JOIN bezposrednio w launcherze.";
+            "Sidecar unavailable. Start HOST/JOIN directly in the launcher.";
     } else if (
         connected &&
         phase_ == SessionOverlayPhase::WaitingForSidecar) {
         phase_ = SessionOverlayPhase::ChooseMode;
         status_ =
-            "HOST/JOIN i haslo ustawiasz w launcherze. F8 sluzy awaryjnie.";
+            "Set HOST/JOIN and the password in the launcher. F8 is the emergency panel.";
     }
 }
 
@@ -123,17 +123,17 @@ std::string_view SessionMenuController::Label(
     const SessionOverlayAction action) noexcept {
     switch (action) {
         case SessionOverlayAction::Host:
-            return "HOST jest dostepny tylko w launcherze";
+            return "HOST is available only in the launcher";
         case SessionOverlayAction::JoinFromClipboard:
-            return "JOIN jest dostepny tylko w launcherze";
+            return "JOIN is available only in the launcher";
         case SessionOverlayAction::StopSession:
-            return "ZATRZYMAJ BIEZACA SESJE COOP";
+            return "STOP THE CURRENT CO-OP SESSION";
         case SessionOverlayAction::ToggleHud:
-            return "Pokaz/ukryj pasek statusu";
+            return "Show/hide status bar";
         case SessionOverlayAction::Close:
-            return "Zamknij menu (F8 otwiera ponownie)";
+            return "Close menu (F8 reopens it)";
     }
-    return "Nieznana akcja";
+    return "Unknown action";
 }
 
 }  // namespace coopstory::bridge

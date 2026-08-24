@@ -4134,7 +4134,7 @@ internal static class Program
         var identity = new PlayerIdentityPayload(
             entityId,
             (byte)SessionRole.Guest,
-            "Łowca 🤠");
+            "Ranger 🤠");
         var encoded = BinaryPayloadCodec.EncodePlayerIdentity(identity);
         Check.Equal(
             BinaryPayloadCodec.PlayerIdentityHeaderSize +
@@ -4142,7 +4142,7 @@ internal static class Program
             encoded.Length);
         Check.Equal(identity, BinaryPayloadCodec.DecodePlayerIdentity(encoded));
 
-        var maximumUtf8 = new string('ą', 24);
+        var maximumUtf8 = new string('é', 24);
         var maximumEncoded = BinaryPayloadCodec.EncodePlayerIdentity(
             identity with { Nickname = maximumUtf8 });
         Check.Equal(
@@ -7434,11 +7434,11 @@ internal static class Program
                 rejectionStatus.Kind);
             Check.True(
                 rejectionStatus.Message.Contains(
-                    "Sprawdz IPv4",
+                    "Check IPv4",
                     StringComparison.Ordinal));
             Check.True(
                 rejectionStatus.Message.Contains(
-                    "haslo ustawione przez hosta",
+                    "password set by the host",
                     StringComparison.Ordinal));
 
             await WriteSessionMenuRequestAsync(
@@ -7470,7 +7470,7 @@ internal static class Program
             }
             Check.True(
                 stoppedStatus.Message.Contains(
-                    "HOST albo JOIN",
+                    "HOST or JOIN",
                     StringComparison.Ordinal));
             Check.False(runtimeTask.IsCompleted);
 

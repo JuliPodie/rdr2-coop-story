@@ -40,12 +40,12 @@ function Get-SafeChildPath {
     )
 
     if ([IO.Path]::IsPathRooted($RelativePath)) {
-        throw 'CriticalFiles moze zawierac tylko sciezki wzgledne.'
+        throw 'CriticalFiles may contain relative paths only.'
     }
 
     $candidate = [IO.Path]::GetFullPath((Join-Path $Root $RelativePath))
     if (-not (Test-PathWithin -Parent $Root -Child $candidate)) {
-        throw 'CriticalFiles zawiera sciezke wychodzaca poza katalog gry.'
+        throw 'CriticalFiles contains a path outside the game directory.'
     }
     return $candidate
 }
@@ -80,14 +80,14 @@ function Get-FileSha256 {
 $gameRoot = [IO.Path]::GetFullPath($GamePath).TrimEnd('\', '/')
 $gameExe = Join-Path $gameRoot 'RDR2.exe'
 if (-not (Test-Path -LiteralPath $gameRoot -PathType Container)) {
-    throw 'GamePath nie istnieje lub nie jest katalogiem.'
+    throw 'GamePath does not exist or is not a directory.'
 }
 $gameRootItem = Get-Item -LiteralPath $gameRoot -Force
 if (($gameRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-    throw 'GamePath nie moze byc reparse pointem.'
+    throw 'GamePath cannot be a reparse point.'
 }
 if (-not (Test-Path -LiteralPath $gameExe -PathType Leaf)) {
-    throw 'GamePath nie zawiera RDR2.exe.'
+    throw 'GamePath does not contain RDR2.exe.'
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -98,16 +98,16 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 
 $outputFull = [IO.Path]::GetFullPath($OutputPath)
 if (Test-PathWithin -Parent $gameRoot -Child $outputFull) {
-    throw 'Baseline musi zostac zapisany poza katalogiem gry.'
+    throw 'The baseline must be saved outside the game directory.'
 }
 if (Test-Path -LiteralPath $outputFull) {
-    throw 'Plik baseline juz istnieje; skrypt odmawia nadpisania.'
+    throw 'The baseline file already exists; the script refuses to overwrite it.'
 }
 
 $criticalLookup = @{}
 foreach ($relativeCritical in $CriticalFiles) {
     if ([string]::IsNullOrWhiteSpace($relativeCritical)) {
-        throw 'CriticalFiles nie moze zawierac pustych wartosci.'
+        throw 'CriticalFiles cannot contain empty values.'
     }
     $safeCriticalPath = Get-SafeChildPath -Root $gameRoot -RelativePath $relativeCritical
     $normalizedRelative = $relativeCritical.Replace('\', '/').TrimStart('/')
@@ -228,12 +228,12 @@ $baseline = [ordered]@{
 $json = $baseline | ConvertTo-Json -Depth 8
 $outputDirectory = Split-Path -Parent $outputFull
 
-if ($PSCmdlet.ShouldProcess($outputFull, 'Zapis manifestu baseline gry')) {
+if ($PSCmdlet.ShouldProcess($outputFull, 'Write game baseline manifest')) {
     if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
         $null = New-Item -ItemType Directory -Path $outputDirectory
     }
     if (Test-Path -LiteralPath $outputFull) {
-        throw 'Plik baseline pojawil sie w trakcie operacji; skrypt odmawia nadpisania.'
+        throw 'The baseline file appeared during the operation; the script refuses to overwrite it.'
     }
 
     $utf8NoBom = New-Object Text.UTF8Encoding($false)
@@ -255,9 +255,9 @@ if ($PSCmdlet.ShouldProcess($outputFull, 'Zapis manifestu baseline gry')) {
     finally {
         $stream.Dispose()
     }
-    Write-Output ('Baseline zapisany: ' + $outputFull)
+    Write-Output ('Baseline saved: ' + $outputFull)
 }
 else {
-    Write-Output ('Dry-run: baseline objalby ' + $topLevel.Count + ' wpisow top-level i ' +
-        $criticalResults.Count + ' plikow krytycznych.')
+    Write-Output ('Dry-run: the baseline would include ' + $topLevel.Count + ' top-level entries and ' +
+        $criticalResults.Count + ' critical files.')
 }

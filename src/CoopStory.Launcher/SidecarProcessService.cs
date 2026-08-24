@@ -90,7 +90,7 @@ public sealed class SidecarProcessService : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (IsRunning)
         {
-            throw new LauncherException("Sidecar już działa.");
+            throw new LauncherException("The sidecar is already running.");
         }
 
         if (_process is not null)
@@ -102,14 +102,14 @@ public sealed class SidecarProcessService : IDisposable
         if (IsProcessRunning("RDR2"))
         {
             throw new LauncherException(
-                "RDR2 już działa. Zamknij grę, aby launcher mógł zagwarantować start od menu Story Mode.");
+                "RDR2 is already running. Close the game so the launcher can start from the Story Mode menu.");
         }
 
         _ = _installation.ValidateInstalled(package);
         SidecarConfiguration.Save(settings, _paths);
         if (!File.Exists(package.SidecarExePath))
         {
-            throw new LauncherException("W paczce brakuje CoopStory.Sidecar.exe.");
+            throw new LauncherException("CoopStory.Sidecar.exe is missing from the package.");
         }
 
         var start = new ProcessStartInfo
@@ -152,8 +152,8 @@ public sealed class SidecarProcessService : IDisposable
             _logger.Info(
                 "sidecar.exited",
                 exitCode is null
-                    ? "Sidecar zakończył pracę."
-                    : $"Sidecar zakończył pracę z kodem {exitCode}.");
+                    ? "The sidecar exited."
+                    : $"The sidecar exited with code {exitCode}.");
             ReportRunning(false);
             StopLobbyMonitor();
             UpdateLobby(current => current with
@@ -168,7 +168,7 @@ public sealed class SidecarProcessService : IDisposable
         if (!process.Start())
         {
             process.Dispose();
-            throw new LauncherException("Nie udało się uruchomić sidecara.");
+            throw new LauncherException("Failed to start the sidecar.");
         }
 
         _process = process;
@@ -192,8 +192,8 @@ public sealed class SidecarProcessService : IDisposable
         ReportRunning(true);
         _logger.Info(
             "sidecar.started",
-            $"Uruchomiono sidecar pid={process.Id}, rola={settings.Role}, " +
-            $"tryb={(localTest ? "solo-test-f9" : "multiplayer")}.");
+            $"Started sidecar pid={process.Id}, role={settings.Role}, " +
+            $"mode={(localTest ? "solo-test-f9" : "multiplayer")}.");
 
         await Task.Delay(800, cancellationToken).ConfigureAwait(true);
         if (process.HasExited)
@@ -203,8 +203,8 @@ public sealed class SidecarProcessService : IDisposable
             _process = null;
             ReportRunning(false);
             throw new LauncherException(
-                $"Sidecar zakończył się przed startem gry (kod {exitCode}). " +
-                $"Sprawdź logi w {_paths.LogDirectory}.");
+                $"The sidecar exited before the game started (code {exitCode}). " +
+                $"Check logs in {_paths.LogDirectory}.");
         }
 
         try
@@ -212,8 +212,8 @@ public sealed class SidecarProcessService : IDisposable
             (launchGame ?? (() => OpenRdr2(launchTarget, settings.GameExePath)))();
             _logger.Info(
                 "game.launch_requested",
-                $"Przekazano żądanie startu RDR2 przez {launchTarget}. " +
-                "Użytkownik musi wybrać wyłącznie Story Mode.");
+                $"Sent the RDR2 start request through {launchTarget}. " +
+                "The user must select Story Mode only.");
         }
         catch
         {
@@ -244,7 +244,7 @@ public sealed class SidecarProcessService : IDisposable
         finally
         {
             StopLobbyMonitor();
-            _logger.Info("sidecar.stopped", "Zatrzymano sidecar.");
+            _logger.Info("sidecar.stopped", "Sidecar stopped.");
             _process.Dispose();
             _process = null;
             ReportRunning(false);
@@ -284,7 +284,7 @@ public sealed class SidecarProcessService : IDisposable
 
         if (launchTarget != GameLaunchTarget.Rockstar)
         {
-            throw new LauncherException("Nieobsługiwany sposób uruchomienia gry.");
+            throw new LauncherException("Unsupported game launch method.");
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(gameExePath);
@@ -296,14 +296,14 @@ public sealed class SidecarProcessService : IDisposable
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                "Dla Rockstar wskaż istniejący plik RDR2.exe.");
+                "For Rockstar, select an existing RDR2.exe file.");
         }
 
         return new ProcessStartInfo
         {
             FileName = fullGameExePath,
             WorkingDirectory = Path.GetDirectoryName(fullGameExePath)
-                ?? throw new LauncherException("RDR2.exe nie ma katalogu nadrzędnego."),
+                ?? throw new LauncherException("RDR2.exe has no parent directory."),
             UseShellExecute = true
         };
     }
@@ -315,7 +315,7 @@ public sealed class SidecarProcessService : IDisposable
         var start = CreateGameStartInfo(launchTarget, gameExePath);
         _ = Process.Start(start)
             ?? throw new LauncherException(
-                $"{launchTarget} nie przyjął żądania startu gry.");
+                $"{launchTarget} did not accept the game start request.");
     }
 
     private static bool IsProcessRunning(string processName)

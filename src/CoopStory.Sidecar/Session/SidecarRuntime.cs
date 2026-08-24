@@ -343,7 +343,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 await SendSessionStatusAsync(
                     new SessionMenuStatusPayload(
                         SessionMenuStatusKind.Waiting,
-                        "Sesja zatrzymana. Wybierz ponownie HOST albo JOIN."),
+                        "Session stopped. Select HOST or JOIN again."),
                     cancellationToken).ConfigureAwait(false);
                 await _logger.InfoAsync(
                     "session.returned-to-menu",
@@ -461,7 +461,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             await SendSessionStatusAsync(
                 new SessionMenuStatusPayload(
                     SessionMenuStatusKind.Waiting,
-                    "Brak aktywnej sesji. Wybierz HOST albo JOIN."),
+                    "No active session. Select HOST or JOIN."),
                 cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -556,7 +556,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             await SendSessionStatusAsync(
                 new SessionMenuStatusPayload(
                     SessionMenuStatusKind.Error,
-                    "Menu sesji w grze nie jest wlaczone w tej konfiguracji."),
+                    "The in-game session menu is not enabled in this configuration."),
                 cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -568,7 +568,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             await SendSessionStatusAsync(
                 new SessionMenuStatusPayload(
                     SessionMenuStatusKind.Error,
-                    "Sesja jest juz uruchomiona. Uzyj STOP w F8, aby zmienic role."),
+                    "A session is already running. Use STOP in F8 to change roles."),
                 cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -582,8 +582,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                         ? SessionMenuStatusKind.StartingHost
                         : SessionMenuStatusKind.StartingGuest,
                     host
-                        ? "Tworzenie prywatnej sesji LAN..."
-                        : "Sprawdzanie kodu i laczenie z hostem..."),
+                        ? "Creating a private LAN session..."
+                        : "Checking the code and connecting to the host..."),
                 cancellationToken).ConfigureAwait(false);
 
             var activation = host
@@ -628,11 +628,11 @@ public sealed class SidecarRuntime : IAsyncDisposable
                             ? SessionMenuStatusKind.ReadyHost
                             : SessionMenuStatusKind.ReadyGuest,
                         host
-                            ? $"HOST {_config.HostAddress}: kod gotowy; " +
+                            ? $"HOST {_config.HostAddress}: code ready; " +
                               (_config.HostSave is null
-                                  ? "save nie wybrany; wczytaj Story Mode recznie."
-                                  : $"save {_config.HostSave.FileName}; wczytaj ten slot w menu RDR2.")
-                            : "Kod przyjety; trwa handshake. Czekaj na REMOTE STREAMING.",
+                                  ? "no save selected; load Story Mode manually."
+                                  : $"save {_config.HostSave.FileName}; load this slot from the RDR2 menu.")
+                            : "Code accepted; handshake in progress. Wait for REMOTE STREAMING.",
                         activation.InviteCode),
                     cancellationToken).ConfigureAwait(false);
                 await _logger.InfoAsync(
@@ -682,7 +682,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         if (handler is null)
         {
             const string unavailable =
-                "Test solo nie jest aktywny. Uruchom go przyciskiem TEST SOLO w launcherze.";
+                "The solo test is not active. Start it with the SOLO TEST button in the launcher.";
             await SendSessionStatusAsync(
                 new SessionMenuStatusPayload(
                     SessionMenuStatusKind.Error,
@@ -705,7 +705,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             await SendSessionStatusAsync(
                 new SessionMenuStatusPayload(
                     SessionMenuStatusKind.Error,
-                    "Nie udalo sie przelaczyc testu solo. Wyeksportuj diagnostyke."),
+                    "The solo test could not be toggled. Export diagnostics."),
                 cancellationToken).ConfigureAwait(false);
             await _logger.ErrorAsync(
                 "local-test.f9-toggle-failed",
@@ -716,8 +716,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
 
         var message = enabled
-            ? "TEST SOLO WLACZONY: bot SOLO BOT rozpoczyna trase."
-            : "TEST SOLO ZATRZYMANY: bot zniknie po wygasnieciu streamu.";
+            ? "SOLO TEST ENABLED: the SOLO BOT starts its route."
+            : "SOLO TEST STOPPED: the bot will disappear after the stream expires.";
         await SendSessionStatusAsync(
             new SessionMenuStatusPayload(
                 SessionMenuStatusKind.ReadyHost,
@@ -749,7 +749,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         if (handler is null)
         {
             var unavailable =
-                $"{feature} nie jest aktywny. Uruchom TEST SOLO w launcherze.";
+                $"{feature} is not active. Start SOLO TEST in the launcher.";
             await SendSessionStatusAsync(
                 new SessionMenuStatusPayload(
                     SessionMenuStatusKind.Error,
@@ -787,10 +787,10 @@ public sealed class SidecarRuntime : IAsyncDisposable
         var message = record
             ? active
                 ? "GHOST RECORD: nagrywanie trasy rozpoczete."
-                : "GHOST RECORD: zapisano trase; mozesz uruchomic Ghost Replay."
+                : "GHOST RECORD: route saved; you can start Ghost Replay."
             : active
-                ? "GHOST REPLAY: marionetka odtwarza ostatnia trase."
-                : "GHOST REPLAY: odtwarzanie zatrzymane.";
+                ? "GHOST REPLAY: the puppet replays the latest route."
+                : "GHOST REPLAY: playback stopped.";
         await SendSessionStatusAsync(
             new SessionMenuStatusPayload(
                 SessionMenuStatusKind.ReadyHost,
@@ -2392,8 +2392,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
         var message = _config.Role == SessionRole.Guest
-            ? "Handshake odrzucony. Sprawdz IPv4 oraz wpisz dokladnie haslo ustawione przez hosta."
-            : "Handshake guesta odrzucony. Obie osoby musza wpisac identyczne haslo sesji.";
+            ? "Handshake rejected. Check IPv4 and enter exactly the password set by the host."
+            : "Guest handshake rejected. Both players must enter the same session password.";
         try
         {
             await SendSessionStatusAsync(
@@ -2464,7 +2464,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 await SendSessionStatusAsync(
                         new SessionMenuStatusPayload(
                             SessionMenuStatusKind.Waiting,
-                            "Uruchom HOST albo JOIN z launchera i podaj haslo sesji."),
+                            "Start HOST or JOIN from the launcher and enter the session password."),
                         cancellationToken)
                     .ConfigureAwait(false);
                 return;
@@ -2481,8 +2481,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                             ? SessionMenuStatusKind.ReadyHost
                             : SessionMenuStatusKind.ReadyGuest,
                         _config.Role == SessionRole.Host
-                            ? $"HOST {_config.HostAddress}: kod gotowy; czekam na guesta."
-                            : "Kod przyjety; trwa handshake. Czekaj na REMOTE STREAMING.",
+                            ? $"HOST {_config.HostAddress}: code ready; waiting for the guest."
+                            : "Code accepted; handshake in progress. Wait for REMOTE STREAMING.",
                         _activeInviteCode),
                     cancellationToken).ConfigureAwait(false);
             }
@@ -4265,7 +4265,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 await SendSessionStatusAsync(
                         new SessionMenuStatusPayload(
                             SessionMenuStatusKind.Error,
-                            "TRYB RUCHU NIEZGODNY: ustaw ten sam tryb na obu PC i uruchom sesje ponownie."),
+                            "MOTION MODE MISMATCH: select the same mode on both PCs and restart the session."),
                         CancellationToken.None)
                     .ConfigureAwait(false);
             }

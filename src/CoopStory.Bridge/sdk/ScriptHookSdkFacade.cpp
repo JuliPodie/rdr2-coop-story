@@ -5289,7 +5289,7 @@ void ScriptHookSdkFacade::DrawMenu(
             75,
             255);
         DrawNativeText(
-            "COOP STORY - MENU SESJI",
+            "COOP STORY - SESSION MENU",
             kLeft + 0.020F,
             kTop + 0.013F,
             0.325F,
@@ -5297,7 +5297,7 @@ void ScriptHookSdkFacade::DrawMenu(
             240,
             214);
         DrawNativeText(
-            "Najczestsze akcje po lewej, narzedzia testowe po prawej",
+            "Common actions on the left, test tools on the right",
             kLeft + 0.020F,
             kTop + 0.040F,
             0.195F,
@@ -5307,7 +5307,7 @@ void ScriptHookSdkFacade::DrawMenu(
 
         const auto rowsTop = kTop + kHeaderHeight + kSectionHeight;
         DrawNativeText(
-            "SESJA I RATUNEK",
+            "SESSION AND RECOVERY",
             kLeft + 0.014F,
             kTop + kHeaderHeight + 0.008F,
             0.215F,
@@ -5315,7 +5315,7 @@ void ScriptHookSdkFacade::DrawMenu(
             169,
             75);
         DrawNativeText(
-            "NARZEDZIA TESTOWE",
+            "TEST TOOLS",
             kLeft + columnWidth + kGutter + 0.014F,
             kTop + kHeaderHeight + 0.008F,
             0.215F,
@@ -5379,7 +5379,7 @@ void ScriptHookSdkFacade::DrawMenu(
             13,
             242);
         DrawNativeText(
-            "STRZALKI: wybor / grupa   ENTER: wykonaj   F9 lub ESC: zamknij",
+            "ARROWS: select / group   ENTER: run   F9 or ESC: close",
             kLeft + 0.014F,
             footerY + 0.014F,
             0.205F,
@@ -5387,7 +5387,7 @@ void ScriptHookSdkFacade::DrawMenu(
             188,
             174);
         DrawNativeText(
-            "F7: zapisz marker bledu bez otwierania menu",
+            "F7: save an error marker without opening the menu",
             kLeft + 0.014F,
             footerY + 0.047F,
             0.215F,
@@ -5452,7 +5452,7 @@ void ScriptHookSdkFacade::DrawSessionMenu(
             22,
             240);
         DrawNativeText(
-            "COOP STORY - PANEL AWARYJNY (F8)",
+            "COOP STORY - EMERGENCY PANEL (F8)",
             kLeft + 0.018F,
             kTop + 0.018F,
             0.32F,
@@ -5503,7 +5503,7 @@ void ScriptHookSdkFacade::DrawSessionMenu(
             state.phase == SessionOverlayPhase::Error ? 135 : 220,
             state.phase == SessionOverlayPhase::Error ? 110 : 205);
         DrawNativeText(
-            "HOST/JOIN: launcher | F8 panel | F10 pasek | ESC zamknij",
+            "HOST/JOIN: launcher | F8 panel | F10 bar | ESC close",
             kLeft + 0.018F,
             footerY + 0.058F,
             0.205F,
@@ -5549,7 +5549,7 @@ void ScriptHookSdkFacade::DrawNotification(
             success ? 126 : 55,
             255);
         DrawNativeText(
-            success ? "ZAPISANO DIAGNOSTYKE" : "UWAGA",
+            success ? "DIAGNOSTICS SAVED" : "WARNING",
             left + 0.018F,
             top + 0.010F,
             0.195F,
@@ -5667,12 +5667,12 @@ void ScriptHookSdkFacade::DrawBridgeHud(
         previousHudState_ = state;
         hasPreviousHudState_ = true;
 
-        std::string role{"COOP: OCZEKIWANIE"};
+        std::string role{"COOP: WAITING"};
         if (state.localSlot.has_value()) {
             role =
                 *state.localSlot == PlayerSlot::Host
                     ? "COOP HOST"
-                    : "COOP GOSC";
+                    : "COOP GUEST";
         }
         const std::string ipc =
             state.sidecarConnected
@@ -5758,10 +5758,10 @@ void ScriptHookSdkFacade::DrawPauseVoteStatus(
         std::string text;
         if (state.hostVoted) {
             text =
-                "HOST prosi o pauze | ESC: potwierdz";
+                "HOST requests a pause | ESC: confirm";
         } else {
             text =
-                "GOSC prosi o pauze | ESC: potwierdz";
+                "GUEST requests a pause | ESC: confirm";
         }
         text.append(
             state.hostVoted
@@ -5769,8 +5769,8 @@ void ScriptHookSdkFacade::DrawPauseVoteStatus(
                 : " | HOST ...");
         text.append(
             state.guestVoted
-                ? " | GOSC OK"
-                : " | GOSC ...");
+                ? " | GUEST OK"
+                : " | GUEST ...");
         DrawNativeRectangle(
             0.5F,
             0.105F,
@@ -5822,7 +5822,7 @@ void ScriptHookSdkFacade::ShowMissionBubbleWarning(
             20,
             205);
         DrawNativeText(
-            "COOP: wroc blizej hosta (limit misji)",
+            "COOP: move closer to the host (mission limit)",
             0.305F,
             0.082F,
             0.27F,
@@ -5898,7 +5898,7 @@ bool ScriptHookSdkFacade::ExecuteCommand(
                 if (ped == 0 ||
                     ENTITY::DOES_ENTITY_EXIST(ped) == FALSE) {
                     Log(
-                        "[ERROR][TEST_WEAPON] nie znaleziono lokalnego gracza; lasso nie zostalo przyznane");
+                        "[ERROR][TEST_WEAPON] local player not found; lasso was not granted");
                     return false;
                 }
                 const auto lasso =
@@ -5945,7 +5945,7 @@ bool ScriptHookSdkFacade::ExecuteCommand(
                 return true;
             } catch (...) {
                 Log(
-                    "[ERROR][TEST_WEAPON] wyjatek podczas przyznawania lassa");
+                    "[ERROR][TEST_WEAPON] exception while granting the lasso");
                 return false;
             }
 #else
@@ -8488,7 +8488,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
             std::snprintf(
                 markerText,
                 sizeof(markerText),
-                "ANIMGRAPH CEL  %.2f m",
+                "ANIMGRAPH TARGET  %.2f m",
                 static_cast<double>(positionError));
             DrawNativeText(
                 markerText,
@@ -10807,7 +10807,7 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
             std::snprintf(
                 markerText,
                 sizeof(markerText),
-                "CEL SIECI  %.1f m",
+                "NETWORK TARGET  %.1f m",
                 static_cast<double>(step.positionErrorMeters));
             DrawNativeText(
                 markerText,
@@ -10849,7 +10849,7 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                     232,
                     235);
                 DrawNativeText(
-                    "CEL NAVMESH",
+                    "NAVMESH TARGET",
                     navigationScreenX,
                     navigationScreenY - 0.028F,
                     0.22F,
@@ -14174,7 +14174,7 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                         45,
                         215);
                     DrawNativeText(
-                        "COOP: MISJA ZABLOKOWANA DLA GOSCIA",
+                        "COOP: MISSION BLOCKED FOR GUEST",
                         0.605F,
                         0.911F,
                         0.27F,
@@ -16141,7 +16141,7 @@ void ScriptHookSdkFacade::MaintainMissionCompanionPresentation(
             45,
             238);
         DrawNativeText(
-            "AKTYWNA MISJA HOSTA",
+            "ACTIVE HOST MISSION",
             0.604F,
             0.858F,
             0.285F,
@@ -16151,7 +16151,7 @@ void ScriptHookSdkFacade::MaintainMissionCompanionPresentation(
             255,
             false);
         DrawNativeText(
-            "WSPOLNY CEL FABULARNY - wykonuj aktualne zadanie razem z hostem",
+            "SHARED STORY OBJECTIVE - complete the current task with the host",
             0.604F,
             0.887F,
             0.225F,
@@ -16194,7 +16194,7 @@ void ScriptHookSdkFacade::MaintainMissionCompanionPresentation(
             std::snprintf(
                 markerText,
                 sizeof(markerText),
-                "CEL MISJI FABULARNEJ  %.0f m",
+                "STORY MISSION TARGET  %.0f m",
                 static_cast<double>(state.distanceMeters));
             DrawNativeText(
                 markerText,

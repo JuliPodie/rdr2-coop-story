@@ -97,7 +97,7 @@ internal sealed class RdrLobbyPanel : Control
             true);
         BackColor = LauncherTheme.BackgroundLift;
         Height = 122;
-        AccessibleName = "Lobby sesji";
+        AccessibleName = "Session lobby";
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -122,7 +122,7 @@ internal sealed class RdrLobbyPanel : Control
         using var headingFont = new Font(Font, FontStyle.Bold);
         TextRenderer.DrawText(
             graphics,
-            "LOBBY SESJI",
+            "SESSION LOBBY",
             headingFont,
             new Rectangle(12, 6, Width - 24, 19),
             LauncherTheme.TextMuted,
@@ -143,8 +143,8 @@ internal sealed class RdrLobbyPanel : Control
             new Rectangle(12 + cardWidth + gap, 30, cardWidth, 78),
             string.IsNullOrWhiteSpace(_snapshot.RemoteNickname)
                 ? (_snapshot.PeerConnected
-                    ? "Połączony gracz"
-                    : "Oczekiwanie...")
+                    ? "Connected player"
+                    : "Waiting...")
                 : _snapshot.RemoteNickname,
             _snapshot.RemoteRole,
             local: false,
@@ -201,8 +201,8 @@ internal sealed class RdrLobbyPanel : Control
 
         var state = local
             ? (_snapshot.GameBridgeConnected
-                ? "RDR2 połączone"
-                : connected ? "Sidecar gotowy" : "Konfiguracja")
+                ? "RDR2 connected"
+                : connected ? "Sidecar ready" : "Configuring")
             : connected
                 ? pingMilliseconds.HasValue
                     ? $"ONLINE  •  {pingMilliseconds.Value} ms"
@@ -221,9 +221,9 @@ internal sealed class RdrLobbyPanel : Control
     private static string BuildAccessibleDescription(
         LauncherLobbySnapshot snapshot) =>
         $"{snapshot.LocalNickname}, {snapshot.LocalRole}; " +
-        $"{(string.IsNullOrWhiteSpace(snapshot.RemoteNickname) ? "brak drugiego gracza" : snapshot.RemoteNickname)}, " +
+        $"{(string.IsNullOrWhiteSpace(snapshot.RemoteNickname) ? "no second player" : snapshot.RemoteNickname)}, " +
         $"{snapshot.RemoteRole}; ping " +
-        $"{(snapshot.PingMilliseconds.HasValue ? snapshot.PingMilliseconds.Value + " ms" : "niedostępny")}.";
+        $"{(snapshot.PingMilliseconds.HasValue ? snapshot.PingMilliseconds.Value + " ms" : "unavailable")}.";
 }
 
 internal sealed class RdrSurface : Panel
@@ -541,7 +541,7 @@ internal sealed class RdrStartOrb : Control
     public string MainText { get; set; } = "START";
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public string DetailText { get; set; } = "WYBIERZ TRYB";
+    public string DetailText { get; set; } = "SELECT A MODE";
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color AccentColor { get; set; } = LauncherTheme.Red;
@@ -641,7 +641,7 @@ internal sealed class RdrStartOrb : Control
             MouseRectangle.Contains(PointToClient(MousePosition)) && Enabled ? 3f : 2f);
         graphics.DrawEllipse(outline, circle);
 
-        var title = Busy ? "CHWILA" : MainText;
+        var title = Busy ? "PLEASE WAIT" : MainText;
         using var titleFont = DisplayFont is not null
             ? new Font(DisplayFont.FontFamily, DisplayFont.Size, FontStyle.Regular)
             : new Font("Georgia", 20f, FontStyle.Bold);
@@ -666,7 +666,7 @@ internal sealed class RdrStartOrb : Control
             FontStyle.Bold);
         TextRenderer.DrawText(
             graphics,
-            Busy ? "PRZYGOTOWUJĘ" : DetailText,
+            Busy ? "PREPARING" : DetailText,
             detailFont,
             detailBounds,
             Enabled ? textColor : LauncherTheme.TextDim,

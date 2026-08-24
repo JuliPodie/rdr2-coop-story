@@ -10,9 +10,9 @@ configuration, `sessionToken`, clear-text password, or `.coopjoin` invitation.
 Both testers may copy the same project-owned archive and verify the same
 `SHA256SUMS.txt`.
 
-After extraction, the host selects **Host** in the launcher, clicks **HOSTUJ**,
+After extraction, the host selects **Host** in the launcher, clicks **HOST**,
 and enters the private session password twice. The guest selects **Guest**,
-clicks **DOŁĄCZ**, and enters the host IPv4 address and the same password. Share
+clicks **JOIN**, and enters the host IPv4 address and the same password. Share
 the IPv4 and password privately; there is no normal launcher session-code or
 invite-file step in V29.4.
 
@@ -62,8 +62,9 @@ RDR2-CoopStory-Friend-Test/
     CoopStory.Sidecar.deps.json
     CoopStory.Sidecar.runtimeconfig.json
     CoopStory.Protocol.dll
-  PRZECZYTAJ_MNIE.txt
-  TEST_V31_ANIMSCENE_HYBRID.md
+  README.txt
+  TESTING.md
+  START_COOP.bat
   BUILD_INFO.json
   SHA256SUMS.txt
 ```

@@ -1315,8 +1315,8 @@ void BridgeRuntime::AcceptHelloAck(
     sessionMenu_.MarkSessionReady(
         slot == PlayerSlot::Host,
         slot == PlayerSlot::Host
-            ? "Kod hosta gotowy. REMOTE NONE oznacza oczekiwanie na guesta."
-            : "Kod przyjety lokalnie. Czekaj na REMOTE STREAMING.");
+            ? "Host code ready. REMOTE NONE means waiting for the guest."
+            : "Code accepted locally. Wait for REMOTE STREAMING.");
 }
 
 void BridgeRuntime::ApplyRemotePlayerState(
@@ -7038,7 +7038,7 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
         if (!status.has_value()) {
             sessionMenu_.SetStatus(
                 SessionOverlayPhase::Error,
-                "Sidecar wyslal nieprawidlowy status sesji.");
+                "The sidecar sent an invalid session status.");
             return;
         }
         switch (status->kind) {
@@ -7101,8 +7101,8 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
                 sessionMenu_.MarkSessionReady(
                     true,
                     copied
-                        ? status->message + " Skopiowano."
-                        : "HOST gotowy. Nie udalo sie skopiowac kodu.");
+                        ? status->message + " Copied."
+                        : "HOST ready. The code could not be copied.");
                 break;
             }
             case SessionMenuStatusKind::ReadyGuest:
@@ -7842,7 +7842,7 @@ void BridgeRuntime::HandleSessionOverlayAction(
             !guestMissionIsolationLeaseActive_) {
             sessionMenu_.SetStatus(
                 SessionOverlayPhase::Error,
-                "Brak aktywnej sesji do zatrzymania.");
+                "There is no active session to stop.");
             return;
         }
         HandleMenuCommand(BridgeCommand::StopSession);
@@ -7861,19 +7861,19 @@ void BridgeRuntime::HandleSessionOverlayAction(
             sessionMenu_.MarkSessionReady(
                 true,
                 copied
-                    ? "Kod hosta ponownie skopiowano do schowka."
-                    : "Nie udalo sie ponownie skopiowac kodu hosta.");
+                    ? "The host code was copied to the clipboard again."
+                    : "The host code could not be copied again.");
             return;
         }
         sessionMenu_.SetStatus(
             SessionOverlayPhase::Error,
-            "Sesja jest juz aktywna. Zrestartuj test, aby zmienic role.");
+            "A session is already active. Restart the test to change roles.");
         return;
     }
     if (!transport_.IsConnected()) {
         sessionMenu_.SetStatus(
             SessionOverlayPhase::Error,
-            "Brak sidecara. Uruchom gre z launchera.");
+            "Sidecar unavailable. Start the game from the launcher.");
         return;
     }
 
@@ -7887,7 +7887,7 @@ void BridgeRuntime::HandleSessionOverlayAction(
             joinSample->downed) {
             sessionMenu_.SetStatus(
                 SessionOverlayPhase::Error,
-                "GUEST: wczytaj spokojny zapis poza misja i cutscenka, potem dolacz ponownie.");
+                "GUEST: load a safe save outside a mission and cutscene, then join again.");
             facade_.Log(
                 "[WARNING][MISSION_PREFLIGHT] guest join rejected: local save is not in a safe campaign-shell state");
             return;
@@ -7899,18 +7899,18 @@ void BridgeRuntime::HandleSessionOverlayAction(
         if (inviteCode.empty()) {
             sessionMenu_.SetStatus(
                 SessionOverlayPhase::Error,
-                "Brak kodu R2C1 w schowku. Skopiuj swiezy kod hosta.");
+                "No R2C1 code was found in the clipboard. Copy a fresh host code.");
             return;
         }
         sessionMenu_.SetStatus(
             SessionOverlayPhase::StartingGuest,
-            "Sprawdzanie kodu i laczenie z hostem...");
+            "Checking the code and connecting to the host...");
     } else {
         ReleaseGuestMissionIsolationLease(
             "user selected HOST instead of pending JOIN");
         sessionMenu_.SetStatus(
             SessionOverlayPhase::StartingHost,
-            "Tworzenie prywatnej sesji LAN...");
+            "Creating a private LAN session...");
     }
 
     try {
@@ -7930,7 +7930,7 @@ void BridgeRuntime::HandleSessionOverlayAction(
                     "JOIN preflight raced a local Story transition");
                 sessionMenu_.SetStatus(
                     SessionOverlayPhase::Error,
-                    "GUEST: lokalna misja ruszyla podczas dolaczania. Wczytaj spokojny zapis i sprobuj ponownie.");
+                    "GUEST: a local mission started while joining. Load a safe save and try again.");
                 facade_.Log(
                     "[WARNING][MISSION_PREFLIGHT] JOIN rejected because the vanilla mission gate was already active at lease acquisition");
                 return;
@@ -7944,7 +7944,7 @@ void BridgeRuntime::HandleSessionOverlayAction(
         }
         sessionMenu_.SetStatus(
             SessionOverlayPhase::Error,
-            "Kod ze schowka jest za dlugi albo nieprawidlowy.");
+            "The clipboard code is too long or invalid.");
     }
 }
 
@@ -8047,7 +8047,7 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
         notificationText_ =
             "MARKER ERROR #" +
             std::to_string(userProblemMarkerId_) +
-            " ZAPISANY";
+            " SAVED";
         notificationUntilMs_ = now + 2'500U;
         BeginProblemDiagnosticBurst(
             correlationId,
@@ -8083,7 +8083,7 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
         SendBestEffort(std::move(frame));
         sessionMenu_.SetStatus(
             SessionOverlayPhase::ChooseMode,
-            "Zatrzymywanie sesji coop...");
+            "Stopping the co-op session...");
         facade_.Log(
             "[INFO][SESSION] F8/F9 reusable stop request sent to the sidecar");
         return;
@@ -8093,8 +8093,8 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
         if (!facade_.ExecuteCommand(command)) {
             facade_.Log(
                 command == BridgeCommand::GrantTestLasso
-                    ? "[ERROR][TEST_WEAPON] nie udalo sie dodac lassa testowego"
-                    : "[ERROR][TEST_WEAPON] nie udalo sie dodac pistoletu testowego");
+                    ? "[ERROR][TEST_WEAPON] failed to grant the test lasso"
+                    : "[ERROR][TEST_WEAPON] failed to grant the test pistol");
         }
         return;
     }

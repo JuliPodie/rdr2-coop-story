@@ -220,7 +220,7 @@ public sealed class MainForm : Form
         homeButton.Width = 120;
         homeButton.Accent = true;
         settingsButton = MakeButton(
-            "USTAWIENIA",
+            "SETTINGS",
             RdrIcon.Settings,
             (_, _) => ShowPage(true));
         settingsButton.Width = 150;
@@ -289,29 +289,29 @@ public sealed class MainForm : Form
         layout.Controls.Add(
             CreateSectionHeading(
                 "01",
-                "WYBIERZ TRYB",
-                "Jeden launcher do szybkiego testu i sesji LAN."),
+                "CHOOSE MODE",
+                "One launcher for quick tests and LAN sessions."),
             0,
             0);
 
         ConfigureModeCard(
             _soloMode,
-            "TEST SOLO",
-            "Bot lokalny • najszybsza kontrola zmian",
+            "SOLO TEST",
+            "Local bot • fastest change verification",
             "1 PC",
             LauncherTheme.Red,
             LauncherMode.Solo);
         ConfigureModeCard(
             _hostMode,
-            "HOSTUJ SESJĘ",
-            "Tworzysz świat i zaproszenie dla znajomego",
+            "HOST SESSION",
+            "Own the world and invite another player",
             "HOST",
             Color.FromArgb(137, 53, 43),
             LauncherMode.Host);
         ConfigureModeCard(
             _guestMode,
-            "DOŁĄCZAM",
-            "Wpisujesz IPv4 hosta i jego hasło sesji",
+            "JOIN SESSION",
+            "Enter the host IPv4 address and session password",
             "GUEST",
             LauncherTheme.Guest,
             LauncherMode.Guest);
@@ -323,7 +323,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Bottom,
             Height = 86,
-            Text = "STORY MODE ONLY\nPrzed Red Dead Online zawsze odinstaluj mod.",
+            Text = "STORY MODE ONLY\nAlways uninstall the mod before Red Dead Online.",
             Font = new Font(Font.FontFamily, 9f, FontStyle.Bold),
             ForeColor = LauncherTheme.Warning,
             TextAlign = ContentAlignment.BottomLeft,
@@ -354,21 +354,21 @@ public sealed class MainForm : Form
         layout.Controls.Add(
             CreateSectionHeading(
                 "02",
-                "PLATFORMA",
-                "Kolor STARTU odpowiada wybranemu launcherowi."),
+                "PLATFORM",
+                "The START color matches the selected launcher."),
             0,
             0);
 
         ConfigurePlatformCard(
             _steamPlatform,
             "STEAM",
-            "Uruchom przez steam://rungameid/1174180",
+            "Launch through steam://rungameid/1174180",
             LauncherTheme.Steam,
             LauncherPlatform.Steam);
         ConfigurePlatformCard(
             _rockstarPlatform,
             "ROCKSTAR",
-            "Uruchom przez Rockstar Games Launcher",
+            "Launch through Rockstar Games Launcher",
             LauncherTheme.Rockstar,
             LauncherPlatform.Rockstar);
         layout.Controls.Add(_steamPlatform, 0, 1);
@@ -377,9 +377,9 @@ public sealed class MainForm : Form
         _startOrb.Anchor = AnchorStyles.None;
         _startOrb.Font = Font;
         _startOrb.DisplayFont = CreateDisplayFont(21f);
-        _startOrb.AccessibleName = "Uruchom wybrany tryb";
+        _startOrb.AccessibleName = "Start the selected mode";
         _startOrb.AccessibleDescription =
-            "Sprawdza instalację i uruchamia wybrany tryb przez wybraną platformę.";
+            "Checks the installation and starts the selected mode through the selected platform.";
         _startOrb.Click += async (_, _) =>
             await RunActionAsync(StartSelectedModeAsync);
         layout.Controls.Add(_startOrb, 0, 3);
@@ -437,7 +437,7 @@ public sealed class MainForm : Form
         heading.Controls.Add(_contextTitle);
         layout.Controls.Add(heading, 0, 0);
 
-        layout.Controls.Add(MakeFieldLabel("NICK W GRZE"), 0, 1);
+        layout.Controls.Add(MakeFieldLabel("IN-GAME NICKNAME"), 0, 1);
         _nickname.MaxLength = 48;
         _nickname.PlaceholderText = "np. ArthurPL";
         layout.Controls.Add(_nickname, 0, 2);
@@ -486,13 +486,13 @@ public sealed class MainForm : Form
         var diagnosticCaption = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "DIAGNOSTYKA\n1 klik • stary ZIP zostanie zastąpiony",
+            Text = "DIAGNOSTICS\n1 click - previous ZIP will be replaced",
             ForeColor = LauncherTheme.Text,
             Font = new Font(Font.FontFamily, 8.2f, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft
         };
         var exportDiagnostics = MakeButton(
-            "EKSPORTUJ",
+            "EXPORT",
             RdrIcon.Download,
             async (_, _) => await RunActionAsync(ExportDiagnosticsAsync));
         exportDiagnostics.Dock = DockStyle.Fill;
@@ -500,7 +500,7 @@ public sealed class MainForm : Form
         exportDiagnostics.Accent = true;
         exportDiagnostics.Compact = true;
         stopButton = MakeButton(
-            "WYŁĄCZ COOP",
+            "STOP COOP",
             RdrIcon.Stop,
             (_, _) => StopSession());
         stopButton.Dock = DockStyle.Fill;
@@ -537,7 +537,7 @@ public sealed class MainForm : Form
             Location = new Point(48, 13),
             Font = new Font(Font.FontFamily, 11f, FontStyle.Bold),
             ForeColor = LauncherTheme.Text,
-            Text = "Szybki test lokalny"
+            Text = "Quick local test"
         };
         var description = new Label
         {
@@ -548,9 +548,9 @@ public sealed class MainForm : Form
             Font = new Font(Font.FontFamily, 9f),
             ForeColor = LauncherTheme.TextMuted,
             Text =
-                "Launcher sprawdzi instalację, w razie potrzeby podmieni bieżący build " +
-                "i uruchomi syntetycznego gracza SOLO BOT. Po wejściu do Story Mode " +
-                "otwórz F9 i wybierz „Test solo: start / stop”."
+                "The launcher checks the installation, replaces the current build if needed, " +
+                "and starts a synthetic SOLO BOT player. After entering Story Mode, " +
+                "open F9 and select 'Solo test: start / stop'."
         };
         panel.Controls.Add(description);
         panel.Controls.Add(title);
@@ -580,15 +580,15 @@ public sealed class MainForm : Form
         panel.Controls.Add(_lobby, 0, 0);
 
         detectAddressButton = MakeButton(
-            "WYKRYJ",
+            "DETECT",
             RdrIcon.Search,
             DetectHostAddress);
         detectAddressButton.Width = 112;
         var addressBlock = CreateFieldBlock(
-            "IPV4 SESJI — HOST: SWÓJ / GUEST: ADRES HOSTA",
+            "SESSION IPV4 - HOST: YOURS / GUEST: HOST ADDRESS",
             _hostAddress,
             detectAddressButton);
-        _hostAddress.PlaceholderText = "np. Hamachi 25.x.x.x albo LAN 192.168.x.x";
+        _hostAddress.PlaceholderText = "e.g. Hamachi 25.x.x.x or LAN 192.168.x.x";
         panel.Controls.Add(addressBlock, 0, 1);
 
         var passwordPanel = new Panel
@@ -615,8 +615,8 @@ public sealed class MainForm : Form
             ForeColor = LauncherTheme.TextDim,
             Font = new Font(Font.FontFamily, 8.2f),
             Text =
-                "Hasło podajesz dopiero po kliknięciu HOSTUJ lub DOŁĄCZ. " +
-                "Nie jest zapisywane jawnie ani dodawane do diagnostyki."
+                "Enter the password only after clicking HOST or JOIN. " +
+                "It is never stored in clear text or added to diagnostics."
         };
         panel.Controls.Add(note, 0, 3);
         return panel;
@@ -672,56 +672,56 @@ public sealed class MainForm : Form
         layout.Controls.Add(
             CreateSectionHeading(
                 "",
-                "USTAWIENIA MODA",
-                "Ścieżki i silnik ruchu zapisują się lokalnie między buildami."),
+                "MOD SETTINGS",
+                "Paths and the motion engine are stored locally between builds."),
             0,
             0);
 
         var browseGame = MakeButton(
-            "PRZEGLĄDAJ",
+            "BROWSE",
             RdrIcon.Folder,
             BrowseGame);
         browseGame.Width = 132;
         layout.Controls.Add(
-            CreateFieldBlock("PLIK GRY — RDR2.EXE", _gamePath, browseGame),
+            CreateFieldBlock("GAME FILE - RDR2.EXE", _gamePath, browseGame),
             0,
             1);
 
         var browseRuntime = MakeButton(
-            "PRZEGLĄDAJ",
+            "BROWSE",
             RdrIcon.Folder,
             BrowseRuntime);
         browseRuntime.Width = 132;
         layout.Controls.Add(
             CreateFieldBlock(
-                "ROZPAKOWANY SCRIPTHOOK — FOLDER LUB BIN",
+                "EXTRACTED SCRIPT HOOK — FOLDER OR BIN",
                 _runtimePath,
                 browseRuntime),
             0,
             2);
 
         var browseHostSave = MakeButton(
-            "WYBIERZ",
+            "SELECT",
             RdrIcon.Folder,
             BrowseHostSave);
         browseHostSave.Width = 132;
         _hostSave.ReadOnly = true;
         layout.Controls.Add(
             CreateFieldBlock(
-                "LOKALNY SAVE HOSTA — SRDR*",
+                "LOCAL HOST SAVE — SRDR*",
                 _hostSave,
                 browseHostSave),
             0,
             3);
 
         var browseDiagnostics = MakeButton(
-            "PRZEGLĄDAJ",
+            "BROWSE",
             RdrIcon.Folder,
             BrowseDiagnosticsFolder);
         browseDiagnostics.Width = 132;
         layout.Controls.Add(
             CreateFieldBlock(
-                "FOLDER EKSPORTU DIAGNOSTYKI",
+                "DIAGNOSTICS EXPORT FOLDER",
                 _diagnosticsFolder,
                 browseDiagnostics),
             0,
@@ -739,12 +739,12 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 7, 0, 7)
         };
         var detect = MakeButton(
-            "WYKRYJ TYPOWE ŚCIEŻKI",
+            "DETECT COMMON PATHS",
             RdrIcon.Search,
             (_, _) => DetectCommonPaths());
         detect.Width = 210;
         var save = MakeButton(
-            "ZAPISZ USTAWIENIA",
+            "SAVE SETTINGS",
             RdrIcon.Shield,
             (_, _) => SaveSettingsWithFeedback());
         save.Width = 196;
@@ -775,9 +775,9 @@ public sealed class MainForm : Form
             Font = new Font(Font.FontFamily, 8.5f),
             Padding = new Padding(2, 8, 8, 0),
             Text =
-                "QoL: START sam sprawdza instalację i instaluje aktualny build, jeśli trzeba. " +
-                "ScriptHook nie jest dołączany do paczki i nadal musi być wskazany osobno. " +
-                "Ustawienia są w LocalAppData, więc nowe paczki release nie zerują ścieżek."
+                "START checks the installation and installs the current build when needed. " +
+                "Script Hook is not included and must still be selected separately. " +
+                "Settings live in LocalAppData, so new release packages retain paths."
         };
         layout.Controls.Add(tip, 0, 8);
         return surface;
@@ -809,7 +809,7 @@ public sealed class MainForm : Form
         var title = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "SILNIK RUCHU ZDALNEJ POSTACI",
+            Text = "REMOTE PLAYER MOTION ENGINE",
             Font = new Font(Font.FontFamily, 8.8f, FontStyle.Bold),
             ForeColor = LauncherTheme.Text,
             TextAlign = ContentAlignment.MiddleLeft
@@ -818,7 +818,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             Text =
-                "Wyłączone: Task/Navmesh. Włączone: bezpośrednia replika ruchu bez navmeshu; w 2P ustaw tak samo na obu PC.",
+                "Off: Task/Navmesh. On: direct motion replication without navmesh; use the same setting on both PCs.",
             Font = new Font(Font.FontFamily, 8.1f),
             ForeColor = LauncherTheme.TextDim,
             TextAlign = ContentAlignment.TopLeft
@@ -854,7 +854,7 @@ public sealed class MainForm : Form
         _animGraphReplica.AccessibleName =
             "Eksperymentalny silnik AnimGraph Replica";
         _animGraphReplica.AccessibleDescription =
-            "Osobny eksperymentalny silnik. Po wyłączeniu launcher używa dotychczasowego Task/Navmesh.";
+            "A separate experimental engine. When disabled, the launcher uses the existing Task/Navmesh mode.";
 
         ConfigureToggle(
             _storyVmProbe,
@@ -863,7 +863,7 @@ public sealed class MainForm : Form
         _storyVmProbe.AccessibleName =
             "Eksperymentalne przechwytywanie Story VM";
         _storyVmProbe.AccessibleDescription =
-            "Eksperymentalnie przechwytuje definicje AnimScene na przypiętej wersji gry. Domyślnie wyłączone.";
+            "Experimentally captures AnimScene definitions on the pinned game build. Disabled by default.";
 
         var toggles = new TableLayoutPanel
         {
@@ -886,10 +886,10 @@ public sealed class MainForm : Form
         layout.SetRowSpan(toggles, 2);
         _toolTip.SetToolTip(
             _animGraphReplica,
-            "Bezpośrednio replikuje transform i dostępny stan ruchu. Pełne warstwy i clipy AnimGraphu nie są jeszcze odczytywane. Zmiana działa przy następnym START.");
+            "Directly replicates transforms and available motion state. Full AnimGraph layers and clips are not read yet. The change applies on the next START.");
         _toolTip.SetToolTip(
             _storyVmProbe,
-            "Eksperymentalne: przechwytuje zasób, playback i role Story VM, aby odtworzyć dokładną AnimScene guesta. Działa tylko na przypiętym buildzie i wyłącza się bezpiecznie przy niezgodności. Zmiana działa przy następnym START.");
+            "Experimental: captures the Story VM resource, playback, and roles to reproduce the guest AnimScene. It works only on the pinned build and fails closed on mismatch. The change applies on the next START.");
         return panel;
     }
 
@@ -925,8 +925,8 @@ public sealed class MainForm : Form
         maintenanceLayout.Controls.Add(
             CreateSectionHeading(
                 "",
-                "INSTALACJA I SERWIS",
-                "Bezpieczna kontrola plików bieżącego builda."),
+                "INSTALLATION AND SERVICE",
+                "Safe validation of current build files."),
             0,
             0);
 
@@ -947,18 +947,18 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 8, 0, 4)
         };
         var verify = MakeButton(
-            "SPRAWDŹ",
+            "VERIFY",
             RdrIcon.Shield,
             async (_, _) => await RunActionAsync(VerifyAsync));
         verify.Width = 122;
         var install = MakeButton(
-            "ZAINSTALUJ",
+            "INSTALL",
             RdrIcon.Download,
             async (_, _) => await RunActionAsync(InstallAsync));
         install.Width = 145;
         install.Accent = true;
         var uninstall = MakeButton(
-            "ODINSTALUJ",
+            "UNINSTALL",
             RdrIcon.Trash,
             async (_, _) => await RunActionAsync(UninstallAsync));
         uninstall.Width = 143;
@@ -977,12 +977,12 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 8, 0, 4)
         };
         var openLogs = MakeButton(
-            "OTWÓRZ LOGI",
+            "OPEN LOGS",
             RdrIcon.Log,
             (_, _) => SafeUiAction(OpenLogs));
         openLogs.Width = 145;
         var openDiagnostics = MakeButton(
-            "FOLDER DIAGNOSTYKI",
+            "DIAGNOSTICS FOLDER",
             RdrIcon.Folder,
             (_, _) => SafeUiAction(OpenDiagnosticsFolder));
         openDiagnostics.Width = 205;
@@ -997,8 +997,8 @@ public sealed class MainForm : Form
             Font = new Font(Font.FontFamily, 8.2f),
             TextAlign = ContentAlignment.BottomLeft,
             Text =
-                $"Paczka: {ReadPackageDisplayName()}\n" +
-                $"Launcher: {ReadLauncherVersion()} • protokół i build odczytywane z paczki release"
+                $"Package: {ReadPackageDisplayName()}\n" +
+                $"Launcher: {ReadLauncherVersion()} - protocol and build read from the release package"
         };
         maintenanceLayout.Controls.Add(version, 0, 4);
         column.Controls.Add(maintenance, 0, 0);
@@ -1019,7 +1019,7 @@ public sealed class MainForm : Form
         var activityTitle = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "OSTATNIA AKTYWNOŚĆ",
+            Text = "LATEST ACTIVITY",
             Font = new Font(Font.FontFamily, 9.5f, FontStyle.Bold),
             ForeColor = LauncherTheme.Text,
             TextAlign = ContentAlignment.MiddleLeft
@@ -1031,7 +1031,7 @@ public sealed class MainForm : Form
         _activityLog.ForeColor = LauncherTheme.TextMuted;
         _activityLog.Font = new Font("Cascadia Mono", 8.4f);
         _activityLog.Text =
-            $"{DateTime.Now:HH:mm:ss}  Launcher gotowy. Wybierz tryb i platformę.\n";
+            $"{DateTime.Now:HH:mm:ss}  Launcher ready. Choose a mode and platform.\n";
         activityLayout.Controls.Add(activityTitle, 0, 0);
         activityLayout.Controls.Add(_activityLog, 0, 1);
         column.Controls.Add(activity, 0, 1);
@@ -1059,7 +1059,7 @@ public sealed class MainForm : Form
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.Font = new Font(Font.FontFamily, 8.5f, FontStyle.Bold);
         _status.ForeColor = LauncherTheme.TextMuted;
-        _status.Text = "Gotowy.";
+        _status.Text = "Ready.";
         _sidecarState.Dock = DockStyle.Fill;
         _sidecarState.TextAlign = ContentAlignment.MiddleRight;
         _sidecarState.Font = new Font(Font.FontFamily, 8.5f, FontStyle.Bold);
@@ -1100,8 +1100,8 @@ public sealed class MainForm : Form
                 SaveSettingsSilently();
                 SetStatus(
                     _animGraphReplica.Checked
-                        ? "AnimGraph Replica zostanie użyty przy następnym uruchomieniu."
-                        : "Przywrócono silnik Task/Navmesh przy następnym uruchomieniu.",
+                        ? "AnimGraph Replica will be used on the next launch."
+                        : "Task/Navmesh will be restored on the next launch.",
                 StatusKind.Neutral);
             }
         };
@@ -1112,14 +1112,14 @@ public sealed class MainForm : Form
                 SaveSettingsSilently();
                 SetStatus(
                     _storyVmProbe.Checked
-                        ? "Story VM Capture zostanie uruchomiony przy następnym START (eksperymentalne)."
-                        : "Story VM Capture jest wyłączony przy następnym START; pozostaje bezpieczny fallback.",
+                        ? "Story VM Capture will start on the next START (experimental)."
+                        : "Story VM Capture will be disabled on the next START; safe fallback remains active.",
                     StatusKind.Neutral);
             }
         };
         _toolTip.SetToolTip(
             _startOrb,
-            "Launcher sprawdzi pliki, zainstaluje bieżący build i uruchomi wybrany tryb.");
+            "The launcher checks files, installs the current build, and starts the selected mode.");
     }
 
     private void ConfigureModeCard(
@@ -1208,17 +1208,17 @@ public sealed class MainForm : Form
         (_contextTitle.Text, _contextDescription.Text) = _selectedMode switch
         {
             LauncherMode.Solo => (
-                "TEST SOLO",
-                "Najszybszy test zmian silnika na jednym komputerze."),
+                "SOLO TEST",
+                "The fastest single-PC test for engine changes."),
             LauncherMode.Host => (
-                "HOST SESJI",
-                "Kliknij HOSTUJ, ustaw hasło sesji i poczekaj na drugiego gracza."),
+                "SESSION HOST",
+                "Click HOST, set a session password, and wait for the second player."),
             LauncherMode.Guest => (
-                "DOŁĄCZANIE",
-                "Kliknij DOŁĄCZ i podaj IPv4 hosta oraz jego hasło sesji."),
+                "JOINING",
+                "Click JOIN and enter the host IPv4 address and session password."),
             _ => (
-                "KONFIGURACJA SESJI",
-                "Najpierw wybierz rodzaj testu po lewej stronie.")
+                "SESSION CONFIGURATION",
+                "Choose a test mode on the left first.")
         };
         UpdatePasswordState();
     }
@@ -1231,10 +1231,10 @@ public sealed class MainForm : Form
         }
 
         _passwordState.Text = _passwordConfirmedForLaunch
-            ? "✓  HASŁO ZAPISANE — GOTOWE DO UWIERZYTELNIENIA"
+            ? "✓  PASSWORD SAVED - READY TO AUTHENTICATE"
             : _selectedMode == LauncherMode.Host
-                ? "HASŁO SESJI — PODASZ JE PO KLIKNIĘCIU HOSTUJ"
-                : "IPV4 + HASŁO — PODASZ JE PO KLIKNIĘCIU DOŁĄCZ";
+                ? "SESSION PASSWORD - ENTER IT AFTER CLICKING HOST"
+                : "IPV4 + PASSWORD - ENTER THEM AFTER CLICKING JOIN";
         _passwordState.ForeColor = _passwordConfirmedForLaunch
             ? LauncherTheme.Success
             : LauncherTheme.Warning;
@@ -1250,42 +1250,42 @@ public sealed class MainForm : Form
         var issues = new List<string>();
         if (_selectedMode is null)
         {
-            issues.Add("wybierz tryb");
+            issues.Add("choose a mode");
         }
 
         if (_selectedPlatform is null)
         {
-            issues.Add("wybierz platformę");
+            issues.Add("choose a platform");
         }
 
         if (!IsNicknameValid(_nickname.Text))
         {
-            issues.Add("uzupełnij poprawny nick");
+            issues.Add("enter a valid nickname");
         }
 
         if (!File.Exists(_gamePath.Text.Trim()))
         {
-            issues.Add("wskaż RDR2.exe w Ustawieniach");
+            issues.Add("select RDR2.exe in Settings");
         }
 
         if (!IsRuntimeFolderValid(_runtimePath.Text.Trim()))
         {
-            issues.Add("wskaż ScriptHook w Ustawieniach");
+            issues.Add("select Script Hook in Settings");
         }
 
         if (_selectedMode == LauncherMode.Host)
         {
             if (!IsHostAddressValid(_hostAddress.Text))
             {
-                issues.Add("wykryj adres hosta");
+                issues.Add("detect the host address");
             }
 
             if (!IsSavePathValid(_hostSave.Text))
             {
-                issues.Add("wybierz save SRDR* w Ustawieniach");
+                issues.Add("select an SRDR* save in Settings");
             }
         }
-        // Guest may press DOŁĄCZ before entering the connection data. The
+        // The guest may press JOIN before entering connection data. The
         // themed lobby prompt asks for IPv4 and the session password then.
 
         var sessionReady = _selectedMode switch
@@ -1309,31 +1309,31 @@ public sealed class MainForm : Form
         };
         _startOrb.MainText = _selectedMode switch
         {
-            LauncherMode.Solo => "TESTUJ",
-            LauncherMode.Host => "HOSTUJ",
-            LauncherMode.Guest => "DOŁĄCZ",
+            LauncherMode.Solo => "TEST",
+            LauncherMode.Host => "HOST",
+            LauncherMode.Guest => "JOIN",
             _ => "START"
         };
         _startOrb.DetailText = _selectedPlatform switch
         {
-            LauncherPlatform.Steam => "PRZEZ STEAM",
-            LauncherPlatform.Rockstar => "PRZEZ ROCKSTAR",
-            _ => "WYBIERZ PLATFORMĘ"
+            LauncherPlatform.Steam => "VIA STEAM",
+            LauncherPlatform.Rockstar => "VIA ROCKSTAR",
+            _ => "CHOOSE PLATFORM"
         };
         _startOrb.Invalidate();
 
         if (sidecarRunning)
         {
-            _startHint.Text = "SESJA DZIAŁA — UŻYJ STOP PO TEŚCIE";
+            _startHint.Text = "SESSION RUNNING - USE STOP AFTER TESTING";
             _startHint.ForeColor = LauncherTheme.Success;
         }
         else if (ready)
         {
             _startHint.Text = _selectedMode switch
             {
-                LauncherMode.Host => "HOSTUJ • USTAW HASŁO SESJI",
-                LauncherMode.Guest => "DOŁĄCZ • PODAJ IPV4 I HASŁO",
-                _ => "GOTOWE • START SPRAWDZI I ZAINSTALUJE BUILD"
+                LauncherMode.Host => "HOST - SET SESSION PASSWORD",
+                LauncherMode.Guest => "JOIN - ENTER IPV4 AND PASSWORD",
+                _ => "READY - START WILL VERIFY AND INSTALL THE BUILD"
             };
             _startHint.ForeColor = _selectedMode is LauncherMode.Host or LauncherMode.Guest
                 ? LauncherTheme.Warning
@@ -1342,7 +1342,7 @@ public sealed class MainForm : Form
         else
         {
             _startHint.Text = issues.Count == 0
-                ? "CHWILA — TRWA OPERACJA"
+                ? "PLEASE WAIT — OPERATION IN PROGRESS"
                 : issues[0].ToUpperInvariant();
             _startHint.ForeColor = LauncherTheme.TextMuted;
         }
@@ -1351,10 +1351,10 @@ public sealed class MainForm : Form
         var pathsReady = File.Exists(_gamePath.Text.Trim()) &&
                          IsRuntimeFolderValid(_runtimePath.Text.Trim());
         _readiness.Text =
-            $"{ReadyMark(selectionReady)} tryb + platforma    " +
+            $"{ReadyMark(selectionReady)} mode + platform    " +
             $"{ReadyMark(IsNicknameValid(_nickname.Text))} nick\n" +
-            $"{ReadyMark(pathsReady)} pliki gry    " +
-            $"{ReadyMark(sessionReady)} dane przed startem";
+            $"{ReadyMark(pathsReady)} game files    " +
+            $"{ReadyMark(sessionReady)} pre-launch data";
         _readiness.ForeColor = ready
             ? LauncherTheme.Success
             : LauncherTheme.TextMuted;
@@ -1372,7 +1372,7 @@ public sealed class MainForm : Form
     {
         if (_selectedMode is null || _selectedPlatform is null)
         {
-            throw new LauncherException("Wybierz tryb oraz platformę startu.");
+            throw new LauncherException("Choose a mode and launch platform.");
         }
 
         string? enteredPassword = null;
@@ -1390,7 +1390,7 @@ public sealed class MainForm : Form
         if (_selectedMode is LauncherMode.Host or LauncherMode.Guest)
         {
             var password = enteredPassword ?? throw new LauncherException(
-                "Nie podano hasła sesji.");
+                "No session password was provided.");
             var hostAddress = _hostAddress.Text.Trim();
             _sessionToken = await Task.Run(() =>
                 SessionPasswordService.DeriveSessionToken(
@@ -1402,8 +1402,8 @@ public sealed class MainForm : Form
             SaveSettingsSilently();
             SetStatus(
                 _selectedMode == LauncherMode.Host
-                    ? "Hasło zapisane. Sesja HOST jest gotowa do uruchomienia."
-                    : "Hasło zapisane. Dane GUEST są gotowe do połączenia.",
+                    ? "Password saved. The HOST session is ready to start."
+                    : "Password saved. The GUEST connection data is ready.",
                 StatusKind.Success);
         }
 
@@ -1414,7 +1414,7 @@ public sealed class MainForm : Form
             : GameLaunchTarget.Steam;
         var modeName = _selectedMode switch
         {
-            LauncherMode.Solo => "TEST SOLO",
+            LauncherMode.Solo => "SOLO TEST",
             LauncherMode.Host => "HOST",
             LauncherMode.Guest => "CLIENT",
             _ => "TEST"
@@ -1436,23 +1436,23 @@ public sealed class MainForm : Form
         if (!report.IsValid && !updateAvailable)
         {
             throw new LauncherException(
-                "Kontrola przed startem nie powiodła się:\n" + report.Summary);
+                "Pre-start validation failed:\n" + report.Summary);
         }
 
         var installText = updateAvailable
-            ? "Wykryto nowszą lub inną paczkę. Poprzedni build zostanie bezpiecznie zastąpiony."
+            ? "A newer or different package was detected. The previous build will be replaced safely."
             : report.IsInstalled
-                ? "Bieżący build jest poprawnie zainstalowany."
-                : "Bieżący build zostanie teraz bezpiecznie zainstalowany.";
+                ? "The current build is installed correctly."
+                : "The current build will now be installed safely.";
         var modeInstruction = _selectedMode == LauncherMode.Solo
-            ? "Po wczytaniu Story Mode otwórz F9 i uruchom test solo."
+            ? "After loading Story Mode, open F9 and start the solo test."
             : _selectedMode == LauncherMode.Host
-                ? $"W Story Mode wczytaj slot odpowiadający {Path.GetFileName(settings.HostSavePath)}."
-                : "Po wejściu do Story Mode poczekaj na połączenie z hostem.";
+                ? $"In Story Mode, load the slot corresponding to {Path.GetFileName(settings.HostSavePath)}."
+                : "After entering Story Mode, wait for the host connection.";
         if (MessageBox.Show(
                 this,
-                $"{installText}\n\nUruchomić {modeName} przez {platformName}? " +
-                $"{modeInstruction}\n\nWyłącznie Story Mode — nie otwieraj Red Dead Online.",
+                $"{installText}\n\nStart {modeName} through {platformName}? " +
+                $"{modeInstruction}\n\nStory Mode only - do not open Red Dead Online.",
                 $"Start {modeName}",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning) != DialogResult.Yes)
@@ -1465,14 +1465,14 @@ public sealed class MainForm : Form
             await Task.Run(() => _services.Installation.UpdateToPackage(request));
             _services.Logger.Info(
                 "quick_start.updated",
-                "Launcher zastąpił poprzedni build bieżącą paczką przed startem.");
+                "The launcher replaced the previous build with the current package before starting.");
         }
         else if (!report.IsInstalled)
         {
             await Task.Run(() => _services.Installation.Install(request));
             _services.Logger.Info(
                 "quick_start.installed",
-                "Launcher zainstalował bieżący build przed startem.");
+                "The launcher installed the current build before starting.");
         }
 
         if (_selectedMode == LauncherMode.Solo)
@@ -1482,7 +1482,7 @@ public sealed class MainForm : Form
                 _services.Package,
                 launchTarget);
             SetStatus(
-                "Test solo uruchomiony. W Story Mode użyj F9 → „Test solo: start / stop”.",
+                "Solo test started. In Story Mode, use F9 -> 'Solo test: start / stop'.",
                 StatusKind.Success);
         }
         else
@@ -1492,7 +1492,7 @@ public sealed class MainForm : Form
                 _services.Package,
                 launchTarget);
             SetStatus(
-                $"{modeName} startuje przez {platformName}. Po teście wyeksportuj diagnostykę.",
+                $"{modeName} is starting through {platformName}. Export diagnostics after testing.",
                 StatusKind.Success);
         }
     }
@@ -1505,11 +1505,11 @@ public sealed class MainForm : Form
             _services.Installation.IsPackageUpdateAvailable(_services.Package));
         var report = await Task.Run(() => _services.Installation.Verify(request));
         _installationState.Text = updateAvailable
-            ? "↻ Dostępny jest inny build paczki — START może go zastąpić automatycznie."
+            ? "↻ A different package build is available - START can replace it automatically."
             : report.IsValid
             ? report.IsInstalled
-                ? "✓ Bieżący build jest poprawnie zainstalowany."
-                : "○ Ścieżki są poprawne. Build nie jest jeszcze zainstalowany."
+                ? "✓ The current build is installed correctly."
+                : "○ Paths are valid. The build is not installed yet."
             : "! " + report.Summary.Replace(Environment.NewLine, "  •  ");
         _installationState.ForeColor = updateAvailable
             ? LauncherTheme.Warning
@@ -1520,7 +1520,7 @@ public sealed class MainForm : Form
             : LauncherTheme.Failure;
         SetStatus(
             updateAvailable
-                ? "Wykryto zmianę paczki. Użyj Zainstaluj albo wróć i kliknij START."
+                ? "A package change was detected. Use Install or go back and click START."
                 : report.Summary,
             updateAvailable || report.IsValid
                 ? StatusKind.Success
@@ -1541,7 +1541,7 @@ public sealed class MainForm : Form
 
         if (report.IsInstalled && !updateAvailable)
         {
-            SetStatus("Bieżący build jest już zainstalowany.", StatusKind.Success);
+            SetStatus("The current build is already installed.", StatusKind.Success);
             UpdateInstallationHint();
             return;
         }
@@ -1549,12 +1549,12 @@ public sealed class MainForm : Form
         if (MessageBox.Show(
                 this,
                 (updateAvailable
-                    ? "Launcher bezpiecznie zastąpi poprzedni build bieżącą paczką. "
-                    : "Launcher zainstaluje bieżący build. ") +
-                "Skopiuje ScriptHookRDR2.dll " +
-                "i dinput8.dll ze wskazanego folderu. NativeTrainer.asi nie zostanie skopiowany. " +
-                "Kontynuować?",
-                "Bezpieczna instalacja",
+                    ? "The launcher will safely replace the previous build with the current package. "
+                    : "The launcher will install the current build. ") +
+                "It will copy ScriptHookRDR2.dll " +
+                "and dinput8.dll from the selected folder. NativeTrainer.asi will not be copied. " +
+                "Continue?",
+                "Safe installation",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning) != DialogResult.Yes)
         {
@@ -1572,8 +1572,8 @@ public sealed class MainForm : Form
 
         SetStatus(
             updateAvailable
-                ? "Poprzedni build został zastąpiony bieżącą paczką."
-                : "Bieżący build został zainstalowany.",
+                ? "The previous build was replaced with the current package."
+                : "The current build was installed.",
             StatusKind.Success);
         UpdateInstallationHint();
     }
@@ -1583,14 +1583,14 @@ public sealed class MainForm : Form
         if (_services.Sidecar.IsRunning)
         {
             throw new LauncherException(
-                "Najpierw zatrzymaj sesję i zamknij RDR2.");
+                "Stop the session and close RDR2 first.");
         }
 
         if (MessageBox.Show(
                 this,
-                "Launcher usunie wyłącznie pliki zapisane w manifeście jako własność " +
-                "tej instalacji. Zamknij RDR2 i kontynuuj.",
-                "Bezpieczna deinstalacja",
+                "The launcher will remove only files recorded in the manifest as owned by " +
+                "this installation. Close RDR2 and continue.",
+                "Safe uninstallation",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning) != DialogResult.Yes)
         {
@@ -1599,7 +1599,7 @@ public sealed class MainForm : Form
 
         await Task.Run(_services.Installation.Uninstall);
         SetStatus(
-            "Mod odinstalowany. Można teraz bezpiecznie uruchomić Red Dead Online.",
+            "Mod uninstalled. Red Dead Online can now be started without project-owned files.",
             StatusKind.Success);
         UpdateInstallationHint();
     }
@@ -1614,7 +1614,7 @@ public sealed class MainForm : Form
             ReadSettings(),
             _services.Package));
         SetStatus(
-            $"Diagnostyka gotowa: {exported}. Poprzedni ZIP został zastąpiony.",
+            $"Diagnostics ready: {exported}. The previous ZIP was replaced.",
             StatusKind.Success);
         UpdateDiagnosticsLocation();
     }
@@ -1623,7 +1623,7 @@ public sealed class MainForm : Form
     {
         _services.Sidecar.Stop();
         SetStatus(
-            "Sidecar wyłączony. Wybierz HOSTUJ albo DOŁĄCZ, aby uruchomić nową sesję.",
+            "Sidecar stopped. Choose HOST or JOIN to start a new session.",
             StatusKind.Warning);
         UpdateRunningUi();
     }
@@ -1636,14 +1636,14 @@ public sealed class MainForm : Form
             if (string.IsNullOrWhiteSpace(suggested))
             {
                 throw new LauncherException(
-                    "Nie wykryto aktywnego IPv4 Hamachi ani prywatnego LAN.");
+                    "No active Hamachi IPv4 or private LAN address was detected.");
             }
 
             _hostAddress.Text = suggested;
             SetStatus(
                 suggested.StartsWith("25.", StringComparison.Ordinal)
-                    ? $"Wykryto Hamachi: {suggested}."
-                    : $"Wykryto LAN: {suggested}.",
+                    ? $"Detected Hamachi: {suggested}."
+                    : $"Detected LAN: {suggested}.",
                 StatusKind.Success);
         });
     }
@@ -1652,7 +1652,7 @@ public sealed class MainForm : Form
     {
         using var dialog = new OpenFileDialog
         {
-            Title = "Wskaż RDR2.exe",
+            Title = "Select RDR2.exe",
             Filter = "RDR2.exe|RDR2.exe",
             CheckFileExists = true,
             Multiselect = false,
@@ -1669,7 +1669,7 @@ public sealed class MainForm : Form
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "Wskaż rozpakowany folder ScriptHookRDR2 albo jego folder bin",
+            Description = "Select the extracted ScriptHookRDR2 folder or its bin folder",
             UseDescriptionForTitle = true,
             ShowNewFolderButton = false,
             InitialDirectory = Directory.Exists(_runtimePath.Text)
@@ -1687,7 +1687,7 @@ public sealed class MainForm : Form
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "Wybierz folder dla pliku RDR2-Coop-Diagnostics.zip",
+            Description = "Choose a folder for RDR2-Coop-Diagnostics.zip",
             UseDescriptionForTitle = true,
             ShowNewFolderButton = true,
             InitialDirectory = Directory.Exists(_diagnosticsFolder.Text)
@@ -1714,8 +1714,8 @@ public sealed class MainForm : Form
                 "Profiles");
             using var dialog = new OpenFileDialog
             {
-                Title = "Wybierz lokalny save hosta (SRDR*)",
-                Filter = "Save RDR2 (SRDR*)|SRDR*|Wszystkie pliki (*.*)|*.*",
+                Title = "Select the host's local save (SRDR*)",
+                Filter = "RDR2 save (SRDR*)|SRDR*|All files (*.*)|*.*",
                 CheckFileExists = true,
                 Multiselect = false,
                 InitialDirectory = Directory.Exists(profileRoot)
@@ -1731,13 +1731,13 @@ public sealed class MainForm : Form
                     "SRDR",
                     StringComparison.OrdinalIgnoreCase))
             {
-                throw new LauncherException("Wybierz plik save zaczynający się od SRDR.");
+                throw new LauncherException("Select a save file whose name starts with SRDR.");
             }
 
             _hostSave.Text = Path.GetFullPath(dialog.FileName);
             SaveSettingsSilently();
             SetStatus(
-                "Wybrano lokalny save hosta. Launcher go nie zmieni ani nie skopiuje.",
+                "The host's local save was selected. The launcher will not modify or copy it.",
                 StatusKind.Success);
         });
     }
@@ -1770,8 +1770,8 @@ public sealed class MainForm : Form
             SaveSettings();
             SetStatus(
                 changed
-                    ? "Uzupełniono wykryte ścieżki. Sprawdź je przed startem."
-                    : "Nie znaleziono nowych ścieżek. Wskaż je przyciskiem Przeglądaj.",
+                    ? "Detected paths were filled in. Review them before starting."
+                    : "No new paths were found. Select them with the Browse button.",
                 changed ? StatusKind.Success : StatusKind.Warning);
         });
     }
@@ -1947,7 +1947,7 @@ public sealed class MainForm : Form
         {
             SaveSettings();
             SetStatus(
-                "Ustawienia zapisane. Będą używane także przez kolejne paczki release.",
+                "Settings saved. They will also be used by later release packages.",
                 StatusKind.Success);
             UpdateReadiness();
         });
@@ -1972,8 +1972,8 @@ public sealed class MainForm : Form
             SetStatus(exception.Message, StatusKind.Error);
             MessageBox.Show(
                 this,
-                $"{exception.Message}\n\nSzczegóły zapisano w:\n{_services.Paths.LogDirectory}",
-                "Operacja zatrzymana",
+                $"{exception.Message}\n\nDetails were saved to:\n{_services.Paths.LogDirectory}",
+                "Operation stopped",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -1996,8 +1996,8 @@ public sealed class MainForm : Form
             SetStatus(exception.Message, StatusKind.Error);
             MessageBox.Show(
                 this,
-                $"{exception.Message}\n\nSzczegóły zapisano w:\n{_services.Paths.LogDirectory}",
-                "Operacja zatrzymana",
+                $"{exception.Message}\n\nDetails were saved to:\n{_services.Paths.LogDirectory}",
+                "Operation stopped",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -2008,7 +2008,7 @@ public sealed class MainForm : Form
         password = null;
         using var dialog = new Form
         {
-            Text = "Ustaw hasło sesji",
+            Text = "Set session password",
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
@@ -2040,19 +2040,19 @@ public sealed class MainForm : Form
         var heading = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "HOSTUJ SESJĘ  •  USTAW HASŁO",
+            Text = "HOST SESSION - SET PASSWORD",
             Font = CreateDisplayFont(15f),
             ForeColor = LauncherTheme.Host,
             TextAlign = ContentAlignment.MiddleLeft
         };
         layout.Controls.Add(heading, 0, 0);
-        layout.Controls.Add(MakeFieldLabel("HASŁO SESJI"), 0, 1);
+        layout.Controls.Add(MakeFieldLabel("SESSION PASSWORD"), 0, 1);
         var entered = CreateTextBox();
         entered.MaxLength = SessionPasswordService.MaximumLength;
         entered.UseSystemPasswordChar = true;
-        entered.PlaceholderText = "minimum 4 znaki";
+        entered.PlaceholderText = "minimum 4 characters";
         layout.Controls.Add(entered, 0, 2);
-        layout.Controls.Add(MakeFieldLabel("POWTÓRZ HASŁO"), 0, 3);
+        layout.Controls.Add(MakeFieldLabel("REPEAT PASSWORD"), 0, 3);
         var confirmation = CreateTextBox();
         confirmation.MaxLength = SessionPasswordService.MaximumLength;
         confirmation.UseSystemPasswordChar = true;
@@ -2061,7 +2061,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ForeColor = LauncherTheme.TextDim,
-            Text = "Przekaż znajomemu IPv4 oraz to samo hasło. Hasło nie jest zapisywane jawnie.",
+            Text = "Share the IPv4 address and the same password privately. The password is never stored in clear text.",
             TextAlign = ContentAlignment.MiddleLeft
         };
         layout.Controls.Add(help, 0, 5);
@@ -2082,7 +2082,7 @@ public sealed class MainForm : Form
         };
         var save = new Button
         {
-            Text = "ZAPISZ I HOSTUJ",
+            Text = "SAVE AND HOST",
             Width = 160,
             Height = 38,
             BackColor = LauncherTheme.Host,
@@ -2092,7 +2092,7 @@ public sealed class MainForm : Form
         save.FlatAppearance.BorderSize = 0;
         var cancel = new Button
         {
-            Text = "ANULUJ",
+            Text = "CANCEL",
             Width = 105,
             Height = 38,
             BackColor = LauncherTheme.SurfaceRaised,
@@ -2111,7 +2111,7 @@ public sealed class MainForm : Form
                         confirmation.Text,
                         StringComparison.Ordinal))
                 {
-                    throw new LauncherException("Powtórzone hasło nie jest identyczne.");
+                    throw new LauncherException("The repeated password does not match.");
                 }
 
                 dialog.DialogResult = DialogResult.OK;
@@ -2145,7 +2145,7 @@ public sealed class MainForm : Form
         password = null;
         using var dialog = new Form
         {
-            Text = "Dołącz do lobby",
+            Text = "Join lobby",
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
@@ -2176,21 +2176,21 @@ public sealed class MainForm : Form
         var heading = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "DOŁĄCZ DO SESJI  •  GUEST",
+            Text = "JOIN SESSION - GUEST",
             Font = CreateDisplayFont(15f),
             ForeColor = LauncherTheme.Guest,
             TextAlign = ContentAlignment.MiddleLeft
         };
         layout.Controls.Add(heading, 0, 0);
-        layout.Controls.Add(MakeFieldLabel("IPV4 HOSTA — HAMACHI / LAN"), 0, 1);
+        layout.Controls.Add(MakeFieldLabel("HOST IPV4 — HAMACHI / LAN"), 0, 1);
         var address = CreateTextBox();
         address.Text = _hostAddress.Text.Trim();
-        address.PlaceholderText = "np. adres Hamachi 25.x.x.x";
+        address.PlaceholderText = "e.g. Hamachi address 25.x.x.x";
         layout.Controls.Add(address, 0, 2);
-        layout.Controls.Add(MakeFieldLabel("HASŁO SESJI HOSTA"), 0, 3);
+        layout.Controls.Add(MakeFieldLabel("HOST SESSION PASSWORD"), 0, 3);
         var entered = CreateTextBox();
         entered.MaxLength = SessionPasswordService.MaximumLength;
-        entered.PlaceholderText = "hasło ustawione przez hosta";
+        entered.PlaceholderText = "password set by the host";
         entered.UseSystemPasswordChar = true;
         layout.Controls.Add(entered, 0, 4);
         var validation = new Label
@@ -2209,7 +2209,7 @@ public sealed class MainForm : Form
         };
         var join = new Button
         {
-            Text = "DOŁĄCZ",
+            Text = "JOIN",
             Width = 125,
             Height = 38,
             BackColor = LauncherTheme.Guest,
@@ -2219,7 +2219,7 @@ public sealed class MainForm : Form
         join.FlatAppearance.BorderSize = 0;
         var cancel = new Button
         {
-            Text = "ANULUJ",
+            Text = "CANCEL",
             Width = 105,
             Height = 38,
             BackColor = LauncherTheme.SurfaceRaised,
@@ -2236,7 +2236,7 @@ public sealed class MainForm : Form
                     parsed.AddressFamily != AddressFamily.InterNetwork)
                 {
                     throw new LauncherException(
-                        "Wpisz poprawny IPv4 hosta, np. adres Hamachi 25.x.x.x.");
+                        "Enter a valid host IPv4 address, for example a Hamachi 25.x.x.x address.");
                 }
                 _ = InviteService.ValidateRemoteHost(address.Text.Trim());
                 SessionPasswordService.Validate(entered.Text);
@@ -2348,7 +2348,7 @@ public sealed class MainForm : Form
     private void UpdateRunningUi()
     {
         var running = _services.Sidecar.IsRunning;
-        _sidecarState.Text = running ? "●  SESJA AKTYWNA" : "○  SESJA ZATRZYMANA";
+        _sidecarState.Text = running ? "●  SESSION ACTIVE" : "○  SESSION STOPPED";
         _sidecarState.ForeColor = running
             ? LauncherTheme.Success
             : LauncherTheme.TextDim;
@@ -2363,8 +2363,8 @@ public sealed class MainForm : Form
     {
         var manifestPresent = File.Exists(_services.Paths.InstallManifestPath);
         _installationState.Text = manifestPresent
-            ? "○ Manifest istnieje — kliknij Sprawdź, aby potwierdzić zgodność builda."
-            : "○ Build nie jest zainstalowany lub brak lokalnego manifestu.";
+            ? "○ Manifest exists - click Verify to confirm the build."
+            : "○ Build is not installed or no local manifest exists.";
         _installationState.ForeColor = manifestPresent
             ? LauncherTheme.Warning
             : LauncherTheme.TextMuted;
@@ -2386,16 +2386,16 @@ public sealed class MainForm : Form
             exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
             _diagnosticsLocation.Text =
-                "NIEPRAWIDŁOWA ŚCIEŻKA EKSPORTU\n" + exception.Message;
+                "INVALID EXPORT PATH\n" + exception.Message;
             _diagnosticsLocation.ForeColor = LauncherTheme.Failure;
             return;
         }
 
         _diagnosticsLocation.ForeColor = LauncherTheme.TextMuted;
         _diagnosticsLocation.Text =
-            "EKSPORT JEDNYM KLIKNIĘCIEM\n" +
+            "ONE-CLICK EXPORT\n" +
             path +
-            "\nNowy eksport bezpiecznie zastępuje poprzedni plik ZIP.";
+            "\nA new export safely replaces the previous ZIP file.";
     }
 
     private void SetStatus(string text, StatusKind kind)
@@ -2459,8 +2459,8 @@ public sealed class MainForm : Form
         if (_services.Sidecar.IsRunning &&
             MessageBox.Show(
                 this,
-                "Sidecar nadal działa. Zamknięcie launchera zatrzyma bieżący test. Zamknąć?",
-                "Sesja jest uruchomiona",
+                "The sidecar is still running. Closing the launcher will stop the current test. Close anyway?",
+                "Session is running",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning) != DialogResult.Yes)
         {
@@ -2506,7 +2506,7 @@ public sealed class MainForm : Form
     private static string DefaultDiagnosticsFolder()
     {
         var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        return Path.Combine(documents, "RDR2 Coop Story", "Diagnostyka");
+        return Path.Combine(documents, "RDR2 Coop Story", "Diagnostics");
     }
 
     private static Font CreateDisplayFont(float size) =>

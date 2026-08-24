@@ -78,7 +78,7 @@ std::span<const BridgeCommand> MenuController::Commands() const noexcept {
 std::string_view MenuController::Label(const BridgeCommand command) noexcept {
     switch (command) {
         case BridgeCommand::SkipCutscene:
-            return "Glosuj: pomin cutscenke";
+            return "Vote: skip cutscene";
         case BridgeCommand::ToggleSoloTest:
             return "Test solo: start / stop";
         case BridgeCommand::ToggleGhostRecord:
@@ -88,27 +88,27 @@ std::string_view MenuController::Label(const BridgeCommand command) noexcept {
         case BridgeCommand::ToggleSoloOverride:
             return "Solo override";
         case BridgeCommand::TeleportGuest:
-            return "Przywolaj guest (host)";
+            return "Teleport guest here (host)";
         case BridgeCommand::TeleportToPlayer:
-            return "Teleport do gracza";
+            return "Teleport to player";
         case BridgeCommand::ResyncEntities:
             return "Resync entities";
         case BridgeCommand::ResyncEquipment:
             return "Resync equipment";
         case BridgeCommand::GrantTestPistol:
-            return "Daj pistolet + max ammo (test)";
+            return "Give pistol + max ammo (test)";
         case BridgeCommand::GrantTestLasso:
-            return "Daj lasso (test)";
+            return "Give lasso (test)";
         case BridgeCommand::EmergencyRecover:
-            return "Ratunek awaryjny gracza";
+            return "Emergency player recovery";
         case BridgeCommand::RetryCheckpoint:
             return "Retry checkpoint";
         case BridgeCommand::ToggleDiagnostics:
             return "Diagnostics";
         case BridgeCommand::SaveProblemMarker:
-            return "Zapisz znacznik problemu";
+            return "Save problem marker";
         case BridgeCommand::StopSession:
-            return "Zatrzymaj sesje coop";
+            return "Stop co-op session";
         case BridgeCommand::Unload:
             return "Unload bridge";
     }

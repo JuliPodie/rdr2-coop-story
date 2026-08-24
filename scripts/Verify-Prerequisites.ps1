@@ -292,7 +292,7 @@ try {
     }
 }
 catch {
-    Add-Check -Category 'Workspace' -Name 'Workspace root' -Status 'FAIL' -Detail 'Nie mozna bezpiecznie rozpoznac katalogu projektu.'
+    Add-Check -Category 'Workspace' -Name 'Workspace root' -Status 'FAIL' -Detail 'The project directory could not be resolved safely.'
     $workspaceFull = $null
 }
 
@@ -333,30 +333,30 @@ if ($null -ne $vsWhere) {
 
 if ([string]::IsNullOrWhiteSpace($vsInstall)) {
     Add-Check -Category 'Build' -Name 'Visual Studio C++ workload' `
-        -Status 'FAIL' -Detail 'Nie znaleziono instalacji Visual Studio z komponentem C++ x64/x86.'
+        -Status 'FAIL' -Detail 'No Visual Studio installation with the C++ x64/x86 component was found.'
     Add-Check -Category 'Build' -Name ('Planned VS channel ' + $ExpectedVisualStudioChannel) `
-        -Status 'WARN' -Detail 'Planowany kanal nie jest zainstalowany.'
+        -Status 'WARN' -Detail 'The planned channel is not installed.'
     Add-Check -Category 'Build' -Name 'MSVC x64 compiler' -Status 'FAIL' `
-        -Detail 'Nie mozna potwierdzic cl.exe bez instalacji Visual Studio C++.'
+        -Detail 'cl.exe cannot be verified without a Visual Studio C++ installation.'
 
     $cmakeCommand = Get-Command cmake.exe -ErrorAction SilentlyContinue
     if ($null -ne $cmakeCommand) {
-        Add-Check -Category 'Build' -Name 'CMake' -Status 'PASS' -Detail 'CMake jest dostepny w PATH.'
+        Add-Check -Category 'Build' -Name 'CMake' -Status 'PASS' -Detail 'CMake is available in PATH.'
     }
     else {
-        Add-Check -Category 'Build' -Name 'CMake' -Status 'FAIL' -Detail 'Nie znaleziono CMake.'
+        Add-Check -Category 'Build' -Name 'CMake' -Status 'FAIL' -Detail 'CMake was not found.'
     }
 }
 else {
     Add-Check -Category 'Build' -Name 'Visual Studio C++ workload' `
-        -Status 'PASS' -Detail 'Znaleziono instalacje Visual Studio z komponentem C++ x64/x86.'
+        -Status 'PASS' -Detail 'A Visual Studio installation with the C++ x64/x86 component was found.'
     if ([string]::IsNullOrWhiteSpace($plannedVsInstall)) {
         Add-Check -Category 'Build' -Name ('Planned VS channel ' + $ExpectedVisualStudioChannel) `
-            -Status 'WARN' -Detail 'Planowany kanal nie jest zainstalowany; uzywany jest nowszy toolchain.'
+            -Status 'WARN' -Detail 'The planned channel is not installed; a newer toolchain is being used.'
     }
     else {
         Add-Check -Category 'Build' -Name ('Planned VS channel ' + $ExpectedVisualStudioChannel) `
-            -Status 'PASS' -Detail 'Planowany kanal z workloadem C++ jest dostepny.'
+            -Status 'PASS' -Detail 'The planned channel with the C++ workload is available.'
     }
 
     $msvcRoot = Join-Path $vsInstall 'VC\Tools\MSVC'
@@ -368,24 +368,24 @@ else {
         Select-Object -First 1
     if ($null -ne $msvcDirectory) {
         Add-Check -Category 'Build' -Name 'MSVC x64 compiler' -Status 'PASS' `
-            -Detail ('Kompilator Hostx64/x64 jest dostepny; toolset ' + $msvcDirectory.Name + '.')
+            -Detail ('The Hostx64/x64 compiler is available; toolset ' + $msvcDirectory.Name + '.')
     }
     else {
         Add-Check -Category 'Build' -Name 'MSVC x64 compiler' -Status 'FAIL' `
-            -Detail 'Nie znaleziono kompilatora cl.exe dla Hostx64/x64.'
+            -Detail 'The Hostx64/x64 cl.exe compiler was not found.'
     }
 
     $vsCmake = Join-Path $vsInstall 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
     if (Test-Path -LiteralPath $vsCmake -PathType Leaf) {
-        Add-Check -Category 'Build' -Name 'CMake' -Status 'PASS' -Detail 'CMake z Visual Studio jest dostepny.'
+        Add-Check -Category 'Build' -Name 'CMake' -Status 'PASS' -Detail 'Visual Studio CMake is available.'
     }
     else {
         $cmakeCommand = Get-Command cmake.exe -ErrorAction SilentlyContinue
         if ($null -ne $cmakeCommand) {
-            Add-Check -Category 'Build' -Name 'CMake' -Status 'PASS' -Detail 'CMake jest dostepny w PATH.'
+            Add-Check -Category 'Build' -Name 'CMake' -Status 'PASS' -Detail 'CMake is available in PATH.'
         }
         else {
-            Add-Check -Category 'Build' -Name 'CMake' -Status 'FAIL' -Detail 'Nie znaleziono CMake.'
+            Add-Check -Category 'Build' -Name 'CMake' -Status 'FAIL' -Detail 'CMake was not found.'
         }
     }
 }
@@ -412,35 +412,35 @@ if (-not [string]::IsNullOrWhiteSpace($sdkRoot)) {
     if ((Test-Path -LiteralPath $windowsHeader -PathType Leaf) -and
         (Test-Path -LiteralPath $resourceCompiler -PathType Leaf)) {
         Add-Check -Category 'Build' -Name ('Windows SDK ' + $ExpectedWindowsSdk) `
-            -Status 'PASS' -Detail 'Naglowki i narzedzia x64 sa dostepne.'
+            -Status 'PASS' -Detail 'The x64 headers and tools are available.'
     }
     else {
         Add-Check -Category 'Build' -Name ('Windows SDK ' + $ExpectedWindowsSdk) `
-            -Status 'FAIL' -Detail 'Brakuje wymaganych naglowkow lub narzedzi x64.'
+            -Status 'FAIL' -Detail 'Required x64 headers or tools are missing.'
     }
 }
 else {
     Add-Check -Category 'Build' -Name ('Windows SDK ' + $ExpectedWindowsSdk) `
-        -Status 'FAIL' -Detail 'Nie znaleziono Windows Kits.'
+        -Status 'FAIL' -Detail 'Windows Kits were not found.'
 }
 
 # .NET sidecar runtime/SDK
 $dotnetCommand = Get-Command dotnet.exe -ErrorAction SilentlyContinue
 if ($null -eq $dotnetCommand) {
-    Add-Check -Category 'Build' -Name '.NET SDK 10' -Status 'FAIL' -Detail 'Nie znaleziono polecenia dotnet.'
+    Add-Check -Category 'Build' -Name '.NET SDK 10' -Status 'FAIL' -Detail 'The dotnet command was not found.'
 }
 else {
     try {
         $dotnetSdks = @(& $dotnetCommand.Source --list-sdks 2>$null)
         if (@($dotnetSdks | Where-Object { $_ -match '^10\.' }).Count -gt 0) {
-            Add-Check -Category 'Build' -Name '.NET SDK 10' -Status 'PASS' -Detail 'SDK 10.x jest dostepny.'
+            Add-Check -Category 'Build' -Name '.NET SDK 10' -Status 'PASS' -Detail 'SDK 10.x is available.'
         }
         else {
-            Add-Check -Category 'Build' -Name '.NET SDK 10' -Status 'FAIL' -Detail 'dotnet dziala, ale brak SDK 10.x.'
+            Add-Check -Category 'Build' -Name '.NET SDK 10' -Status 'FAIL' -Detail 'dotnet works, but SDK 10.x is missing.'
         }
     }
     catch {
-        Add-Check -Category 'Build' -Name '.NET SDK 10' -Status 'FAIL' -Detail 'Nie udalo sie odczytac listy SDK.'
+        Add-Check -Category 'Build' -Name '.NET SDK 10' -Status 'FAIL' -Detail 'The SDK list could not be read.'
     }
 }
 
@@ -450,7 +450,7 @@ if ([string]::IsNullOrWhiteSpace($SdkPath) -and $null -ne $workspaceFull) {
         -DirectoryPattern 'ScriptHookRDR2_SDK_*' -ArchivePattern '*ScriptHookRDR2*SDK*.zip'
 }
 if ([string]::IsNullOrWhiteSpace($SdkPath)) {
-    Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 SDK' -Status 'FAIL' -Detail 'Nie znaleziono SDK w workspace ani prereqs\incoming.'
+    Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 SDK' -Status 'FAIL' -Detail 'The SDK was not found in the workspace or prereqs\incoming.'
 }
 else {
     try {
@@ -463,14 +463,14 @@ else {
         )
         $sdkReadme = Get-PackageEntryText -Path $SdkPath -EntryName 'readme.txt'
         if ($sdkOk -and $sdkReadme -match '(?i)v1\.0\.1207\.73') {
-            Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 SDK' -Status 'PASS' -Detail 'Wymagane naglowki, biblioteka i warunki SDK sa obecne.'
+            Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 SDK' -Status 'PASS' -Detail 'The required headers, library, and SDK terms are present.'
         }
         else {
-            Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 SDK' -Status 'FAIL' -Detail 'Pakiet nie zawiera kompletu plikow lub deklaracji wersji 1.0.1207.73.'
+            Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 SDK' -Status 'FAIL' -Detail 'The package does not contain the complete files or version declaration for 1.0.1207.73.'
         }
     }
     catch {
-        Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 SDK' -Status 'FAIL' -Detail 'Pakiet jest nieczytelny lub uszkodzony.'
+        Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 SDK' -Status 'FAIL' -Detail 'The package is unreadable or corrupted.'
     }
 }
 
@@ -479,7 +479,7 @@ if ([string]::IsNullOrWhiteSpace($RuntimePath) -and $null -ne $workspaceFull) {
         -DirectoryPattern 'ScriptHookRDR2_1.0.1491.17*' -ArchivePattern '*ScriptHookRDR2*1.0.1491.17*.zip'
 }
 if ([string]::IsNullOrWhiteSpace($RuntimePath)) {
-    Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 runtime 1.0.1491.17' -Status 'FAIL' -Detail 'Nie znaleziono runtime w workspace ani prereqs\incoming.'
+    Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 runtime 1.0.1491.17' -Status 'FAIL' -Detail 'The runtime was not found in the workspace or prereqs\incoming.'
 }
 else {
     try {
@@ -490,14 +490,14 @@ else {
         )
         $runtimeReadme = Get-PackageEntryText -Path $RuntimePath -EntryName 'readme.txt'
         if ($runtimeOk -and $runtimeReadme -match '(?i)v1\.0\.1491\.17') {
-            Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 runtime 1.0.1491.17' -Status 'PASS' -Detail 'Wymagane pliki runtime sa obecne; installer projektu ich nie kopiuje.'
+            Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 runtime 1.0.1491.17' -Status 'PASS' -Detail 'The required runtime files are present; the project installer does not copy them.'
         }
         else {
-            Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 runtime 1.0.1491.17' -Status 'FAIL' -Detail 'Pakiet nie zawiera kompletu plikow lub deklaracji wersji 1.0.1491.17.'
+            Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 runtime 1.0.1491.17' -Status 'FAIL' -Detail 'The package does not contain the complete files or version declaration for 1.0.1491.17.'
         }
     }
     catch {
-        Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 runtime 1.0.1491.17' -Status 'FAIL' -Detail 'Pakiet jest nieczytelny lub uszkodzony.'
+        Add-Check -Category 'ScriptHook' -Name 'ScriptHookRDR2 runtime 1.0.1491.17' -Status 'FAIL' -Detail 'The package is unreadable or corrupted.'
     }
 }
 
@@ -507,9 +507,9 @@ if ([string]::IsNullOrWhiteSpace($GamePath)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($GamePath)) {
-    Add-Check -Category 'Game' -Name 'Steam manifest' -Status 'SKIP' -Detail 'Nie wykryto instalacji Steam; podaj -GamePath, jesli uzywasz innego launchera.'
-    Add-Check -Category 'Game' -Name 'RDR2.exe version' -Status 'SKIP' -Detail 'Brak sciezki gry.'
-    Add-Check -Category 'Game' -Name 'RDR2.exe SHA-256' -Status 'SKIP' -Detail 'Brak sciezki gry.'
+    Add-Check -Category 'Game' -Name 'Steam manifest' -Status 'SKIP' -Detail 'No Steam installation was detected; provide -GamePath if you use another launcher.'
+    Add-Check -Category 'Game' -Name 'RDR2.exe version' -Status 'SKIP' -Detail 'No game path was provided.'
+    Add-Check -Category 'Game' -Name 'RDR2.exe SHA-256' -Status 'SKIP' -Detail 'No game path was provided.'
 }
 else {
     try {
@@ -518,7 +518,7 @@ else {
             throw 'RDR2.exe missing.'
         }
 
-        Add-Check -Category 'Game' -Name 'Steam manifest / explicit game root' -Status 'PASS' -Detail 'Rozpoznano katalog zawierajacy RDR2.exe.'
+        Add-Check -Category 'Game' -Name 'Steam manifest / explicit game root' -Status 'PASS' -Detail 'A directory containing RDR2.exe was resolved.'
 
         $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($gameExe)
         $actualVersion = Get-NormalizedVersion $versionInfo.ProductVersion
@@ -526,31 +526,31 @@ else {
             $actualVersion = Get-NormalizedVersion $versionInfo.FileVersion
         }
         if ($actualVersion -eq $ExpectedGameVersion) {
-            Add-Check -Category 'Game' -Name 'RDR2.exe version' -Status 'PASS' -Detail ('Wersja zgodna: ' + $ExpectedGameVersion + '.')
+            Add-Check -Category 'Game' -Name 'RDR2.exe version' -Status 'PASS' -Detail ('Matching version: ' + $ExpectedGameVersion + '.')
         }
         else {
-            Add-Check -Category 'Game' -Name 'RDR2.exe version' -Status 'FAIL' -Detail ('Oczekiwano ' + $ExpectedGameVersion + '; wykryta wersja jest nieobslugiwana.')
+            Add-Check -Category 'Game' -Name 'RDR2.exe version' -Status 'FAIL' -Detail ('Expected ' + $ExpectedGameVersion + '; the detected version is unsupported.')
         }
 
         $actualHash = Get-FileSha256 -Path $gameExe
         if ($actualHash -eq $ExpectedGameSha256.ToUpperInvariant()) {
-            Add-Check -Category 'Game' -Name 'RDR2.exe SHA-256' -Status 'PASS' -Detail 'Hash odpowiada obslugiwanemu buildowi.'
+            Add-Check -Category 'Game' -Name 'RDR2.exe SHA-256' -Status 'PASS' -Detail 'The hash matches the supported build.'
         }
         else {
-            Add-Check -Category 'Game' -Name 'RDR2.exe SHA-256' -Status 'FAIL' -Detail 'Hash nie odpowiada obslugiwanemu buildowi; mod nie powinien byc uruchamiany.'
+            Add-Check -Category 'Game' -Name 'RDR2.exe SHA-256' -Status 'FAIL' -Detail 'The hash does not match the supported build; the mod should not be started.'
         }
 
         $runtimeInstalled = (Test-Path -LiteralPath (Join-Path $GamePath 'ScriptHookRDR2.dll') -PathType Leaf) -and
             (Test-Path -LiteralPath (Join-Path $GamePath 'dinput8.dll') -PathType Leaf)
         if ($runtimeInstalled) {
-            Add-Check -Category 'Game' -Name 'ScriptHook runtime in game' -Status 'PASS' -Detail 'Runtime jest obecny w katalogu gry.'
+            Add-Check -Category 'Game' -Name 'ScriptHook runtime in game' -Status 'PASS' -Detail 'The runtime is present in the game directory.'
         }
         else {
-            Add-Check -Category 'Game' -Name 'ScriptHook runtime in game' -Status 'WARN' -Detail 'Runtime nie jest zainstalowany; skrypty projektu celowo go nie instaluja.'
+            Add-Check -Category 'Game' -Name 'ScriptHook runtime in game' -Status 'WARN' -Detail 'The runtime is not installed; the project scripts intentionally do not install it.'
         }
     }
     catch {
-        Add-Check -Category 'Game' -Name 'Game verification' -Status 'FAIL' -Detail 'Nie mozna bezpiecznie odczytac RDR2.exe.'
+        Add-Check -Category 'Game' -Name 'Game verification' -Status 'FAIL' -Detail 'RDR2.exe could not be read safely.'
     }
 }
 

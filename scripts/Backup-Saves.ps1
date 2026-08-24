@@ -47,7 +47,7 @@ function Get-SafeFileInventory {
         $directory = $pending.Dequeue()
         foreach ($item in (Get-ChildItem -LiteralPath $directory -Force)) {
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw 'Zrodlo zawiera reparse point; backup zostal zatrzymany, aby nie wyjsc poza wskazany katalog.'
+                throw 'The source contains a reparse point; backup was stopped to avoid leaving the selected directory.'
             }
 
             if ($item.PSIsContainer) {
@@ -56,7 +56,7 @@ function Get-SafeFileInventory {
             }
 
             if (-not $item.FullName.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-                throw 'Wykryto plik poza katalogiem zrodlowym.'
+                throw 'A file outside the source directory was detected.'
             }
 
             $relative = $item.FullName.Substring($rootPrefix.Length).Replace('\', '/')
@@ -69,10 +69,10 @@ function Get-SafeFileInventory {
             })
 
             if ($files.Count -gt $FileLimit) {
-                throw ('Zrodlo przekracza limit ' + $FileLimit + ' plikow.')
+                throw ('The source exceeds the limit of ' + $FileLimit + ' files.')
             }
             if ($totalBytes -gt $ByteLimit) {
-                throw ('Zrodlo przekracza limit ' + $MaxTotalSizeMiB + ' MiB.')
+                throw ('The source exceeds the limit of ' + $MaxTotalSizeMiB + ' MiB.')
             }
         }
     }
@@ -139,30 +139,30 @@ function Copy-FileExclusive {
 
 $sourceRoot = [IO.Path]::GetFullPath($SourcePath).TrimEnd('\', '/')
 if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) {
-    throw 'SourcePath nie istnieje lub nie jest katalogiem.'
+    throw 'SourcePath does not exist or is not a directory.'
 }
 $sourceItem = Get-Item -LiteralPath $sourceRoot -Force
 if (($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-    throw 'SourcePath nie moze byc reparse pointem.'
+    throw 'SourcePath cannot be a reparse point.'
 }
 
 if (-not [IO.Path]::IsPathRooted($DestinationRoot)) {
-    throw 'DestinationRoot musi byc jawna, bezwzgledna sciezka.'
+    throw 'DestinationRoot must be an explicit absolute path.'
 }
 $destinationFull = [IO.Path]::GetFullPath($DestinationRoot).TrimEnd('\', '/')
 if (Test-Path -LiteralPath $destinationFull) {
     $destinationItem = Get-Item -LiteralPath $destinationFull -Force
     if (-not $destinationItem.PSIsContainer) {
-        throw 'DestinationRoot istnieje, ale nie jest katalogiem.'
+        throw 'DestinationRoot exists but is not a directory.'
     }
     if (($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw 'DestinationRoot nie moze byc reparse pointem.'
+        throw 'DestinationRoot cannot be a reparse point.'
     }
 }
 if ($destinationFull.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase) -or
     (Test-PathWithin -Parent $sourceRoot -Child $destinationFull) -or
     (Test-PathWithin -Parent $destinationFull -Child $sourceRoot)) {
-    throw 'Zrodlo i katalog docelowy nie moga sie pokrywac ani zawierac nawzajem.'
+    throw 'The source and destination directories cannot overlap or contain one another.'
 }
 
 if ([string]::IsNullOrWhiteSpace($BackupName)) {
@@ -170,26 +170,26 @@ if ([string]::IsNullOrWhiteSpace($BackupName)) {
 }
 if ($BackupName.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
     $BackupName.Contains('\') -or $BackupName.Contains('/')) {
-    throw 'BackupName musi byc pojedyncza, bezpieczna nazwa katalogu.'
+    throw 'BackupName must be a single safe directory name.'
 }
 
 $backupPath = [IO.Path]::GetFullPath((Join-Path $destinationFull $BackupName))
 if (-not (Test-PathWithin -Parent $destinationFull -Child $backupPath)) {
-    throw 'BackupName wskazuje poza DestinationRoot.'
+    throw 'BackupName points outside DestinationRoot.'
 }
 if (Test-Path -LiteralPath $backupPath) {
-    throw 'Katalog backupu juz istnieje; skrypt odmawia nadpisania.'
+    throw 'The backup directory already exists; the script refuses to overwrite it.'
 }
 
 $maxTotalBytes = [int64]$MaxTotalSizeMiB * 1MB
 $inventory = Get-SafeFileInventory -Root $sourceRoot -FileLimit $MaxFiles -ByteLimit $maxTotalBytes
 if ($inventory.Files.Count -eq 0) {
-    throw 'W SourcePath nie znaleziono zadnych plikow save.'
+    throw 'No save files were found in SourcePath.'
 }
 
-if (-not $PSCmdlet.ShouldProcess($backupPath, ('Utworzenie copy-only backupu ' + $inventory.Files.Count + ' plikow'))) {
-    Write-Output ('Dry-run: pliki=' + $inventory.Files.Count + ', bajty=' + $inventory.TotalBytes +
-        ', katalog=' + $backupPath)
+if (-not $PSCmdlet.ShouldProcess($backupPath, ('Create a copy-only backup of ' + $inventory.Files.Count + ' files'))) {
+    Write-Output ('Dry-run: files=' + $inventory.Files.Count + ', bytes=' + $inventory.TotalBytes +
+        ', directory=' + $backupPath)
     return
 }
 
@@ -197,7 +197,7 @@ if (-not (Test-Path -LiteralPath $destinationFull -PathType Container)) {
     $null = New-Item -ItemType Directory -Path $destinationFull
 }
 if (Test-Path -LiteralPath $backupPath) {
-    throw 'Katalog backupu pojawil sie w trakcie operacji; skrypt odmawia nadpisania.'
+    throw 'The backup directory appeared during the operation; the script refuses to overwrite it.'
 }
 $null = New-Item -ItemType Directory -Path $backupPath
 
@@ -206,10 +206,10 @@ foreach ($file in $inventory.Files) {
     $relativeNative = $file.RelativePath.Replace('/', [IO.Path]::DirectorySeparatorChar)
     $targetPath = [IO.Path]::GetFullPath((Join-Path $backupPath $relativeNative))
     if (-not (Test-PathWithin -Parent $backupPath -Child $targetPath)) {
-        throw 'Wykryto niebezpieczna sciezke wzgledna w zrodle.'
+        throw 'An unsafe relative path was detected in the source.'
     }
     if (Test-Path -LiteralPath $targetPath) {
-        throw ('Plik docelowy juz istnieje: ' + $file.RelativePath)
+        throw ('The destination file already exists: ' + $file.RelativePath)
     }
 
     $targetDirectory = Split-Path -Parent $targetPath
@@ -221,7 +221,7 @@ foreach ($file in $inventory.Files) {
     Copy-FileExclusive -Source $file.SourcePath -Destination $targetPath
     $targetHash = Get-FileSha256 -Path $targetPath
     if ($targetHash -ne $sourceHash) {
-        throw ('Weryfikacja kopii nie powiodla sie dla: ' + $file.RelativePath)
+        throw ('Copy verification failed for: ' + $file.RelativePath)
     }
 
     $manifestEntries.Add([pscustomobject]@{
@@ -247,7 +247,7 @@ $manifest = [ordered]@{
 
 $manifestPath = Join-Path $backupPath 'backup-manifest.json'
 if (Test-Path -LiteralPath $manifestPath) {
-    throw 'Manifest backupu juz istnieje; skrypt odmawia nadpisania.'
+    throw 'The backup manifest already exists; the script refuses to overwrite it.'
 }
 $manifestJson = $manifest | ConvertTo-Json -Depth 7
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
@@ -270,6 +270,6 @@ finally {
     $stream.Dispose()
 }
 
-Write-Output ('Backup gotowy: ' + $backupPath)
-Write-Output ('Pliki: ' + $manifestEntries.Count + '; bajty: ' + $inventory.TotalBytes +
+Write-Output ('Backup ready: ' + $backupPath)
+Write-Output ('Files: ' + $manifestEntries.Count + '; bytes: ' + $inventory.TotalBytes +
     '; hash zestawu: ' + $manifest.ContentSetSha256)

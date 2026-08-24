@@ -11,7 +11,7 @@ public static class SidecarConfiguration
         if (!Enum.IsDefined(settings.MotionReplicationMode))
         {
             throw new LauncherException(
-                "Wybrany silnik replikacji ruchu jest nieobsługiwany.");
+                "The selected motion replication engine is unsupported.");
         }
 
         try
@@ -21,8 +21,8 @@ public static class SidecarConfiguration
         catch (ArgumentException exception)
         {
             throw new LauncherException(
-                "Nick musi miec 1-24 znaki, maksymalnie 64 bajty UTF-8, " +
-                "bez znakow sterujacych.",
+                "Nickname must contain 1-24 characters and at most 64 UTF-8 bytes, " +
+                "with no control characters.",
                 exception);
         }
         if (!string.IsNullOrWhiteSpace(settings.SessionToken))
@@ -42,7 +42,7 @@ public static class SidecarConfiguration
                     StringComparison.OrdinalIgnoreCase))
             {
                 throw new LauncherException(
-                    "Wybrany save hosta musi byc istniejacym lokalnym plikiem SRDR*.");
+                    "The selected host save must be an existing local SRDR* file.");
             }
         }
     }
@@ -68,7 +68,7 @@ public static class SidecarConfiguration
             LauncherMotionReplicationMode.AnimGraphReplica =>
                 "animgraph_replica",
             _ => throw new LauncherException(
-                "Wybrany silnik replikacji ruchu jest nieobsługiwany.")
+                "The selected motion replication engine is unsupported.")
         };
         var launcherSessionReady =
             !string.IsNullOrWhiteSpace(settings.HostAddress) &&

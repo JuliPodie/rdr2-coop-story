@@ -102,7 +102,7 @@ public sealed record LauncherPaths(
         if (string.IsNullOrWhiteSpace(localAppData))
         {
             throw new LauncherException(
-                "System nie udostępnił katalogu LocalAppData.");
+                "The system did not provide a LocalAppData directory.");
         }
 
         return CreateUnder(Path.Combine(localAppData, "RDR2CoopStory", "launcher"));

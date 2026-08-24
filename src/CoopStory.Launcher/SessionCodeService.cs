@@ -11,8 +11,8 @@ public static class SessionCodeService
         if (string.IsNullOrWhiteSpace(token))
         {
             throw new LauncherException(
-                "Kod sesji jest pusty. Host powinien kliknąć „Nowy kod”, " +
-                "a następnie bezpiecznie przekazać go znajomemu.");
+                "The session code is empty. The host should click 'New code' " +
+                "and share it with the invited player through a private channel.");
         }
 
         try
@@ -21,7 +21,7 @@ public static class SessionCodeService
         }
         catch (FormatException exception)
         {
-            throw new LauncherException("Kod sesji ma nieprawidłowy format.", exception);
+            throw new LauncherException("The session code has an invalid format.", exception);
         }
     }
 }

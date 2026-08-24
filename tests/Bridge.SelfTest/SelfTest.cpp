@@ -2005,7 +2005,7 @@ void MenuEdges() {
     CHECK(columnMenu.Selection() == 0U);
     CHECK(
         MenuController::Label(BridgeCommand::StopSession) ==
-        "Zatrzymaj sesje coop");
+        "Stop co-op session");
     CHECK(
         MenuController::Label(BridgeCommand::ToggleGhostRecord) ==
         "Ghost Record: start / stop");
@@ -2014,19 +2014,19 @@ void MenuEdges() {
         "Ghost Replay: start / stop");
     CHECK(
         MenuController::Label(BridgeCommand::GrantTestPistol) ==
-        "Daj pistolet + max ammo (test)");
+        "Give pistol + max ammo (test)");
     CHECK(
         MenuController::Label(BridgeCommand::GrantTestLasso) ==
-        "Daj lasso (test)");
+        "Give lasso (test)");
     CHECK(
         MenuController::Label(BridgeCommand::SkipCutscene) ==
-        "Glosuj: pomin cutscenke");
+        "Vote: skip cutscene");
     CHECK(
         MenuController::Label(BridgeCommand::EmergencyRecover) ==
-        "Ratunek awaryjny gracza");
+        "Emergency player recovery");
     CHECK(
         MenuController::Label(BridgeCommand::SaveProblemMarker) ==
-        "Zapisz znacznik problemu");
+        "Save problem marker");
 }
 
 void SessionOverlayAndPayloads() {
@@ -2058,7 +2058,7 @@ void SessionOverlayAndPayloads() {
     CHECK(
         SessionMenuController::Label(
             SessionOverlayAction::StopSession) ==
-        "ZATRZYMAJ BIEZACA SESJE COOP");
+        "STOP THE CURRENT CO-OP SESSION");
     menu.MarkSessionStopped("stopped");
     CHECK(!menu.IsSessionReady());
     CHECK(!menu.IsOpen());
@@ -7898,7 +7898,7 @@ void RuntimeStructuredDiagnosticsAreRateLimitedAndCorrelated() {
     CHECK(HasLog(facade, "[PROBLEM_SNAPSHOT] correlation="));
     CHECK(!facade.notifications.empty());
     CHECK(
-        facade.notifications.back().find("MARKER ERROR #1 ZAPISANY") !=
+        facade.notifications.back().find("MARKER ERROR #1 SAVED") !=
         std::string::npos);
     CHECK(
         CountLogs(facade, "[SESSION_HEALTH]") ==
@@ -9357,7 +9357,7 @@ void RuntimeSessionOverlay() {
     CHECK(transport.sent.size() == 1U);
     CHECK(facade.sessionMenuPhase == SessionOverlayPhase::Error);
     CHECK(
-        facade.sessionMenuStatus.find("Brak aktywnej sesji") !=
+        facade.sessionMenuStatus.find("There is no active session") !=
         std::string::npos);
 }
 
@@ -9398,7 +9398,7 @@ void RuntimeJoinRequiresFreshClipboardCode() {
         facade.sessionMenuStatus.find("R2C1") !=
         std::string::npos);
     CHECK(
-        facade.sessionMenuStatus.find("swiezy") !=
+        facade.sessionMenuStatus.find("fresh") !=
         std::string::npos);
 }
 
@@ -9433,7 +9433,7 @@ void RuntimeJoinRejectsUnsafeGuestSave() {
         facade.sessionMenuPhase ==
         SessionOverlayPhase::Error);
     CHECK(
-        facade.sessionMenuStatus.find("poza misja") !=
+        facade.sessionMenuStatus.find("outside a mission") !=
         std::string::npos);
     CHECK(HasLog(facade, "[WARNING][MISSION_PREFLIGHT]"));
 

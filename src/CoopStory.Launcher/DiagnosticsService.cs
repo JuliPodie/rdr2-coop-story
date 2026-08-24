@@ -28,7 +28,7 @@ public sealed class DiagnosticsService(
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         var target = Path.GetFullPath(destination);
         var parent = Path.GetDirectoryName(target)
-            ?? throw new LauncherException("Ścieżka diagnostyki nie ma katalogu.");
+            ?? throw new LauncherException("The diagnostics path has no directory.");
         Directory.CreateDirectory(parent);
         var temporaryTarget = Path.Combine(
             parent,
@@ -185,7 +185,7 @@ public sealed class DiagnosticsService(
 
         logger.Info(
             "diagnostics.exported",
-            $"Wyeksportowano diagnostykę do {target}; sekret uwierzytelniania został zredagowany.");
+            $"Diagnostics exported to {target}; the authentication secret was redacted.");
         return target;
     }
 
@@ -524,10 +524,10 @@ public sealed class DiagnosticsService(
             localRole);
 
         var output = new StringBuilder();
-        output.AppendLine("RDR2 COOP STORY - POSORTOWANY INDEKS DIAGNOSTYKI");
-        output.AppendLine($"Wygenerowano UTC: {DateTimeOffset.UtcNow:o}");
+        output.AppendLine("RDR2 COOP STORY - SORTED DIAGNOSTICS INDEX");
+        output.AppendLine($"Generated UTC: {DateTimeOffset.UtcNow:o}");
         output.AppendLine(
-            "To indeks pomocniczy. Pelne, zredagowane logi sa w katalogu logs/ tego ZIP-a.");
+            "This is a helper index. Complete redacted logs are in the logs/ directory of this ZIP.");
         foreach (var group in groups)
         {
             output.AppendLine();
@@ -535,7 +535,7 @@ public sealed class DiagnosticsService(
                 $"===== {group.Key} (matches={matchCounts[group.Key]}, newest={group.Value.Count}) =====");
             if (group.Value.Count == 0)
             {
-                output.AppendLine("(brak dopasowanych wpisow)");
+                output.AppendLine("(no matching entries)");
                 continue;
             }
             foreach (var line in group.Value)
@@ -568,13 +568,13 @@ public sealed class DiagnosticsService(
             output.ToString(),
             summaryJson,
             CreateExtractedText(
-                "RDR2 COOP STORY - NAJNOWSZE BLEDY",
+                "RDR2 COOP STORY - LATEST ERRORS",
                 groups["ERRORS"]),
             CreateExtractedText(
-                "RDR2 COOP STORY - NAJNOWSZE OSTRZEZENIA",
+                "RDR2 COOP STORY - LATEST WARNINGS",
                 groups["WARNINGS"]),
             CreateExtractedText(
-                "RDR2 COOP STORY - NAJNOWSZE PODSUMOWANIA RUNTIME",
+                "RDR2 COOP STORY - LATEST RUNTIME SUMMARIES",
                 groups["RUNTIME_SUMMARIES"]),
             analysis);
     }
@@ -589,11 +589,11 @@ public sealed class DiagnosticsService(
         var output = new StringBuilder();
         output.AppendLine(heading);
         output.AppendLine(
-            $"Pokazano {Math.Min(lines.Count, MaximumExtractedLines)} najnowszych wpisow.");
+            $"Showing {Math.Min(lines.Count, MaximumExtractedLines)} latest entries.");
         var selected = Newest(lines);
         if (selected.Length == 0)
         {
-            output.AppendLine("(brak dopasowanych wpisow)");
+            output.AppendLine("(no matching entries)");
         }
         else
         {

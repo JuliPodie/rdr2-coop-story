@@ -1132,32 +1132,32 @@ internal static partial class DiagnosticsTimelineAnalyzer
         DateTimeOffset generatedAtUtc)
     {
         var output = new StringBuilder();
-        output.AppendLine("# RDR2 Coop Story - okna znacznikow F7");
+        output.AppendLine("# RDR2 Coop Story - F7 marker windows");
         output.AppendLine();
         output.AppendLine(
-            $"Eksport: **{localRole}**, UTC `{generatedAtUtc:o}`.");
+            $"Export: **{localRole}**, UTC `{generatedAtUtc:o}`.");
         output.AppendLine(
-            $"Kazdy znacznik pokazuje kontekst od {MarkerWindowBeforeMilliseconds / 1_000} s przed do {MarkerWindowAfterMilliseconds / 1_000} s po nacisnieciu F7.");
+            $"Each marker shows context from {MarkerWindowBeforeMilliseconds / 1_000} s before to {MarkerWindowAfterMilliseconds / 1_000} s after pressing F7.");
         output.AppendLine();
         if (windows.Count == 0)
         {
-            output.AppendLine("Nie znaleziono znacznikow F7 w zachowanych logach.");
+            output.AppendLine("No F7 markers were found in the preserved logs.");
             return output.ToString();
         }
         foreach (var window in windows)
         {
             output.AppendLine(
-                $"## Marker `{window.CorrelationId}` - {window.Anchor.TimestampUtc?.ToString("O") ?? "bez czasu"}");
+                $"## Marker `{window.CorrelationId}` - {window.Anchor.TimestampUtc?.ToString("O") ?? "no timestamp"}");
             output.AppendLine();
             output.AppendLine(
-                $"Sesja: `{window.Anchor.SessionFingerprint ?? "legacy"}`, zdarzenia markerowe: {string.Join(", ", window.MarkerEvents.Select(static item => $"#{item.Id}"))}.");
+                $"Session: `{window.Anchor.SessionFingerprint ?? "legacy"}`, marker events: {string.Join(", ", window.MarkerEvents.Select(static item => $"#{item.Id}"))}.");
             output.AppendLine();
-            output.AppendLine("| UTC | Rola | Kategoria | Zrodlo | Zdarzenie |");
+            output.AppendLine("| UTC | Role | Category | Source | Event |");
             output.AppendLine("|---|---|---|---|---|");
             foreach (var item in window.ContextEvents)
             {
                 output.Append('|')
-                    .Append(item.TimestampUtc?.ToString("O") ?? "bez czasu")
+                    .Append(item.TimestampUtc?.ToString("O") ?? "no timestamp")
                     .Append('|').Append(EscapeMarkdown(item.Role))
                     .Append('|').Append(EscapeMarkdown(
                         string.Join(", ", item.Categories)))
@@ -1197,23 +1197,23 @@ internal static partial class DiagnosticsTimelineAnalyzer
         DateTimeOffset generatedAtUtc)
     {
         var output = new StringBuilder();
-        output.AppendLine("# RDR2 Coop Story - timeline diagnostyczny");
+        output.AppendLine("# RDR2 Coop Story - diagnostics timeline");
         output.AppendLine();
-        output.AppendLine($"- Wygenerowano UTC: `{generatedAtUtc:o}`");
-        output.AppendLine($"- Strona eksportu: **{localRole}**");
+        output.AppendLine($"- Generated UTC: `{generatedAtUtc:o}`");
+        output.AppendLine($"- Exporting side: **{localRole}**");
         output.AppendLine(
-            $"- Najnowsza sesja: `{latestSessionFingerprint ?? "legacy/brak"}`.");
+            $"- Latest session: `{latestSessionFingerprint ?? "legacy/none"}`.");
         output.AppendLine(
-            $"- Zdarzenia: **{events.Count}** zachowanych z **{totalRelevantEvents}** pasujacych.");
+            $"- Events: **{events.Count}** retained out of **{totalRelevantEvents}** matching events.");
         output.AppendLine(
-            "- Rola oznacza strone, ktora zapisala zdarzenie; jawne `role=Host/Guest` ma pierwszenstwo.");
+            "- Role identifies the side that logged an event; an explicit `role=Host/Guest` takes precedence.");
         output.AppendLine();
-        output.AppendLine("| UTC | Sesja | Rola | Kategoria | Zrodlo | Zdarzenie |");
+        output.AppendLine("| UTC | Session | Role | Category | Source | Event |");
         output.AppendLine("|---|---|---|---|---|---|");
         foreach (var item in events)
         {
             output.Append('|')
-                .Append(item.TimestampUtc?.ToString("O") ?? "bez czasu")
+                .Append(item.TimestampUtc?.ToString("O") ?? "no timestamp")
                 .Append('|').Append(item.SessionFingerprint ?? "legacy")
                 .Append('|').Append(EscapeMarkdown(item.Role))
                 .Append('|').Append(EscapeMarkdown(string.Join(", ", item.Categories)))
@@ -1224,7 +1224,7 @@ internal static partial class DiagnosticsTimelineAnalyzer
         }
         if (events.Count == 0)
         {
-            output.AppendLine("| - | - | - | - | - | Brak pasujacych zdarzen. |");
+            output.AppendLine("| - | - | - | - | - | No matching events. |");
         }
         return output.ToString();
     }
@@ -1242,24 +1242,24 @@ internal static partial class DiagnosticsTimelineAnalyzer
         DateTimeOffset generatedAtUtc)
     {
         var output = new StringBuilder();
-        output.AppendLine("# RDR2 Coop Story - anomalie i korelacja");
+        output.AppendLine("# RDR2 Coop Story - anomalies and correlation");
         output.AppendLine();
-        output.AppendLine($"Eksport: **{localRole}**, UTC `{generatedAtUtc:o}`.");
+        output.AppendLine($"Export: **{localRole}**, UTC `{generatedAtUtc:o}`.");
         output.AppendLine(
-            $"Najnowsza sesja: `{latestSessionFingerprint ?? "legacy/brak"}`.");
+            $"Latest session: `{latestSessionFingerprint ?? "legacy/none"}`.");
         output.AppendLine(
-            $"Wykryto **{totalDetectedAnomalies}** anomalii; raport zachowal **{anomalies.Count}**.");
+            $"Detected **{totalDetectedAnomalies}** anomalies; the report retained **{anomalies.Count}**.");
         output.AppendLine();
-        AppendFirst("Pierwszy rozjazd", firstDivergence);
-        AppendFirst("Pierwszy rozjazd gracza", firstPlayer);
-        AppendFirst("Pierwszy rozjazd encji", firstEntity);
+        AppendFirst("First divergence", firstDivergence);
+        AppendFirst("First player divergence", firstPlayer);
+        AppendFirst("First entity divergence", firstEntity);
         output.AppendLine();
-        output.AppendLine("## Statystyki (gdy log zawieral liczby)");
+        output.AppendLine("## Statistics (when the log contained numbers)");
         output.AppendLine();
         using (var document = JsonDocument.Parse(
                    JsonSerializer.Serialize(statistics, JsonSupport.Options)))
         {
-            output.AppendLine("| Metryka | Probki | P50 | P95 | P99 | Max |");
+            output.AppendLine("| Metric | Samples | P50 | P95 | P99 | Max |");
             output.AppendLine("|---|---:|---:|---:|---:|---:|");
             foreach (var property in document.RootElement.EnumerateObject())
             {
@@ -1275,14 +1275,14 @@ internal static partial class DiagnosticsTimelineAnalyzer
             }
         }
         output.AppendLine();
-        output.AppendLine("## Anomalie chronologicznie");
+        output.AppendLine("## Anomalies in chronological order");
         output.AppendLine();
-        output.AppendLine("| UTC | Sesja | Rola | Rodzaj | Zdarzenie | Korelacja (ID timeline) |");
+        output.AppendLine("| UTC | Session | Role | Type | Event | Correlation (timeline ID) |");
         output.AppendLine("|---|---|---|---|---|---|");
         foreach (var view in anomalies)
         {
             var item = view.Event;
-            output.Append('|').Append(item.TimestampUtc?.ToString("O") ?? "bez czasu")
+            output.Append('|').Append(item.TimestampUtc?.ToString("O") ?? "no timestamp")
                 .Append('|').Append(item.SessionFingerprint ?? "legacy")
                 .Append('|').Append(EscapeMarkdown(item.Role))
                 .Append('|').Append(EscapeMarkdown(PrimaryCategory(item)))
@@ -1293,11 +1293,11 @@ internal static partial class DiagnosticsTimelineAnalyzer
         }
         if (anomalies.Count == 0)
         {
-            output.AppendLine("| - | - | - | - | Brak wykrytych anomalii. | - |");
+            output.AppendLine("| - | - | - | - | No anomalies detected. | - |");
         }
         output.AppendLine();
         output.AppendLine(
-            $"Korelacja obejmuje zdarzenia z obu rol w oknie +/- {CorrelationWindowMilliseconds} ms. Pelny kontekst jest w `TIMELINE.json` ({timeline.Count} zdarzen).");
+            $"Correlation includes events from both roles within +/- {CorrelationWindowMilliseconds} ms. Full context is in `TIMELINE.json` ({timeline.Count} events).");
         return output.ToString();
 
         void AppendFirst(string label, TimelineEvent? item)
@@ -1305,11 +1305,11 @@ internal static partial class DiagnosticsTimelineAnalyzer
             output.Append("- **").Append(label).Append(":** ");
             if (item is null)
             {
-                output.AppendLine("brak danych.");
+                output.AppendLine("no data.");
                 return;
             }
-            output.Append('`').Append(item.TimestampUtc?.ToString("O") ?? "bez czasu")
-                .Append("`, sesja `")
+            output.Append('`').Append(item.TimestampUtc?.ToString("O") ?? "no timestamp")
+                .Append("`, session `")
                 .Append(item.SessionFingerprint ?? "legacy")
                 .Append("`, ").Append(item.Role).Append(", #")
                 .Append(item.Id).Append(' ').Append(item.EventName)

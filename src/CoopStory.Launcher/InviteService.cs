@@ -49,7 +49,7 @@ public static class InviteService
                 invite.UdpPort != 43121)
             {
                 throw new LauncherException(
-                    "Plik zaproszenia ma nieobsługiwaną wersję albo porty.");
+                    "The invitation file has an unsupported version or port configuration.");
             }
 
             _ = ValidateRemoteHost(invite.HostAddress);
@@ -64,7 +64,7 @@ public static class InviteService
         catch (JsonException exception)
         {
             throw new LauncherException(
-                "Plik zaproszenia jest uszkodzony albo nie jest JSON-em.", exception);
+                "The invitation file is corrupted or is not valid JSON.", exception);
         }
     }
 
@@ -119,7 +119,7 @@ public static class InviteService
             host.IndexOfAny(['/', '\\', ':', '@', '?', '#']) >= 0)
         {
             throw new LauncherException(
-                "Brak prawidłowego adresu LAN hosta. Wpisz np. 192.168.1.25.");
+                "No valid host LAN address was provided. For example, enter 192.168.1.25.");
         }
 
         if (IPAddress.TryParse(host, out var address))
@@ -127,7 +127,7 @@ public static class InviteService
             if (address.AddressFamily != AddressFamily.InterNetwork)
             {
                 throw new LauncherException(
-                    "Protokół PoC obsługuje obecnie tylko adres IPv4 hosta.");
+                    "The proof-of-concept protocol currently supports only a host IPv4 address.");
             }
 
             var octets = address.GetAddressBytes();
@@ -139,8 +139,8 @@ public static class InviteService
                 octets[0] is >= 224 and <= 239)
             {
                 throw new LauncherException(
-                    "Adres hosta nie może być localhostem, 0.0.0.0, " +
-                    "broadcastem ani adresem multicast.");
+                    "The host address cannot be localhost, 0.0.0.0, a broadcast " +
+                    "address, or a multicast address.");
             }
 
             return host;
@@ -155,7 +155,7 @@ public static class InviteService
             host.Equals("localhost.localdomain", StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                "Brak prawidłowego adresu LAN hosta. Wpisz np. 192.168.1.25.");
+                "No valid host LAN address was provided. For example, enter 192.168.1.25.");
         }
 
         return host;

@@ -107,7 +107,7 @@ public static class LocalGameTestSession
                 if (mode == LocalSoloTestMode.Recording)
                 {
                     throw new InvalidOperationException(
-                        "Najpierw zatrzymaj Ghost Record, aby bezpiecznie zapisac trase.");
+                        "Stop Ghost Record first so the route can be saved safely.");
                 }
                 enabled = mode != LocalSoloTestMode.Automatic;
                 mode = enabled
@@ -166,7 +166,7 @@ public static class LocalGameTestSession
                 if (mode == LocalSoloTestMode.Recording)
                 {
                     throw new InvalidOperationException(
-                        "Najpierw zatrzymaj Ghost Record, a potem uruchom Ghost Replay.");
+                        "Stop Ghost Record before starting Ghost Replay.");
                 }
                 if (mode == LocalSoloTestMode.Replaying)
                 {

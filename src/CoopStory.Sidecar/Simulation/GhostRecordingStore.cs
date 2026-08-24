@@ -209,8 +209,8 @@ internal sealed class GhostRecordingStore
             if (_frames.Count < 2)
             {
                 throw new InvalidOperationException(
-                    "Ghost Record nie ma jeszcze wystarczajaco danych. " +
-                    "Wczytaj save, przejdz trase i dopiero zatrzymaj nagranie.");
+                    "Ghost Record does not have enough data yet. " +
+                    "Load a save, travel the route, and only then stop recording.");
             }
             document = new GhostRecordingDocument(
                 CurrentFormatVersion,
@@ -229,12 +229,12 @@ internal sealed class GhostRecordingStore
         if (!info.Exists)
         {
             throw new InvalidOperationException(
-                "Brak nagrania Ghost Record. Najpierw nagraj i zatrzymaj trase.");
+                "No Ghost Record exists. Record and stop a route first.");
         }
         if (info.Length is <= 0 or > MaximumFileBytes)
         {
             throw new InvalidDataException(
-                "Plik Ghost Record ma nieprawidlowy rozmiar.");
+                "The Ghost Record file has an invalid size.");
         }
 
         using var stream = new FileStream(
@@ -248,7 +248,7 @@ internal sealed class GhostRecordingStore
                            stream,
                            JsonOptions)
                        ?? throw new InvalidDataException(
-                           "Plik Ghost Record jest pusty lub uszkodzony.");
+                           "The Ghost Record file is empty or corrupted.");
         ValidateDocument(document);
         return document;
     }
@@ -258,7 +258,7 @@ internal sealed class GhostRecordingStore
         ValidateDocument(document);
         var parent = System.IO.Path.GetDirectoryName(_path)
             ?? throw new InvalidDataException(
-                "Sciezka Ghost Record nie ma katalogu nadrzednego.");
+                "The Ghost Record path has no parent directory.");
         Directory.CreateDirectory(parent);
         var temporaryPath = System.IO.Path.Combine(
             parent,
@@ -269,7 +269,7 @@ internal sealed class GhostRecordingStore
             if (bytes.LongLength > MaximumFileBytes)
             {
                 throw new InvalidDataException(
-                    "Nagranie Ghost Record przekracza bezpieczny limit 16 MB.");
+                    "The Ghost Record exceeds the safe 16 MB limit.");
             }
             using (var stream = new FileStream(
                        temporaryPath,
@@ -298,14 +298,14 @@ internal sealed class GhostRecordingStore
         if (document.FormatVersion is < 1 or > CurrentFormatVersion)
         {
             throw new InvalidDataException(
-                $"Nieobslugiwana wersja Ghost Record: {document.FormatVersion}.");
+                $"Unsupported Ghost Record version: {document.FormatVersion}.");
         }
         if (document.SnapshotRateHz is < 1 or > 120 ||
             document.Frames is null ||
             document.Frames.Count is < 2 or > MaximumFrames)
         {
             throw new InvalidDataException(
-                "Plik Ghost Record ma nieprawidlowe parametry lub liczbe klatek.");
+                "The Ghost Record file has invalid parameters or frame count.");
         }
 
         var previousOffset = 0;
@@ -316,7 +316,7 @@ internal sealed class GhostRecordingStore
             if (index == 0 && frame.OffsetMilliseconds != 0)
             {
                 throw new InvalidDataException(
-                    "Pierwsza klatka Ghost Record nie zaczyna sie od zera.");
+                    "The first Ghost Record frame does not start at zero.");
             }
             previousOffset = frame.OffsetMilliseconds;
         }
@@ -360,7 +360,7 @@ internal sealed class GhostRecordingStore
              ~(EquipmentStateFlags.Equipped | EquipmentStateFlags.Reloading)) != 0)
         {
             throw new InvalidDataException(
-                "Ghost Record zawiera nieprawidlowa klatke ruchu.");
+                "Ghost Record contains an invalid motion frame.");
         }
     }
 

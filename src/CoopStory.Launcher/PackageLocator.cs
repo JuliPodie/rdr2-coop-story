@@ -27,8 +27,8 @@ public static class PackageLocator
         }
 
         throw new LauncherException(
-            "Nie znaleziono kompletnej paczki moda. Oczekiwano " +
-            "CoopStoryBridge.asi oraz sidecar\\CoopStory.Sidecar.exe obok launchera.");
+            "A complete mod package was not found. Expected " +
+            "CoopStoryBridge.asi and sidecar\\CoopStory.Sidecar.exe next to the launcher.");
     }
 
     public static bool TryCreate(string root, out PackageLayout layout)
@@ -68,7 +68,7 @@ public static class PackageLocator
         if (!Directory.Exists(root) || IsReparsePoint(root))
         {
             throw new LauncherException(
-                "Wybrany katalog ScriptHook nie istnieje albo jest dowiązaniem.");
+                "The selected Script Hook directory does not exist or is a symbolic link.");
         }
 
         foreach (var candidate in new[] { root, Path.Combine(root, "bin") })
@@ -88,7 +88,7 @@ public static class PackageLocator
             if (IsReparsePoint(scriptHook) || IsReparsePoint(dinput))
             {
                 throw new LauncherException(
-                    "Pliki runtime ScriptHook nie mogą być dowiązaniami.");
+                    "Script Hook runtime files cannot be symbolic links.");
             }
 
             return new RuntimeLayout(
@@ -100,7 +100,7 @@ public static class PackageLocator
         }
 
         throw new LauncherException(
-            "W wybranym folderze ani jego podfolderze bin nie znaleziono " +
+            "The selected folder and its bin subfolder do not contain " +
             "ScriptHookRDR2.dll i dinput8.dll.");
     }
 

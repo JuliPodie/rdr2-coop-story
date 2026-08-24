@@ -22,11 +22,9 @@ $bridge = [IO.Path]::GetFullPath($BridgePath)
 $launcherProject = Join-Path $workspace 'src\CoopStory.Launcher\CoopStory.Launcher.csproj'
 $sidecarProject = Join-Path $workspace 'src\CoopStory.Sidecar\CoopStory.Sidecar.csproj'
 $configSource = Join-Path $workspace 'src\CoopStory.Sidecar\sidecar.config.example.json'
-$readmeSource = Join-Path $workspace 'packaging\PRZECZYTAJ_MNIE.txt'
-$v29TestSource = Join-Path $workspace 'docs\TEST_V29_ANIMSCENE_METAPED.md'
-$v30TestSource = Join-Path $workspace 'docs\TEST_V30_ANIMGRAPH.md'
-$v31TestSource = Join-Path $workspace 'docs\TEST_V31_ANIMSCENE_HYBRID.md'
-$batSource = Join-Path $workspace 'packaging\URUCHOM_COOP.bat'
+$readmeSource = Join-Path $workspace 'packaging\README.txt'
+$testGuideSource = Join-Path $workspace 'docs\TESTING.md'
+$batSource = Join-Path $workspace 'packaging\START_COOP.bat'
 
 function Test-PathWithin {
     param(
@@ -89,26 +87,26 @@ function Assert-PeX64Dll {
     $stream = [IO.File]::OpenRead($Path)
     try {
         if ($stream.Length -lt 512) {
-            throw 'Bridge ASI jest zbyt maly.'
+            throw 'Bridge ASI is too small.'
         }
         $reader = New-Object IO.BinaryReader($stream)
         try {
             if ($reader.ReadUInt16() -ne 0x5A4D) {
-                throw 'Bridge ASI nie ma sygnatury MZ.'
+                throw 'Bridge ASI does not have an MZ signature.'
             }
             $stream.Position = 0x3C
             $peOffset = $reader.ReadInt32()
             if ($peOffset -lt 0x40 -or ($peOffset + 26) -gt $stream.Length) {
-                throw 'Bridge ASI ma nieprawidlowy naglowek PE.'
+                throw 'Bridge ASI has an invalid PE header.'
             }
             $stream.Position = $peOffset
             if ($reader.ReadUInt32() -ne 0x00004550 -or
                 $reader.ReadUInt16() -ne 0x8664) {
-                throw 'Bridge ASI nie jest obrazem PE x64.'
+                throw 'Bridge ASI is not an x64 PE image.'
             }
             $stream.Position = $peOffset + 22
             if (($reader.ReadUInt16() -band 0x2000) -eq 0) {
-                throw 'Bridge ASI nie ma charakterystyki DLL.'
+                throw 'Bridge ASI does not have the DLL characteristic.'
             }
         }
         finally {
@@ -135,9 +133,9 @@ function Assert-ActiveBridgeCapability {
         [StringComparison]::Ordinal) -ge 0
     if (-not $hasEnabledMarker -or $hasDisabledMarker) {
         throw (
-            'Bridge ASI nie ma jednoznacznego markera aktywnych native bindings. ' +
-            'Zbuduj jawny preset bridge-asi-vs2022 lub bridge-asi-vs2026; ' +
-            'paczka nie moze zawierac bezpiecznego, lecz nieaktywnego stuba.')
+            'Bridge ASI does not contain an unambiguous active-native-bindings marker. ' +
+            'Build the explicit bridge-asi-vs2022 or bridge-asi-vs2026 preset; ' +
+            'the package cannot contain a safe but inactive stub.')
     }
 }
 
@@ -169,8 +167,8 @@ function Assert-BridgeFreshness {
     if ($null -eq $newest -or
         $bridgeItem.LastWriteTimeUtc -lt $newest.LastWriteTimeUtc) {
         throw (
-            'Bridge ASI jest starszy niz kod lub konfiguracja builda. ' +
-            'Wykonaj nowy warning-clean build private-validation.')
+            'Bridge ASI is older than the source or build configuration. ' +
+            'Create a new warning-clean private-validation build.')
     }
 }
 
@@ -201,7 +199,7 @@ function Assert-NoPrivateBuildPaths {
                     $needle,
                     [StringComparison]::OrdinalIgnoreCase) -ge 0) {
                 throw (
-                    'Paczka zawiera prywatna sciezke builda w pliku: ' +
+                    'The package contains a private build path in file: ' +
                     $file.FullName)
             }
         }
@@ -209,16 +207,16 @@ function Assert-NoPrivateBuildPaths {
 }
 
 if (-not (Test-Path -LiteralPath $workspace -PathType Container)) {
-    throw 'WorkspaceRoot nie istnieje.'
+    throw 'WorkspaceRoot does not exist.'
 }
 if (-not (Test-PathWithin -Parent $workspace -Child $bridge) -or
     -not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
-    throw 'BridgePath musi wskazywac plik wewnatrz workspace.'
+    throw 'BridgePath must point to a file inside the workspace.'
 }
 if (-not ([IO.Path]::GetFileName($bridge)).Equals(
     'CoopStoryBridge.asi',
     [StringComparison]::Ordinal)) {
-    throw 'BridgePath musi wskazywac CoopStoryBridge.asi.'
+    throw 'BridgePath must point to CoopStoryBridge.asi.'
 }
 Assert-PeX64Dll -Path $bridge
 Assert-ActiveBridgeCapability -Path $bridge
@@ -235,13 +233,13 @@ foreach ($required in @(
     $batSource
 )) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
-        throw ('Brak wymaganego pliku: ' + $required)
+        throw ('Required file is missing: ' + $required)
     }
 }
 
 $dotnet = Get-Command dotnet.exe -ErrorAction SilentlyContinue
 if ($null -eq $dotnet) {
-    throw 'Nie znaleziono dotnet.exe.'
+    throw 'dotnet.exe was not found.'
 }
 
 $pathMapProperty = '-p:PathMap=' + $workspace + '=/_/src'
@@ -254,7 +252,7 @@ if (-not $SkipManagedBuild) {
         $pathMapProperty `
         --nologo
     if ($LASTEXITCODE -ne 0) {
-        throw 'Managed build nie powiodl sie.'
+        throw 'Managed build failed.'
     }
 }
 
@@ -264,7 +262,7 @@ if (-not (Test-Path -LiteralPath $releaseRoot -PathType Container)) {
 }
 $releaseRootItem = Get-Item -LiteralPath $releaseRoot -Force
 if (($releaseRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-    throw 'artifacts\releases nie moze byc reparse pointem.'
+    throw 'artifacts\releases cannot be a reparse point.'
 }
 
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
@@ -273,7 +271,7 @@ $packageRoot = Join-Path $releaseRoot $packageName
 $zipPath = Join-Path $releaseRoot ($packageName + '.zip')
 if ((Test-Path -LiteralPath $packageRoot) -or
     (Test-Path -LiteralPath $zipPath)) {
-    throw 'Docelowa paczka juz istnieje; niczego nie nadpisano.'
+    throw 'The target package already exists; nothing was overwritten.'
 }
 $null = [IO.Directory]::CreateDirectory($packageRoot)
 
@@ -290,14 +288,14 @@ $publishCommon = @(
 
 & $dotnet.Source publish $launcherProject @publishCommon -o $packageRoot
 if ($LASTEXITCODE -ne 0) {
-    throw 'Publikacja launchera nie powiodla sie.'
+    throw 'Launcher publication failed.'
 }
 
 $sidecarRoot = Join-Path $packageRoot 'sidecar'
 $null = [IO.Directory]::CreateDirectory($sidecarRoot)
 & $dotnet.Source publish $sidecarProject @publishCommon -o $sidecarRoot
 if ($LASTEXITCODE -ne 0) {
-    throw 'Publikacja sidecara nie powiodla sie.'
+    throw 'Sidecar publication failed.'
 }
 
 # Project-reference PDB files can be copied from an earlier diagnostic build
@@ -308,7 +306,7 @@ foreach ($debugArtifact in @(
     Get-ChildItem -LiteralPath $packageRoot -Recurse -Force -File -Filter '*.pdb'
 )) {
     if (-not (Test-PathWithin -Parent $packageRoot -Child $debugArtifact.FullName)) {
-        throw 'Wykryto artefakt debugowania poza katalogiem staging.'
+        throw 'A debug artifact was detected outside the staging directory.'
     }
     Remove-Item -LiteralPath $debugArtifact.FullName -Force
 }
@@ -325,23 +323,15 @@ $null = [IO.Directory]::CreateDirectory($configRoot)
     $false)
 [IO.File]::Copy(
     $readmeSource,
-    (Join-Path $packageRoot 'PRZECZYTAJ_MNIE.txt'),
+    (Join-Path $packageRoot 'README.txt'),
     $false)
 [IO.File]::Copy(
-    $v29TestSource,
-    (Join-Path $packageRoot 'TEST_V29_ANIMSCENE_METAPED.md'),
-    $false)
-[IO.File]::Copy(
-    $v30TestSource,
-    (Join-Path $packageRoot 'TEST_V30_ANIMGRAPH.md'),
-    $false)
-[IO.File]::Copy(
-    $v31TestSource,
-    (Join-Path $packageRoot 'TEST_V31_ANIMSCENE_HYBRID.md'),
+    $testGuideSource,
+    (Join-Path $packageRoot 'TESTING.md'),
     $false)
 [IO.File]::Copy(
     $batSource,
-    (Join-Path $packageRoot 'URUCHOM_COOP.bat'),
+    (Join-Path $packageRoot 'START_COOP.bat'),
     $false)
 
 $requiredPackageFiles = @(
@@ -349,16 +339,14 @@ $requiredPackageFiles = @(
     'CoopStoryBridge.asi',
     'config\coopstory.example.json',
     'sidecar\CoopStory.Sidecar.exe',
-    'PRZECZYTAJ_MNIE.txt',
-    'TEST_V29_ANIMSCENE_METAPED.md',
-    'TEST_V30_ANIMGRAPH.md',
-    'TEST_V31_ANIMSCENE_HYBRID.md',
-    'URUCHOM_COOP.bat'
+    'README.txt',
+    'TESTING.md',
+    'START_COOP.bat'
 )
 foreach ($relativePath in $requiredPackageFiles) {
     if (-not (Test-Path -LiteralPath (
         Join-Path $packageRoot $relativePath) -PathType Leaf)) {
-        throw ('Paczka nie zawiera wymaganego pliku: ' + $relativePath)
+        throw ('The package does not contain required file: ' + $relativePath)
     }
 }
 
@@ -372,11 +360,9 @@ $allowedPackagePaths = @(
     'CoopStory.Launcher.runtimeconfig.json',
     'CoopStory.Protocol.dll',
     'CoopStoryBridge.asi',
-    'PRZECZYTAJ_MNIE.txt',
-    'TEST_V29_ANIMSCENE_METAPED.md',
-    'TEST_V30_ANIMGRAPH.md',
-    'TEST_V31_ANIMSCENE_HYBRID.md',
-    'URUCHOM_COOP.bat',
+    'README.txt',
+    'TESTING.md',
+    'START_COOP.bat',
     'config\coopstory.example.json',
     'sidecar\CoopStory.Protocol.dll',
     'sidecar\CoopStory.Sidecar.deps.json',
@@ -394,7 +380,7 @@ $unexpectedPackageFiles = @(Get-ChildItem `
         $allowedPackagePaths -notcontains $relativePath
     })
 if ($unexpectedPackageFiles.Count -gt 0) {
-    throw ('Paczka zawiera plik spoza allowlisty: ' +
+    throw ('The package contains a file outside the allowlist: ' +
         $unexpectedPackageFiles[0].FullName)
 }
 
@@ -436,7 +422,7 @@ $forbidden = @($allFiles | Where-Object {
     $_.Extension -eq '.ttf'
 })
 if ($forbidden.Count -gt 0) {
-    throw ('Paczka zawiera zabroniony plik third-party: ' +
+    throw ('The package contains a forbidden third-party file: ' +
         $forbidden[0].FullName)
 }
 
@@ -533,7 +519,7 @@ Write-Utf8CreateNew `
 Compress-Archive -Path (
     Join-Path $packageRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
 if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
-    throw 'Nie udalo sie utworzyc ZIP.'
+    throw 'Failed to create the ZIP archive.'
 }
 
 # Re-open the actual archive rather than trusting only the staging directory.
@@ -554,20 +540,20 @@ try {
         $_.Contains(':')
     } | Select-Object -First 1)
     if ($unsafeZipEntry.Count -ne 0) {
-        throw ('ZIP zawiera niebezpieczna sciezke: ' + $unsafeZipEntry[0])
+        throw ('The ZIP contains an unsafe path: ' + $unsafeZipEntry[0])
     }
     $duplicateZipEntry = @($zipFilePaths |
         Group-Object |
         Where-Object Count -gt 1 |
         Select-Object -First 1)
     if ($duplicateZipEntry.Count -ne 0) {
-        throw ('ZIP zawiera powtorzony plik: ' + $duplicateZipEntry[0].Name)
+        throw ('The ZIP contains a duplicate file: ' + $duplicateZipEntry[0].Name)
     }
     $zipDifference = @(Compare-Object `
         -ReferenceObject ($expectedZipPaths | Sort-Object) `
         -DifferenceObject ($zipFilePaths | Sort-Object))
     if ($zipDifference.Count -ne 0) {
-        throw ('Zawartosc gotowego ZIP-a nie zgadza sie z allowlista: ' +
+        throw ('The completed ZIP does not match the allowlist: ' +
             $zipDifference[0].InputObject)
     }
 }
@@ -575,8 +561,8 @@ finally {
     $zipArchive.Dispose()
 }
 
-# Dopiero po poprawnym utworzeniu nowej paczki porządkujemy poprzednie wydania.
-# Dzięki temu błąd kompilacji albo kompresji nie usuwa ostatniego działającego ZIP-a.
+# Clean previous releases only after the new package has been created successfully.
+# This ensures that a build or compression failure cannot remove the last working ZIP.
 $oldRoot = Join-Path $releaseRoot 'OLD'
 if (-not (Test-Path -LiteralPath $oldRoot -PathType Container)) {
     $null = [IO.Directory]::CreateDirectory($oldRoot)
@@ -584,7 +570,7 @@ if (-not (Test-Path -LiteralPath $oldRoot -PathType Container)) {
 $oldRootItem = Get-Item -LiteralPath $oldRoot -Force
 if (($oldRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
     -not (Test-PathWithin -Parent $releaseRoot -Child $oldRoot)) {
-    throw 'artifacts\releases\OLD nie jest bezpiecznym katalogiem archiwum.'
+    throw 'artifacts\releases\OLD is not a safe archive directory.'
 }
 
 foreach ($previousZip in @(
@@ -592,11 +578,11 @@ foreach ($previousZip in @(
         Where-Object { $_.FullName -ne $zipPath }
 )) {
     if (-not (Test-PathWithin -Parent $releaseRoot -Child $previousZip.FullName)) {
-        throw 'Wykryto ZIP poza katalogiem releases.'
+        throw 'A ZIP was detected outside the releases directory.'
     }
     $archiveTarget = Join-Path $oldRoot $previousZip.Name
     if (Test-Path -LiteralPath $archiveTarget) {
-        throw ('Archiwum OLD zawiera już plik: ' + $previousZip.Name)
+        throw ('The OLD archive already contains file: ' + $previousZip.Name)
     }
     Move-Item -LiteralPath $previousZip.FullName -Destination $archiveTarget
 }
@@ -610,7 +596,7 @@ foreach ($previousDirectory in @(
 )) {
     if (-not (Test-PathWithin -Parent $releaseRoot -Child $previousDirectory.FullName) -or
         ($previousDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw ('Odmowa usunięcia niebezpiecznego katalogu release: ' +
+        throw ('Refusing to remove an unsafe release directory: ' +
             $previousDirectory.FullName)
     }
     try {
@@ -626,13 +612,13 @@ foreach ($previousDirectory in @(
         if (-not $accessDenied -and -not $fileLocked) {
             throw
         }
-        # Windows nie pozwala usunąć DLL launchera, z którego nadal działa
-        # poprzednia wersja. Nowy ZIP jest już w tym miejscu kompletny i
-        # zweryfikowany, więc pozostawiamy wyłącznie zablokowany katalog do
-        # następnego porządkowania po zamknięciu starego procesu.
+        # Windows cannot remove a launcher DLL while the previous version is
+        # still running from it. The new ZIP is already complete and verified,
+        # so leave only the locked directory for the next cleanup after the old
+        # process has closed.
         Write-Warning (
-            'Pominięto używany katalog starego release; zostanie usunięty ' +
-            'po zamknięciu launchera przy następnym buildzie: ' +
+            'Skipped an in-use old release directory; it will be removed ' +
+            'during the next build after the launcher closes: ' +
             $previousDirectory.FullName)
     }
 }
@@ -641,11 +627,11 @@ $zipSha256 = Get-Sha256 -Path $zipPath
 if (-not (Test-PathWithin -Parent $releaseRoot -Child $packageRoot) -or
     (Get-Item -LiteralPath $packageRoot -Force).Attributes -band
         [IO.FileAttributes]::ReparsePoint) {
-    throw 'Odmowa usuniecia niebezpiecznego katalogu staging release.'
+    throw 'Refusing to remove an unsafe release staging directory.'
 }
-# Użytkownik testuje wyłącznie gotowy ZIP. Po ponownym otwarciu i sprawdzeniu
-# allowlisty katalog staging nie jest już potrzebny; releases ma zawierać tylko
-# bieżący ZIP oraz archiwum OLD ze starszymi ZIP-ami.
+# The tester uses only the completed ZIP. After reopening and checking the
+# allowlist, the staging directory is no longer needed; releases should contain
+# only the current ZIP and the OLD archive of earlier ZIP files.
 Remove-Item -LiteralPath $packageRoot -Recurse -Force
 
 Write-Output ('PACKAGE_ZIP=' + $zipPath)

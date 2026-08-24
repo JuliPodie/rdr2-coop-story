@@ -21,7 +21,7 @@ public sealed class LauncherLogger : IDisposable
         var fullPath = Path.GetFullPath(path);
         Directory.CreateDirectory(
             Path.GetDirectoryName(fullPath)
-                ?? throw new LauncherException("Ścieżka logu nie ma katalogu."));
+                ?? throw new LauncherException("The log path has no directory."));
         _stream = new FileStream(
             fullPath,
             FileMode.Append,

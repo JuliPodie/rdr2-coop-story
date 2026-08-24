@@ -10,9 +10,9 @@ internal static class Program
         if (singleInstance is null)
         {
             MessageBox.Show(
-                "RDR2 Coop Story Launcher jest już uruchomiony dla tego użytkownika.\n\n" +
-                "Wróć do istniejącego okna launchera.",
-                "Launcher już działa",
+                "RDR2 Coop Story Launcher is already running for this user.\n\n" +
+                "Return to the existing launcher window.",
+                "Launcher already running",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
             return;
@@ -24,8 +24,8 @@ internal static class Program
         {
             logger.Error("ui.thread_exception", args.Exception);
             MessageBox.Show(
-                $"Nieoczekiwany błąd: {args.Exception.Message}\n\n" +
-                $"Szczegóły zapisano w:\n{paths.LogDirectory}",
+                $"Unexpected error: {args.Exception.Message}\n\n" +
+                $"Details were saved to:\n{paths.LogDirectory}",
                 "RDR2 Coop Story",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -40,8 +40,8 @@ internal static class Program
         {
             logger.Error("launcher.fatal", exception);
             MessageBox.Show(
-                $"Launcher nie może wystartować: {exception.Message}\n\n" +
-                $"Szczegóły zapisano w:\n{paths.LogDirectory}",
+                $"The launcher cannot start: {exception.Message}\n\n" +
+                $"Details were saved to:\n{paths.LogDirectory}",
                 "RDR2 Coop Story",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);

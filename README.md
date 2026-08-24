@@ -22,9 +22,9 @@ host-authoritative replication layer for Red Dead Redemption 2 PC Story Mode.
 - C# and C++ self-tests;
 - architecture, protocol, test, and development-history documentation.
 
-The launcher UI source is present under `src/CoopStory.Launcher`. Its original
-interface is Polish; the English project website contains a translated,
-privacy-safe browser reconstruction of the UI.
+The launcher UI source is present under `src/CoopStory.Launcher`. The launcher,
+errors, scripts, and public documentation are English. The project website also
+contains a privacy-safe browser reconstruction of the interface.
 
 ## What is not included
 
@@ -106,8 +106,6 @@ license applies only to rights Lifeely can grant in the original code. It does
 not license or grant rights to any game, trademark, third-party software, SDK,
 or other intellectual property. See [NOTICE.md](NOTICE.md).
 
-Some historical research and test notes remain in Polish because they document
-the original development process. The public-facing website, this README, build
-guide, legal notice, and release instructions are in English. Follow
-[PUBLISHING.md](PUBLISHING.md) to publish the repository and website through
-GitHub Pages.
+The original Polish internal notes were removed or consolidated into the
+English documents under `docs`. Follow [PUBLISHING.md](PUBLISHING.md) to publish
+the repository and website through GitHub Pages.

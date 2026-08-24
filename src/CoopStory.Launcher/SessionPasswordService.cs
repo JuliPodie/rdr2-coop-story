@@ -22,8 +22,8 @@ public static class SessionPasswordService
             Encoding.UTF8.GetByteCount(normalized) > 128)
         {
             throw new LauncherException(
-                "Hasło sesji musi mieć 4–64 znaki, bez spacji na początku/końcu " +
-                "i bez znaków sterujących.");
+                "The session password must contain 4-64 characters, with no leading " +
+                "or trailing spaces and no control characters.");
         }
     }
 
@@ -71,7 +71,7 @@ public static class SessionPasswordService
             address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
         {
             throw new LauncherException(
-                "Hasło sesji można powiązać tylko z poprawnym adresem IPv4 hosta.");
+                "A session password can be bound only to a valid host IPv4 address.");
         }
 
         _ = InviteService.ValidateRemoteHost(address.ToString());

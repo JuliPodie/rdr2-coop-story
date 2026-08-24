@@ -53,10 +53,10 @@ public sealed class InstallationService
                 var manifest = ValidateInstalled(request.Package);
                 var messages = new List<string>
                 {
-                    "Mod jest zainstalowany i jego manifest jest poprawny.",
+                    "The mod is installed and its manifest is valid.",
                     $"RDR2: {manifest.GameRoot}",
-                    $"Build gry: {_policy.SupportedGameVersion}",
-                    $"Stan instalacji: {manifest.Phase}"
+                    $"Game build: {_policy.SupportedGameVersion}",
+                    $"Installation state: {manifest.Phase}"
                 };
                 _logger.Info("verify.installed_ok", string.Join(" | ", messages));
                 return new VerificationReport(
@@ -71,16 +71,16 @@ public sealed class InstallationService
             var plan = CreateInstallPlan(request);
             var reportMessages = new List<string>
             {
-                "Weryfikacja zakończona pomyślnie — można instalować.",
-                $"RDR2.exe ma obsługiwany hash ({_policy.SupportedGameVersion}).",
-                "ScriptHookRDR2.dll i dinput8.dll mają oczekiwane hashe.",
-                $"Rola: {request.Settings.Role}.",
-                "Nie wykryto innych plików .asi ani znanych loaderów modów."
+                "Verification completed successfully; installation is allowed.",
+                $"RDR2.exe has a supported hash ({_policy.SupportedGameVersion}).",
+                "ScriptHookRDR2.dll and dinput8.dll have the expected hashes.",
+                $"Role: {request.Settings.Role}.",
+                "No other .asi files or known mod loaders were detected."
             };
             if (plan.Runtime.TrainerWasPresent)
             {
                 reportMessages.Add(
-                    "NativeTrainer.asi znaleziono w archiwum ScriptHook, ale nie zostanie skopiowany.");
+                    "NativeTrainer.asi was found in the Script Hook archive but will not be copied.");
             }
 
             _logger.Info("verify.ready", string.Join(" | ", reportMessages));
@@ -111,7 +111,7 @@ public sealed class InstallationService
         if (HasManifest)
         {
             throw new LauncherException(
-                "Manifest instalacji już istnieje. Najpierw użyj „Odinstaluj”.");
+                "An installation manifest already exists. Use 'Uninstall' first.");
         }
 
         var plan = CreateInstallPlan(request);
@@ -165,7 +165,7 @@ public sealed class InstallationService
                 if (File.Exists(staging))
                 {
                     throw new LauncherException(
-                        $"Plik stagingu już istnieje: {Path.GetFileName(staging)}");
+                        $"A staging file already exists: {Path.GetFileName(staging)}");
                 }
 
                 stagingPaths.Add(staging);
@@ -177,7 +177,7 @@ public sealed class InstallationService
                 {
                     CopyNewDurable(
                         file.SourcePath
-                            ?? throw new LauncherException("Brak źródła pliku instalacji."),
+                            ?? throw new LauncherException("An installation file source is missing."),
                         staging);
                 }
 
@@ -186,7 +186,7 @@ public sealed class InstallationService
                         StringComparison.OrdinalIgnoreCase))
                 {
                     throw new LauncherException(
-                        $"Kontrola stagingu nie powiodła się dla {file.RelativePath}.");
+                        $"Staging validation failed for {file.RelativePath}.");
                 }
 
             }
@@ -206,7 +206,7 @@ public sealed class InstallationService
                 if (File.Exists(target))
                 {
                     throw new LauncherException(
-                        $"Plik docelowy pojawił się podczas instalacji: {entry.RelativePath}");
+                        $"A target file appeared during installation: {entry.RelativePath}");
                 }
 
                 File.Move(staging, target);
@@ -222,7 +222,7 @@ public sealed class InstallationService
                         StringComparison.OrdinalIgnoreCase))
                 {
                     throw new LauncherException(
-                        $"Kontrola finalnego pliku nie powiodła się: {entry.RelativePath}");
+                        $"Final file validation failed: {entry.RelativePath}");
                 }
             }
 
@@ -232,8 +232,8 @@ public sealed class InstallationService
             {
                 _logger.Info(
                     "install.completed",
-                    $"Zainstalowano {entries.Count(static entry => entry.Owned)} " +
-                    $"własnych plików w {plan.GameRoot}; installId={installId:D}.");
+                    $"Installed {entries.Count(static entry => entry.Owned)} " +
+                    $"owned files in {plan.GameRoot}; installId={installId:D}.");
             }
             catch
             {
@@ -291,9 +291,9 @@ public sealed class InstallationService
             }
             throw new LauncherException(
                 (rollbackComplete
-                    ? $"Instalacja nie powiodła się i została wycofana: {exception.Message}"
-                    : $"Instalacja nie powiodła się. Manifest pozostawiono do bezpiecznego " +
-                      $"odzyskania przez „Odinstaluj”: {exception.Message}") +
+                    ? $"Installation failed and was rolled back: {exception.Message}"
+                    : $"Installation failed. The manifest was retained for safe " +
+                      $"recovery through 'Uninstall': {exception.Message}") +
                 AccessRecoveryHint(exception),
                 exception);
         }
@@ -428,8 +428,8 @@ public sealed class InstallationService
 
             _logger.Error("uninstall.move_failed", exception);
             throw new LauncherException(
-                "Nie udało się bezpiecznie ukryć wszystkich plików moda. " +
-                "Manifest został zachowany; spróbuj ponownie po zamknięciu gry." +
+                "Not all mod files could be hidden safely. " +
+                "The manifest was retained; try again after closing the game." +
                 AccessRecoveryHint(exception),
                 exception);
         }
@@ -458,8 +458,8 @@ public sealed class InstallationService
         File.Delete(_paths.InstallManifestPath);
         _logger.Info(
             "uninstall.completed",
-            $"Usunięto wyłącznie pliki należące do instalacji {manifest.InstallId:D}. " +
-            "Pliki ScriptHook obecne przed instalacją zostały zachowane.");
+            $"Removed only files owned by installation {manifest.InstallId:D}. " +
+            "Script Hook files that existed before installation were preserved.");
     }
 
     public InstallManifest ValidateInstalled(PackageLayout? package = null)
@@ -469,8 +469,8 @@ public sealed class InstallationService
         if (manifest.Phase != InstallPhase.Committed)
         {
             throw new LauncherException(
-                $"Instalacja jest niepełna (stan {manifest.Phase}). " +
-                "Użyj „Odinstaluj”, a następnie zainstaluj ponownie.");
+                $"The installation is incomplete (state {manifest.Phase}). " +
+                "Use 'Uninstall' and then install again.");
         }
 
         if (package is not null)
@@ -482,8 +482,8 @@ public sealed class InstallationService
                     StringComparison.OrdinalIgnoreCase))
             {
                 throw new LauncherException(
-                    "Zawartość paczki bridge/sidecar zmieniła się od instalacji. " +
-                    "Odinstaluj mod i użyj jednej, kompletnej wersji paczki.");
+                    "The bridge/sidecar package content changed after installation. " +
+                    "Uninstall the mod and use one complete package version.");
             }
         }
 
@@ -494,7 +494,7 @@ public sealed class InstallationService
             if (!File.Exists(target))
             {
                 throw new LauncherException(
-                    $"Brakuje zainstalowanego pliku: {entry.RelativePath}");
+                    $"An installed file is missing: {entry.RelativePath}");
             }
 
             EnsureHash(target, entry.Sha256, entry.RelativePath);
@@ -507,7 +507,7 @@ public sealed class InstallationService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                "RDR2.exe zmienił się od instalacji albo ma nieobsługiwany build.");
+                "RDR2.exe changed after installation or has an unsupported build.");
         }
 
         return manifest;
@@ -538,13 +538,13 @@ public sealed class InstallationService
 
         var gameExe = Path.GetFullPath(request.Settings.GameExePath);
         var gameRoot = Path.GetDirectoryName(gameExe)
-            ?? throw new LauncherException("RDR2.exe nie ma katalogu nadrzędnego.");
+            ?? throw new LauncherException("RDR2.exe has no parent directory.");
         if (!gameRoot.Equals(
                 installed.GameRoot,
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                "Aktualizacja musi wskazywać ten sam katalog RDR2 co bieżąca instalacja.");
+                "An update must target the same RDR2 directory as the current installation.");
         }
 
         if (!File.Exists(gameExe) ||
@@ -556,13 +556,13 @@ public sealed class InstallationService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                "Aktualizacja zatrzymana: RDR2.exe ma nieobsługiwany build.");
+                "Update stopped: RDR2.exe has an unsupported build.");
         }
 
         if (PathsOverlap(gameRoot, request.Package.Root))
         {
             throw new LauncherException(
-                "Paczka launchera i katalog gry nie mogą znajdować się jeden w drugim.");
+                "The launcher package and game directory cannot be nested inside each other.");
         }
 
         var runtime = PackageLocator.LocateRuntime(
@@ -570,7 +570,7 @@ public sealed class InstallationService
         if (PathsOverlap(gameRoot, runtime.Root))
         {
             throw new LauncherException(
-                "Folder ScriptHook musi znajdować się poza katalogiem gry.");
+                "The Script Hook folder must be outside the game directory.");
         }
 
         EnsureHash(
@@ -589,23 +589,23 @@ public sealed class InstallationService
 
         _logger.Info(
             "update.started",
-            $"Aktualizacja instalacji {installed.InstallId:D} do nowej zawartości paczki.");
+            $"Updating installation {installed.InstallId:D} to the new package content.");
         Uninstall();
         try
         {
             var updated = Install(request);
             _logger.Info(
                 "update.completed",
-                $"Zainstalowano nową paczkę; installId={updated.InstallId:D}.");
+                $"Installed the new package; installId={updated.InstallId:D}.");
             return updated;
         }
         catch (Exception exception)
         {
             _logger.Error("update.failed_safe_uninstalled", exception);
             throw new LauncherException(
-                "Poprzedni build został bezpiecznie usunięty, ale instalacja nowego " +
-                "nie powiodła się. Gra pozostała bez aktywnego moda. Popraw wskazane " +
-                $"ustawienia i spróbuj ponownie: {exception.Message}",
+                "The previous build was removed safely, but installation of the new " +
+                "build failed. The game was left without an active mod. Correct the " +
+                $"reported settings and try again: {exception.Message}",
                 exception);
         }
     }
@@ -623,32 +623,32 @@ public sealed class InstallationService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                "Wskaż dokładny plik RDR2.exe przyciskiem „Przeglądaj”.");
+                "Select the exact RDR2.exe file with the 'Browse' button.");
         }
 
         if (PackageLocator.IsReparsePoint(gameExe))
         {
-            throw new LauncherException("RDR2.exe nie może być dowiązaniem.");
+            throw new LauncherException("RDR2.exe cannot be a symbolic link.");
         }
 
         var gameRoot = Path.GetDirectoryName(gameExe)
-            ?? throw new LauncherException("RDR2.exe nie ma katalogu nadrzędnego.");
+            ?? throw new LauncherException("RDR2.exe has no parent directory.");
         if (PackageLocator.IsReparsePoint(gameRoot))
         {
-            throw new LauncherException("Katalog gry nie może być dowiązaniem.");
+            throw new LauncherException("The game directory cannot be a symbolic link.");
         }
 
         if (PathsOverlap(gameRoot, request.Package.Root))
         {
             throw new LauncherException(
-                "Paczka launchera i katalog gry nie mogą znajdować się jeden w drugim.");
+                "The launcher package and game directory cannot be nested inside each other.");
         }
 
         var gameHash = Hashing.FileSha256(gameExe);
         if (!gameHash.Equals(_policy.GameSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                $"Nieobsługiwany RDR2.exe. Launcher wymaga builda " +
+                $"Unsupported RDR2.exe. The launcher requires build " +
                 $"{_policy.SupportedGameVersion}.");
         }
 
@@ -657,7 +657,7 @@ public sealed class InstallationService
         if (PathsOverlap(gameRoot, runtime.Root))
         {
             throw new LauncherException(
-                "Wskaż osobno rozpakowany folder ScriptHook; nie wybieraj katalogu gry.");
+                "Select a separately extracted Script Hook folder; do not select the game directory.");
         }
 
         EnsureHash(runtime.ScriptHookPath, _policy.ScriptHookSha256, "ScriptHookRDR2.dll");
@@ -674,8 +674,8 @@ public sealed class InstallationService
         if (File.Exists(obsoleteConfig))
         {
             throw new LauncherException(
-                "W katalogu gry pozostał CoopStory.config.json ze starszego instalatora. " +
-                "Uruchom jego deinstalator przed użyciem nowego launchera.");
+                "CoopStory.config.json from an older installer remains in the game directory. " +
+                "Run that installer's uninstaller before using the new launcher.");
         }
 
         foreach (var file in files.Where(static item => item.Owned))
@@ -684,8 +684,8 @@ public sealed class InstallationService
             if (File.Exists(target))
             {
                 throw new LauncherException(
-                    $"Plik {file.RelativePath} już istnieje bez manifestu launchera. " +
-                    "Launcher odmawia nadpisania.");
+                    $"File {file.RelativePath} already exists without a launcher manifest. " +
+                    "The launcher refuses to overwrite it.");
             }
         }
 
@@ -712,15 +712,15 @@ public sealed class InstallationService
         if (PackageLocator.IsReparsePoint(target))
         {
             throw new LauncherException(
-                $"{relativePath} w katalogu gry jest dowiązaniem. Operację zatrzymano.");
+                $"{relativePath} in the game directory is a symbolic link. The operation was stopped.");
         }
 
         var targetHash = Hashing.FileSha256(target);
         if (!targetHash.Equals(sourceHash, StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                $"{relativePath} już istnieje, ale ma inny hash. " +
-                "Launcher nie nadpisze cudzego runtime.");
+                $"{relativePath} already exists but has a different hash. " +
+                "The launcher will not overwrite a foreign runtime.");
         }
 
         return PlannedFile.FromSource(relativePath, sourcePath, owned: false);
@@ -734,7 +734,7 @@ public sealed class InstallationService
             !File.Exists(package.ConfigTemplatePath) ||
             !File.Exists(package.SidecarExePath))
         {
-            throw new LauncherException("Paczka moda jest niekompletna.");
+            throw new LauncherException("The mod package is incomplete.");
         }
 
         var count = 0;
@@ -752,7 +752,7 @@ public sealed class InstallationService
                 if (PackageLocator.IsReparsePoint(path))
                 {
                     throw new LauncherException(
-                        "Paczka moda zawiera niedozwolone dowiązanie.");
+                        "The mod package contains a forbidden symbolic link.");
                 }
 
                 if (Directory.Exists(path))
@@ -766,7 +766,7 @@ public sealed class InstallationService
                 if (count > 5000 || bytes > 4L * 1024 * 1024 * 1024)
                 {
                     throw new LauncherException(
-                        "Paczka przekracza bezpieczny limit rozmiaru.");
+                        "The package exceeds the safe size limit.");
                 }
 
                 if (ForbiddenPackageFileNames.Contains(
@@ -774,8 +774,8 @@ public sealed class InstallationService
                         StringComparer.OrdinalIgnoreCase))
                 {
                     throw new LauncherException(
-                        $"Paczka moda nie może zawierać {Path.GetFileName(path)}. " +
-                        "ScriptHook musi być osobnym wymaganiem użytkownika.");
+                        $"The mod package cannot contain {Path.GetFileName(path)}. " +
+                        "Script Hook must remain a separate user-supplied prerequisite.");
                 }
             }
         }
@@ -815,7 +815,7 @@ public sealed class InstallationService
         if (foreignAsi.Length > 0)
         {
             throw new LauncherException(
-                "Usuń lub przenieś inne mody .asi przed testem: " +
+                "Remove or move other .asi mods before testing: " +
                 string.Join(", ", foreignAsi));
         }
 
@@ -825,9 +825,9 @@ public sealed class InstallationService
         if (foundDirectories.Length > 0)
         {
             throw new LauncherException(
-                "Wykryto katalogi innych loaderów/modów: " +
+                "Directories from other loaders/mods were detected: " +
                 string.Join(", ", foundDirectories) +
-                ". Test wymaga czystego katalogu gry.");
+                ". The test requires a clean game directory.");
         }
     }
 
@@ -836,7 +836,7 @@ public sealed class InstallationService
         if (!File.Exists(_paths.InstallManifestPath))
         {
             throw new LauncherException(
-                "Nie znaleziono manifestu. Launcher nie będzie zgadywał, co usunąć.");
+                "No manifest was found. The launcher will not guess what to remove.");
         }
 
         try
@@ -847,14 +847,14 @@ public sealed class InstallationService
             if (manifest is null || manifest.SchemaVersion != 1)
             {
                 throw new LauncherException(
-                    "Manifest instalacji ma nieobsługiwaną wersję.");
+                    "The installation manifest has an unsupported version.");
             }
 
             return manifest;
         }
         catch (JsonException exception)
         {
-            throw new LauncherException("Manifest instalacji jest uszkodzony.", exception);
+            throw new LauncherException("The installation manifest is corrupted.", exception);
         }
     }
 
@@ -868,7 +868,7 @@ public sealed class InstallationService
             !manifest.MachineId.Equals(GetOrCreateMachineId()))
         {
             throw new LauncherException(
-                "Manifest nie należy do tej maszyny albo ma nieprawidłową strukturę.");
+                "The manifest does not belong to this machine or has an invalid structure.");
         }
 
         var root = Path.GetFullPath(manifest.GameRoot).TrimEnd('\\', '/');
@@ -878,7 +878,7 @@ public sealed class InstallationService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                "Manifest wskazuje inny albo nieistniejący katalog gry.");
+                "The manifest points to a different or nonexistent game directory.");
         }
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -895,7 +895,7 @@ public sealed class InstallationService
                 entry.InstallStageRelativePath.Contains(Path.DirectorySeparatorChar) ||
                 entry.UninstallStageRelativePath.Contains(Path.DirectorySeparatorChar))
             {
-                throw new LauncherException("Manifest zawiera niedozwolony wpis pliku.");
+                throw new LauncherException("The manifest contains a forbidden file entry.");
             }
 
             _ = Convert.FromHexString(entry.Sha256);
@@ -934,7 +934,7 @@ public sealed class InstallationService
                 return existing;
             }
 
-            throw new LauncherException("Lokalny identyfikator maszyny jest uszkodzony.");
+            throw new LauncherException("The local machine identifier is corrupted.");
         }
 
         var created = Guid.NewGuid();
@@ -947,7 +947,7 @@ public sealed class InstallationService
         if (_isGameOrSidecarRunning())
         {
             throw new LauncherException(
-                "RDR2 albo CoopStory.Sidecar jest uruchomiony. Zamknij grę i test przed zmianą plików.");
+                "RDR2 or CoopStory.Sidecar is running. Close the game and test before changing files.");
         }
     }
 
@@ -997,7 +997,7 @@ public sealed class InstallationService
             relativePath.Contains('/') ||
             relativePath.Contains('\\'))
         {
-            throw new LauncherException("Niedozwolona względna ścieżka pliku.");
+            throw new LauncherException("Forbidden relative file path.");
         }
 
         var root = Path.GetFullPath(gameRoot).TrimEnd('\\', '/');
@@ -1005,7 +1005,7 @@ public sealed class InstallationService
         var prefix = root + Path.DirectorySeparatorChar;
         if (!target.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
-            throw new LauncherException("Wyznaczony plik wychodzi poza katalog gry.");
+            throw new LauncherException("The resolved file is outside the game directory.");
         }
 
         return target;
@@ -1025,7 +1025,7 @@ public sealed class InstallationService
         if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
         {
             throw new LauncherException(
-                $"{displayName} ma inny hash niż oczekiwany. Operację zatrzymano.");
+                $"{displayName} has a different hash than expected. The operation was stopped.");
         }
     }
 
@@ -1040,9 +1040,9 @@ public sealed class InstallationService
             if (current is UnauthorizedAccessException ||
                 current.HResult == accessDeniedHResult)
             {
-                return " Brak uprawnień do katalogu gry. Zamknij RDR2 i launcher, " +
-                       "uruchom launcher prawym przyciskiem jako administrator tylko na " +
-                       "czas instalacji/deinstalacji, a do zwykłego testu uruchamiaj go normalnie.";
+                return " The game directory does not grant write permission. Close RDR2 and " +
+                       "the launcher, run the launcher as administrator only for install/uninstall, " +
+                       "and run it normally for regular testing.";
             }
         }
 

@@ -142,27 +142,27 @@ function Assert-GameReady {
     param([switch]$RequireSupportedHash)
 
     if (-not (Test-Path -LiteralPath $gameExeFull -PathType Leaf)) {
-        throw ('Nie znaleziono RDR2.exe: ' + $gameExeFull)
+        throw ('RDR2.exe was not found: ' + $gameExeFull)
     }
     if (-not ([IO.Path]::GetFileName($gameExeFull)).Equals(
         'RDR2.exe',
         [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'GameExe musi wskazywac plik RDR2.exe.'
+        throw 'GameExe must point to an RDR2.exe file.'
     }
     if (@(Get-Process -Name RDR2 -ErrorAction SilentlyContinue).Count -gt 0) {
-        throw 'RDR2 jest uruchomione. Zamknij gre i uruchom ten plik ponownie.'
+        throw 'RDR2 is running. Close the game and run this file again.'
     }
     if ($RequireSupportedHash) {
         $actualHash = Get-FileSha256 -Path $gameExeFull
         if ($actualHash -ne $expectedGameHash) {
-            throw 'Ta wersja RDR2.exe nie jest obslugiwana. Instalacja zostala zatrzymana.'
+            throw 'This RDR2.exe version is unsupported. Installation was stopped.'
         }
     }
 }
 
 function Assert-SidecarClosed {
     if (@(Get-Process -Name 'CoopStory.Sidecar' -ErrorAction SilentlyContinue).Count -gt 0) {
-        throw 'Sidecar jest uruchomiony. Zamknij jego okno i sprobuj ponownie.'
+        throw 'The sidecar is running. Close its window and try again.'
     }
 }
 
@@ -175,11 +175,11 @@ function Get-StaleInstallerTemps {
             continue
         }
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw ('Stary staging jest reparse pointem; odmowa usuniecia: ' +
+            throw ('Old staging is a reparse point; refusing to remove: ' +
                 $item.Name)
         }
         if ((Split-Path -Parent $item.FullName) -ne $gameRoot) {
-            throw 'Wykryto staging poza katalogiem gry.'
+            throw 'Staging was detected outside the game directory.'
         }
         $result.Add($item)
     }
@@ -199,11 +199,11 @@ function Remove-StaleInstallerTemps {
         if ($file.Name -notmatch $ownedNamePattern -or
             (Split-Path -Parent $file.FullName) -ne $gameRoot -or
             ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw 'Lista starych stagingow zmienila sie; odmowa usuniecia.'
+            throw 'The old staging list changed; refusing removal.'
         }
         if (Test-Path -LiteralPath $file.FullName -PathType Leaf) {
             Remove-Item -LiteralPath $file.FullName -Force
-            Write-Host ('Usunieto nieaktywny staging po przerwaniu: ' +
+            Write-Host ('Removed inactive staging left by an interrupted operation: ' +
                 $file.Name)
         }
     }
@@ -235,7 +235,7 @@ function Assert-DistReady {
     )
     foreach ($path in $required) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw ('Brakuje gotowego pliku paczki: ' + $path)
+            throw ('A required built package file is missing: ' + $path)
         }
     }
 
@@ -243,14 +243,14 @@ function Assert-DistReady {
     $forbiddenInDist = @(Get-ChildItem -LiteralPath (Join-Path $workspace 'dist') -Recurse -Force |
         Where-Object { (-not $_.PSIsContainer) -and ($forbidden -contains $_.Name) })
     if ($forbiddenInDist.Count -gt 0) {
-        throw 'Katalog dist zawiera runtime lub trainer. Instalacja zostala zatrzymana.'
+        throw 'The dist directory contains a runtime or trainer. Installation was stopped.'
     }
 
     $sidecar = Join-Path $workspace 'dist\sidecar\CoopStory.Sidecar.exe'
     $helpOutput = @(& $sidecar --help 2>&1)
     if ($LASTEXITCODE -ne 0 -or
         (($helpOutput -join "`n") -notmatch 'local-test')) {
-        throw 'Sidecar nie uruchamia sie na lokalnym .NET 10 albo nie obsluguje local-test.'
+        throw 'The sidecar does not start with the local .NET 10 runtime or does not support local-test.'
     }
 }
 
@@ -262,9 +262,9 @@ function Assert-NoConflictingMods {
                 [StringComparison]::OrdinalIgnoreCase)
         })
     if ($asiFiles.Count -gt 0) {
-        throw ('W katalogu gry jest inny mod ASI: ' +
+        throw ('Another ASI mod is present in the game directory: ' +
             (($asiFiles | ForEach-Object { $_.Name }) -join ', ') +
-            '. Usun go przed kontrolowanym testem.')
+            '. Remove it before a controlled test.')
     }
 
     $knownConflicts = @(
@@ -283,8 +283,8 @@ function Assert-NoConflictingMods {
         }
     }
     if ($present.Count -gt 0) {
-        throw ('Wykryto konfliktujacy mod/loader: ' + ($present -join ', ') +
-            '. Instalator niczego nie usunie automatycznie.')
+        throw ('A conflicting mod/loader was detected: ' + ($present -join ', ') +
+            '. The installer will not remove anything automatically.')
     }
 }
 
@@ -293,14 +293,14 @@ function Resolve-RuntimeRoot {
     if (Test-Path -LiteralPath $exact -PathType Container) {
         return $exact
     }
-    throw 'Brakuje lokalnego, rozpakowanego runtime ScriptHookRDR2_1.0.1491.17.'
+    throw 'The local extracted ScriptHookRDR2_1.0.1491.17 runtime is missing.'
 }
 
 function Invoke-PrerequisiteVerification {
     param([Parameter(Mandatory = $true)][string]$RuntimeRoot)
 
     if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
-        throw 'Nie znaleziono Windows PowerShell 5.1.'
+        throw 'Windows PowerShell 5.1 was not found.'
     }
     $verifyScript = Join-Path $workspace 'scripts\Verify-Prerequisites.ps1'
     $sdkRoot = Join-Path $workspace 'ScriptHookRDR2_SDK_1.0.1207.73'
@@ -316,7 +316,7 @@ function Invoke-PrerequisiteVerification {
     )
     & $windowsPowerShell @commandArguments
     if ($LASTEXITCODE -ne 0) {
-        throw 'Weryfikacja wymagan nie przeszla. Przeczytaj FAIL powyzej.'
+        throw 'Prerequisite verification failed. Review the FAIL entries above.'
     }
 }
 
@@ -331,14 +331,14 @@ function Read-RuntimeReceipt {
             ConvertFrom-Json
     }
     catch {
-        throw 'Manifest runtime jest uszkodzony. Instalator odmawia zgadywania.'
+        throw 'The runtime manifest is corrupted. The installer refuses to guess.'
     }
     if ($manifest.SchemaVersion -ne 1) {
-        throw 'Manifest runtime ma nieobslugiwana wersje.'
+        throw 'The runtime manifest has an unsupported version.'
     }
     $fingerprint = Get-StringSha256 -Value ($gameRoot.ToLowerInvariant())
     if ($manifest.GameRootFingerprint -ne $fingerprint) {
-        throw 'Manifest runtime zostal utworzony dla innego katalogu gry.'
+        throw 'The runtime manifest was created for a different game directory.'
     }
 
     $allowed = @{}
@@ -349,13 +349,13 @@ function Read-RuntimeReceipt {
         $relative = [string]$entry.RelativePath
         $key = $relative.ToLowerInvariant()
         if (-not $allowed.ContainsKey($key) -or $result.ContainsKey($key)) {
-            throw 'Manifest runtime zawiera niedozwolony albo powtorzony plik.'
+            throw 'The runtime manifest contains an unsupported or duplicate file.'
         }
         if ([string]$entry.Sha256 -ne $allowed[$key].Sha256) {
-            throw 'Manifest runtime zawiera nieoczekiwany hash.'
+            throw 'The runtime manifest contains an unexpected hash.'
         }
         if (-not ($entry.OwnedByEasyInstaller -is [bool])) {
-            throw 'Manifest runtime nie zawiera poprawnej informacji ownership.'
+            throw 'The runtime manifest does not contain valid ownership information.'
         }
         $result[$key] = [pscustomobject]@{
             RelativePath = $relative
@@ -375,18 +375,18 @@ function Get-RuntimePlan {
     foreach ($spec in $runtimeFiles) {
         $source = Join-Path $RuntimeRoot $spec.SourceRelativePath
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-            throw ('Pakiet runtime nie zawiera: ' + $spec.SourceRelativePath)
+            throw ('The runtime package does not contain: ' + $spec.SourceRelativePath)
         }
         $sourceHash = Get-FileSha256 -Path $source
         if ($sourceHash -ne $spec.Sha256) {
-            throw ('Lokalny runtime ma nieoczekiwany hash: ' + $spec.RelativePath)
+            throw ('The local runtime has an unexpected hash: ' + $spec.RelativePath)
         }
 
         $target = Join-Path $gameRoot $spec.RelativePath
         $targetPresent = Test-Path -LiteralPath $target -PathType Leaf
         if ($targetPresent -and (Get-FileSha256 -Path $target) -ne $spec.Sha256) {
-            throw ('Plik ' + $spec.RelativePath +
-                ' juz istnieje, ale ma inny hash. Instalator go nie nadpisze.')
+            throw ('File ' + $spec.RelativePath +
+                ' already exists but has a different hash. The installer will not overwrite it.')
         }
         $key = $spec.RelativePath.ToLowerInvariant()
         $previouslyOwned = $receipt.ContainsKey($key) -and
@@ -485,11 +485,11 @@ function Install-Runtime {
         foreach ($plan in $Plans) {
             if (-not $plan.NeedsCopy) {
                 if ($plan.OwnedAfterInstall) {
-                    Write-Host ('Runtime juz zainstalowany przez ten instalator: ' +
+                    Write-Host ('Runtime already installed by this installer: ' +
                         $plan.RelativePath)
                 }
                 else {
-                    Write-Host ('Identyczny runtime byl juz obecny; pozostaje cudzy: ' +
+                    Write-Host ('An identical runtime was already present and remains third-party-owned: ' +
                         $plan.RelativePath)
                 }
                 continue
@@ -501,20 +501,20 @@ function Install-Runtime {
             try {
                 Copy-DurableExclusive -Source $plan.SourcePath -Destination $staging
                 if ((Get-FileSha256 -Path $staging) -ne $plan.Sha256) {
-                    throw ('Weryfikacja stagingu nie powiodla sie: ' +
+                    throw ('Staging verification failed: ' +
                         $plan.RelativePath)
                 }
                 if (Test-Path -LiteralPath $plan.TargetPath) {
-                    throw ('Target pojawil sie podczas stagingu: ' +
+                    throw ('The target appeared during staging: ' +
                         $plan.RelativePath)
                 }
                 [IO.File]::Move($staging, $plan.TargetPath)
                 $committedPlans.Add($plan)
                 if ((Get-FileSha256 -Path $plan.TargetPath) -ne $plan.Sha256) {
-                    throw ('Weryfikacja finalnego runtime nie powiodla sie: ' +
+                    throw ('Final runtime verification failed: ' +
                         $plan.RelativePath)
                 }
-                Write-Host ('Skopiowano oficjalny runtime: ' +
+                Write-Host ('Copied official runtime: ' +
                     $plan.RelativePath) -ForegroundColor Green
             }
             finally {
@@ -558,12 +558,12 @@ function Test-ConfigSafety {
         $config = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     }
     catch {
-        throw 'CoopStory.config.json jest uszkodzony.'
+        throw 'CoopStory.config.json is corrupted.'
     }
     if ($config.schemaVersion -ne 1 -or
         $config.safety.storyModeOnly -ne $true -or
         $config.safety.refuseOnlineMode -ne $true) {
-        throw 'Konfiguracja nie zawiera obowiazkowych blokad Story Mode/RDO.'
+        throw 'The configuration is missing mandatory Story Mode/RDO guards.'
     }
 }
 
@@ -576,32 +576,32 @@ function Test-ProjectAlreadyInstalled {
             ConvertFrom-Json
     }
     catch {
-        throw 'Manifest moda jest uszkodzony. Uzyj bezpiecznego deinstalatora.'
+        throw 'The mod manifest is corrupted. Use the safe uninstaller.'
     }
     $fingerprint = Get-StringSha256 -Value ($gameRoot.ToLowerInvariant())
     if ($manifest.SchemaVersion -ne 1 -or
         $manifest.GameRootFingerprint -ne $fingerprint) {
-        throw 'Manifest moda nie pasuje do tego katalogu gry.'
+        throw 'The mod manifest does not match this game directory.'
     }
 
     $bridgeTarget = Join-Path $gameRoot 'CoopStoryBridge.asi'
     $configTarget = Join-Path $gameRoot 'CoopStory.config.json'
     if (-not (Test-Path -LiteralPath $bridgeTarget -PathType Leaf) -or
         -not (Test-Path -LiteralPath $configTarget -PathType Leaf)) {
-        throw 'Manifest istnieje, ale instalacja moda jest niepelna.'
+        throw 'The manifest exists, but the mod installation is incomplete.'
     }
     $bridgeEntry = @($manifest.Files | Where-Object {
         $_.RelativePath -eq 'CoopStoryBridge.asi'
     }) | Select-Object -First 1
     if ($null -eq $bridgeEntry) {
-        throw 'Manifest moda nie zawiera bridge.'
+        throw 'The mod manifest does not contain the bridge.'
     }
     $installedHash = Get-FileSha256 -Path $bridgeTarget
     $distHash = Get-FileSha256 -Path (
         Join-Path $workspace 'dist\CoopStoryBridge.asi')
     if ($installedHash -ne [string]$bridgeEntry.Sha256 -or
         $installedHash -ne $distHash) {
-        throw 'Zainstalowany bridge jest inny. Najpierw uzyj deinstalatora.'
+        throw 'The installed bridge is different. Use the uninstaller first.'
     }
     Test-ConfigSafety -Path $configTarget
     return $true
@@ -618,12 +618,12 @@ function Confirm-Exact {
     }
     $answer = Read-Host $Prompt
     if ($answer -cne $Expected) {
-        throw 'Anulowano. Nie zmieniono katalogu gry.'
+        throw 'Cancelled. The game directory was not changed.'
     }
 }
 
 function Install-Easy {
-    Write-Step 'Kontrola gry i paczki'
+    Write-Step 'Checking the game and package'
     Assert-GameReady -RequireSupportedHash
     Assert-SidecarClosed
     Assert-DistReady
@@ -638,14 +638,14 @@ function Install-Easy {
     if ($projectInstalled -and -not $runtimeNeedsCopy -and
         $staleTemps.Count -eq 0) {
         Write-Host ''
-        Write-Host 'Mod i runtime sa juz poprawnie zainstalowane.' -ForegroundColor Green
-        Write-Host 'Uruchom teraz: 2_URUCHOM_TEST.bat'
+        Write-Host 'The mod and runtime are already installed correctly.' -ForegroundColor Green
+        Write-Host 'Run now: 2_RUN_TEST.bat'
         return
     }
 
-    Write-Step 'Bezpieczny dry-run instalacji'
+    Write-Step 'Safe installation dry run'
     if ($projectInstalled) {
-        Write-Host '  pliki projektu: juz zainstalowane; naprawiany bedzie tylko runtime'
+        Write-Host '  project files: already installed; only the runtime will be repaired'
     }
     else {
         & (Join-Path $workspace 'scripts\Install-DevBuild.ps1') `
@@ -660,26 +660,26 @@ function Install-Easy {
             Write-Host ('  leave identical runtime: ' + $plan.RelativePath)
         }
     }
-    Write-Host '  NativeTrainer.asi: NIGDY NIE JEST KOPIOWANY'
+    Write-Host '  NativeTrainer.asi: NEVER COPIED'
     foreach ($temp in $staleTemps) {
         Write-Host ('  remove stale non-loadable staging: ' + $temp.Name)
     }
 
     if ($Preview) {
         Write-Host ''
-        Write-Host 'Preview zakonczony. Nie zmieniono katalogu gry.' -ForegroundColor Yellow
+        Write-Host 'Preview complete. The game directory was not changed.' -ForegroundColor Yellow
         return
     }
 
     Write-Host ''
-    Write-Host 'To jest eksperymentalny smoke test, nie gotowy coop kampanii.' `
+    Write-Host 'This is an experimental smoke test, not a finished campaign co-op mod.' `
         -ForegroundColor Yellow
-    Confirm-Exact -Expected 'INSTALUJ' `
-        -Prompt 'Aby kontynuowac, wpisz dokladnie INSTALUJ'
+    Confirm-Exact -Expected 'INSTALL' `
+        -Prompt 'To continue, type exactly INSTALL'
 
     Remove-StaleInstallerTemps -Files $staleTemps
 
-    Write-Step 'Backup save i baseline'
+    Write-Step 'Save backup and baseline'
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
     & (Join-Path $workspace 'scripts\Backup-Saves.ps1') `
         -DestinationRoot (Join-Path $workspace '_backups\saves-easy-installer') `
@@ -690,7 +690,7 @@ function Install-Easy {
             'artifacts\baselines\easy-before-install-' + $stamp + '.json'))
 
     if (-not $projectInstalled) {
-        Write-Step 'Instalacja nieaktywnego bridge i konfiguracji'
+        Write-Step 'Installing the inactive bridge and configuration'
         & (Join-Path $workspace 'scripts\Install-DevBuild.ps1') `
             -GamePath $gameRoot `
             -WorkspaceRoot $workspace `
@@ -699,12 +699,12 @@ function Install-Easy {
 
     # The loader is the last commit. If an earlier project step fails, no new
     # executable loader is left in the game directory.
-    Write-Step 'Instalacja oficjalnego runtime i loadera jako ostatni krok'
+    Write-Step 'Installing the official runtime and loader as the final step'
     Install-Runtime -Plans $runtimePlans
 
     Write-Host ''
-    Write-Host 'INSTALACJA GOTOWA.' -ForegroundColor Green
-    Write-Host 'Nastepnie kliknij 2_URUCHOM_TEST.bat i wybierz tylko Story Mode.'
+    Write-Host 'INSTALLATION COMPLETE.' -ForegroundColor Green
+    Write-Host 'Next, run 2_RUN_TEST.bat and select Story Mode only.'
 }
 
 function Get-OwnedRuntimeForRemoval {
@@ -719,8 +719,8 @@ function Get-OwnedRuntimeForRemoval {
             continue
         }
         if ((Get-FileSha256 -Path $target) -ne $entry.Sha256) {
-            throw ('Nasz runtime zostal zmieniony: ' + $entry.RelativePath +
-                '. Deinstalator odmawia usuniecia.')
+            throw ('A runtime owned by this installer was modified: ' + $entry.RelativePath +
+                '. The uninstaller refuses to remove it.')
         }
         $owned.Add([pscustomobject]@{
             RelativePath = $entry.RelativePath
@@ -750,7 +750,7 @@ function Uninstall-Runtime {
         $target = Join-Path $backup $file.RelativePath
         Copy-DurableExclusive -Source $file.FullPath -Destination $target
         if ((Get-FileSha256 -Path $target) -ne $file.Sha256) {
-            throw ('Backup runtime nie przeszedl weryfikacji: ' +
+            throw ('Runtime backup verification failed: ' +
                 $file.RelativePath)
         }
     }
@@ -758,7 +758,7 @@ function Uninstall-Runtime {
     Copy-DurableExclusive -Source $runtimeManifestPath -Destination $manifestBackup
     $manifestHash = Get-FileSha256 -Path $runtimeManifestPath
     if ((Get-FileSha256 -Path $manifestBackup) -ne $manifestHash) {
-        throw 'Backup manifestu runtime nie przeszedl weryfikacji.'
+        throw 'Runtime manifest backup verification failed.'
     }
 
     $removalOrder = @($OwnedFiles | Sort-Object @{
@@ -768,19 +768,19 @@ function Uninstall-Runtime {
     })
     foreach ($file in $removalOrder) {
         if ((Get-FileSha256 -Path $file.FullPath) -ne $file.Sha256) {
-            throw ('Runtime zmienil sie podczas backupu: ' + $file.RelativePath)
+            throw ('The runtime changed during backup: ' + $file.RelativePath)
         }
         Remove-Item -LiteralPath $file.FullPath -Force
     }
     if ((Get-FileSha256 -Path $runtimeManifestPath) -ne $manifestHash) {
-        throw 'Manifest runtime zmienil sie podczas operacji.'
+        throw 'The runtime manifest changed during the operation.'
     }
     Remove-Item -LiteralPath $runtimeManifestPath -Force
-    Write-Host ('Backup usunietego runtime: ' + $backup)
+    Write-Host ('Removed runtime backup: ' + $backup)
 }
 
 function Uninstall-Easy {
-    Write-Step 'Kontrola przed deinstalacja'
+    Write-Step 'Pre-uninstallation checks'
     Assert-GameReady
     Assert-SidecarClosed
     $ownedRuntime = @(Get-OwnedRuntimeForRemoval)
@@ -791,11 +791,11 @@ function Uninstall-Easy {
         $staleTemps.Count -eq 0) {
         $untrackedResidue = @(Get-UnsafeGameResidue)
         if ($untrackedResidue.Count -gt 0) {
-            Write-Host ('UWAGA: brak manifestu, ale nadal obecne: ' +
+            Write-Host ('WARNING: no manifest exists, but these files remain: ' +
                 ($untrackedResidue -join ', ')) -ForegroundColor Red
-            throw 'Deinstalator nie bedzie zgadywal, co wolno usunac. NIE WCHODZ DO RDO.'
+            throw 'The uninstaller will not guess what may be removed. DO NOT ENTER RDO.'
         }
-        Write-Host 'Nie znaleziono instalacji wykonanej przez ten instalator.'
+        Write-Host 'No installation created by this installer was found.'
         return
     }
 
@@ -818,11 +818,11 @@ function Uninstall-Easy {
     }
 
     if ($Preview) {
-        Write-Host 'Preview zakonczony. Niczego nie usunieto.' -ForegroundColor Yellow
+        Write-Host 'Preview complete. Nothing was removed.' -ForegroundColor Yellow
         return
     }
-    Confirm-Exact -Expected 'ODINSTALUJ' `
-        -Prompt 'Aby kontynuowac, wpisz dokladnie ODINSTALUJ'
+    Confirm-Exact -Expected 'UNINSTALL' `
+        -Prompt 'To continue, type exactly UNINSTALL'
 
     # Disable the loader first. If a later project-file cleanup fails, an
     # inert ASI is safer than a live dinput8 loader.
@@ -838,36 +838,36 @@ function Uninstall-Easy {
     Remove-StaleInstallerTemps -Files $staleTemps
 
     Write-Host ''
-    Write-Host 'DEINSTALACJA GOTOWA.' -ForegroundColor Green
-    Write-Host 'Pliki innych modow i cudzy runtime pozostaly nietkniete.'
+    Write-Host 'UNINSTALLATION COMPLETE.' -ForegroundColor Green
+    Write-Host 'Files from other mods and third-party runtimes were left untouched.'
     $remainingUnsafe = @(Get-UnsafeGameResidue)
     if ($remainingUnsafe.Count -gt 0) {
         Write-Host ''
-        Write-Host ('UWAGA: nadal obecne: ' +
+        Write-Host ('WARNING: still present: ' +
             ($remainingUnsafe -join ', ')) `
             -ForegroundColor Red
-        Write-Host 'NIE WCHODZ DO RDO, dopoki nie usuniesz ich recznie.' `
+        Write-Host 'DO NOT ENTER RDO until you remove them manually.' `
             -ForegroundColor Red
     }
 }
 
 function Launch-Easy {
-    Write-Step 'Kontrola instalacji'
+    Write-Step 'Installation check'
     Assert-GameReady -RequireSupportedHash
     Assert-DistReady
     Assert-NoConflictingMods
     if (-not (Test-ProjectAlreadyInstalled)) {
-        throw 'Mod nie jest zainstalowany. Najpierw kliknij 1_ZAINSTALUJ_MOD.bat.'
+        throw 'The mod is not installed. Run 1_INSTALL_MOD.bat first.'
     }
     foreach ($spec in $runtimeFiles) {
         $target = Join-Path $gameRoot $spec.RelativePath
         if (-not (Test-Path -LiteralPath $target -PathType Leaf) -or
             (Get-FileSha256 -Path $target) -ne $spec.Sha256) {
-            throw ('Brakuje poprawnego runtime: ' + $spec.RelativePath)
+            throw ('A valid runtime file is missing: ' + $spec.RelativePath)
         }
     }
     if (@(Get-Process -Name 'CoopStory.Sidecar' -ErrorAction SilentlyContinue).Count -gt 0) {
-        throw 'Sidecar juz dziala. Zamknij jego okno i uruchom launcher ponownie.'
+        throw 'The sidecar is already running. Close its window and restart the launcher.'
     }
 
     $sidecar = Join-Path $workspace 'dist\sidecar\CoopStory.Sidecar.exe'
@@ -887,16 +887,16 @@ function Launch-Easy {
     $escapedFailure = $failureFile.Replace("'", "''")
     $command = @"
 `$Host.UI.RawUI.WindowTitle = 'RDR2 Coop Story - LOCAL TEST'
-Write-Host 'Nie zamykaj tego okna podczas testu.' -ForegroundColor Cyan
-Write-Host 'Sukces: pojawia sie LOCAL_TEST_BRIDGE_ACTIVE i LOCAL_TEST_GUEST_STREAMING.'
+Write-Host 'Do not close this window during the test.' -ForegroundColor Cyan
+Write-Host 'Success: LOCAL_TEST_BRIDGE_ACTIVE and LOCAL_TEST_GUEST_STREAMING appear.'
 & '$escapedSidecar' local-test --config '$escapedConfig' --ready-file '$escapedReady' --motion-profile puppet
 `$sidecarExit = `$LASTEXITCODE
 if (-not (Test-Path -LiteralPath '$escapedReady')) {
     [IO.File]::WriteAllText('$escapedFailure', [string]`$sidecarExit)
 }
 Write-Host ''
-Write-Host 'Sidecar zakonczyl prace. Przeczytaj komunikat bledu powyzej.' -ForegroundColor Yellow
-Read-Host 'Nacisnij Enter, aby zamknac to okno'
+Write-Host 'The sidecar stopped. Read the error message above.' -ForegroundColor Yellow
+Read-Host 'Press Enter to close this window'
 exit `$sidecarExit
 "@
     $encoded = [Convert]::ToBase64String(
@@ -913,7 +913,7 @@ exit `$sidecarExit
     while ($readyWait.ElapsedMilliseconds -lt 8000) {
         if (Test-Path -LiteralPath $failureFile -PathType Leaf) {
             $failureCode = Get-Content -LiteralPath $failureFile -Raw
-            throw ('Local-test zakonczyl sie przed gotowoscia. Kod: ' +
+            throw ('Local-test ended before becoming ready. Exit code: ' +
                 $failureCode)
         }
         if (Test-Path -LiteralPath $readyFile -PathType Leaf) {
@@ -926,15 +926,15 @@ exit `$sidecarExit
         }
         $sidecarWindow.Refresh()
         if ($sidecarWindow.HasExited) {
-            throw 'Okno local-test zamknelo sie przed osiagnieciem gotowosci.'
+            throw 'The local-test window closed before reaching readiness.'
         }
         Start-Sleep -Milliseconds 100
     }
     if (-not $ready) {
-        throw 'Local-test nie osiagnal gotowosci w ciagu 8 sekund. Steam nie zostal uruchomiony.'
+        throw 'Local-test did not become ready within 8 seconds. Steam was not started.'
     }
 
-    Write-Host 'Local-test gotowy. Otwieram RDR2 przez Steam...'
+    Write-Host 'Local-test ready. Opening RDR2 through Steam...'
     $startInfo = New-Object Diagnostics.ProcessStartInfo
     $startInfo.FileName = 'steam://rungameid/1174180'
     $startInfo.UseShellExecute = $true
@@ -942,13 +942,13 @@ exit `$sidecarExit
         $null = [Diagnostics.Process]::Start($startInfo)
     }
     catch {
-        Write-Warning 'Nie udalo sie otworzyc Steam automatycznie. Kliknij Graj w Steam recznie.'
+        Write-Warning 'Steam could not be opened automatically. Click Play in Steam manually.'
     }
 
     Write-Host ''
-    Write-Host 'W grze wybierz wylacznie STORY MODE.' -ForegroundColor Yellow
-    Write-Host 'NIGDY nie wchodz do Red Dead Online z zainstalowanym modem.'
-    Write-Host 'Przed RDO zawsze uruchom 3_ODINSTALUJ_MOD.bat.'
+    Write-Host 'In the game, select STORY MODE only.' -ForegroundColor Yellow
+    Write-Host 'NEVER enter Red Dead Online while the mod is installed.'
+    Write-Host 'Always run 3_UNINSTALL_MOD.bat before entering RDO.'
 }
 
 try {
@@ -960,16 +960,16 @@ try {
 }
 catch {
     Write-Host ''
-    Write-Host ('BLAD: ' + $_.Exception.Message) -ForegroundColor Red
+    Write-Host ('ERROR: ' + $_.Exception.Message) -ForegroundColor Red
     if ($Action -eq 'Install' -and -not $Preview) {
-        Write-Host 'NIE URUCHAMIAJ GRY ANI RDO.' -ForegroundColor Red
-        Write-Host 'Zachowaj ten folder i uruchom 3_ODINSTALUJ_MOD.bat.' `
+        Write-Host 'DO NOT START THE GAME OR RDO.' -ForegroundColor Red
+        Write-Host 'Keep this folder and run 3_UNINSTALL_MOD.bat.' `
             -ForegroundColor Red
     }
     elseif ($Action -eq 'Uninstall' -and -not $Preview) {
-        Write-Host 'Loader moze nadal byc obecny. NIE WCHODZ DO RDO.' `
+        Write-Host 'The loader may still be present. DO NOT ENTER RDO.' `
             -ForegroundColor Red
-        Write-Host 'Zachowaj ten folder, zamknij gre/sidecar i ponow deinstalacje.' `
+        Write-Host 'Keep this folder, close the game/sidecar, and retry uninstallation.' `
             -ForegroundColor Red
     }
     exit 1

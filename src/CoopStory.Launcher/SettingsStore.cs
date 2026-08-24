@@ -19,7 +19,7 @@ public sealed class SettingsStore(LauncherPaths paths)
             if (settings is null || settings.SchemaVersion != 1)
             {
                 throw new LauncherException(
-                    "Plik ustawień ma nieobsługiwaną wersję.");
+                    "The settings file has an unsupported version.");
             }
 
             return settings;
@@ -27,7 +27,7 @@ public sealed class SettingsStore(LauncherPaths paths)
         catch (JsonException exception)
         {
             throw new LauncherException(
-                "Plik ustawień launchera jest uszkodzony.", exception);
+                "The launcher settings file is corrupted.", exception);
         }
     }
 

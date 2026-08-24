@@ -144,7 +144,7 @@ function Get-SafeTreeItems {
         $directory = $pending.Dequeue()
         foreach ($item in (Get-ChildItem -LiteralPath $directory -Force)) {
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw 'Paczka dist zawiera reparse point; instalacja zostala zatrzymana.'
+                throw 'The dist package contains a reparse point; installation was stopped.'
             }
             $items.Add($item)
             if ($item.PSIsContainer) {
@@ -154,7 +154,7 @@ function Get-SafeTreeItems {
                 $fileCount++
                 $totalBytes += [int64]$item.Length
                 if ($fileCount -gt $MaxFiles -or $totalBytes -gt $MaxBytes) {
-                    throw 'Paczka dist przekracza bezpieczny limit liczby lub rozmiaru plikow.'
+                    throw 'The dist package exceeds the safe file count or size limit.'
                 }
             }
         }
@@ -165,11 +165,11 @@ function Get-SafeTreeItems {
 
 $workspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\', '/')
 if (-not (Test-Path -LiteralPath $workspace -PathType Container)) {
-    throw 'WorkspaceRoot nie istnieje lub nie jest katalogiem.'
+    throw 'WorkspaceRoot does not exist or is not a directory.'
 }
 $workspaceItem = Get-Item -LiteralPath $workspace -Force
 if (($workspaceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-    throw 'WorkspaceRoot nie moze byc reparse pointem.'
+    throw 'WorkspaceRoot cannot be a reparse point.'
 }
 
 if ([string]::IsNullOrWhiteSpace($PackageRoot)) {
@@ -177,38 +177,38 @@ if ([string]::IsNullOrWhiteSpace($PackageRoot)) {
 }
 $package = [IO.Path]::GetFullPath($PackageRoot).TrimEnd('\', '/')
 if (-not (Test-Path -LiteralPath $package -PathType Container)) {
-    throw 'PackageRoot nie istnieje. Najpierw zbuduj i opublikuj katalog dist.'
+    throw 'PackageRoot does not exist. Build and publish the dist directory first.'
 }
 $packageItem = Get-Item -LiteralPath $package -Force
 if (($packageItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-    throw 'PackageRoot nie moze byc reparse pointem.'
+    throw 'PackageRoot cannot be a reparse point.'
 }
 if (-not (Test-PathWithin -Parent $workspace -Child $package)) {
-    throw 'PackageRoot musi znajdowac sie wewnatrz WorkspaceRoot.'
+    throw 'PackageRoot must be inside WorkspaceRoot.'
 }
 
 $gameRoot = [IO.Path]::GetFullPath($GamePath).TrimEnd('\', '/')
 $gameExe = Join-Path $gameRoot 'RDR2.exe'
 if (-not (Test-Path -LiteralPath $gameRoot -PathType Container) -or
     -not (Test-Path -LiteralPath $gameExe -PathType Leaf)) {
-    throw 'GamePath nie wskazuje katalogu zawierajacego RDR2.exe.'
+    throw 'GamePath does not point to a directory containing RDR2.exe.'
 }
 $gameRootItem = Get-Item -LiteralPath $gameRoot -Force
 if (($gameRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-    throw 'GamePath nie moze byc reparse pointem.'
+    throw 'GamePath cannot be a reparse point.'
 }
 if ((Test-PathWithin -Parent $gameRoot -Child $workspace) -or
     (Test-PathWithin -Parent $workspace -Child $gameRoot) -or
     $gameRoot.Equals($workspace, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'WorkspaceRoot i GamePath nie moga sie pokrywac ani zawierac nawzajem.'
+    throw 'WorkspaceRoot and GamePath cannot overlap or contain one another.'
 }
 if (@(Get-Process -Name RDR2 -ErrorAction SilentlyContinue).Count -gt 0) {
-    throw 'RDR2 jest uruchomione. Zamknij gre przed instalacja.'
+    throw 'RDR2 is running. Close the game before installation.'
 }
 
 $actualGameHash = Get-FileSha256 -Path $gameExe
 if ($actualGameHash -ne $ExpectedGameSha256.ToUpperInvariant()) {
-    throw 'Hash RDR2.exe nie odpowiada obslugiwanemu buildowi 1.0.1491.50.'
+    throw 'The RDR2.exe hash does not match supported build 1.0.1491.50.'
 }
 
 if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
@@ -217,13 +217,13 @@ if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
 $manifestFull = [IO.Path]::GetFullPath($ManifestPath)
 $allowedManifestRoot = [IO.Path]::GetFullPath((Join-Path $workspace 'artifacts\deploy')).TrimEnd('\', '/')
 if (-not (Test-PathWithin -Parent $allowedManifestRoot -Child $manifestFull)) {
-    throw 'ManifestPath musi znajdowac sie w WorkspaceRoot\artifacts\deploy.'
+    throw 'ManifestPath must be inside WorkspaceRoot\artifacts\deploy.'
 }
 if (Test-PathWithin -Parent $gameRoot -Child $manifestFull) {
-    throw 'Manifest wdrozenia nigdy nie moze znajdowac sie w katalogu gry.'
+    throw 'The deployment manifest must never be stored in the game directory.'
 }
 if (Test-Path -LiteralPath $manifestFull) {
-    throw 'Manifest wdrozenia juz istnieje. Najpierw uzyj Uninstall-DevBuild.ps1.'
+    throw 'The deployment manifest already exists. Run Uninstall-DevBuild.ps1 first.'
 }
 
 $bridgeSource = Join-Path $package 'CoopStoryBridge.asi'
@@ -232,11 +232,11 @@ $sidecarRoot = Join-Path $package 'sidecar'
 $sidecarExe = Join-Path $sidecarRoot 'CoopStory.Sidecar.exe'
 foreach ($requiredFile in @($bridgeSource, $configSource, $sidecarExe)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
-        throw 'Paczka dist nie zawiera wszystkich wymaganych artefaktow bridge/config/sidecar.'
+        throw 'The dist package does not contain all required bridge/config/sidecar artifacts.'
     }
     $item = Get-Item -LiteralPath $requiredFile -Force
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw 'Artefakty dist nie moga byc reparse pointami.'
+        throw 'Dist artifacts cannot be reparse points.'
     }
 }
 
@@ -245,42 +245,42 @@ $packageItems = @(Get-SafeTreeItems -Root $package)
 if (@($packageItems | Where-Object {
     (-not $_.PSIsContainer) -and ($forbiddenRedistribution -contains $_.Name)
 }).Count -gt 0) {
-    throw 'Paczka dist zawiera plik runtime/trainer, ktorego projekt nie moze redystrybuowac.'
+    throw 'The dist package contains a runtime/trainer file that the project cannot redistribute.'
 }
 
 try {
     $config = Get-Content -LiteralPath $configSource -Raw | ConvertFrom-Json
 }
 catch {
-    throw 'coopstory.example.json nie jest poprawnym dokumentem JSON.'
+    throw 'coopstory.example.json is not a valid JSON document.'
 }
 $schemaVersion = Get-PropertyValue -Object $config -Name 'schemaVersion'
 $role = [string](Get-PropertyValue -Object $config -Name 'role')
 if ($schemaVersion -ne 1 -or @('Host', 'Guest') -notcontains $role) {
-    throw 'Konfiguracja musi miec schemaVersion=1 oraz role Host albo Guest.'
+    throw 'The configuration must use schemaVersion=1 and role Host or Guest.'
 }
 $tcpPort = Get-PropertyValue -Object $config -Name 'tcpPort'
 $udpPort = Get-PropertyValue -Object $config -Name 'udpPort'
 if ($tcpPort -lt 1 -or $tcpPort -gt 65535 -or
     $udpPort -lt 1 -or $udpPort -gt 65535 -or
     $tcpPort -eq $udpPort) {
-    throw 'Konfiguracja zawiera nieprawidlowe lub identyczne porty TCP/UDP.'
+    throw 'The configuration contains invalid or identical TCP/UDP ports.'
 }
 $safety = Get-PropertyValue -Object $config -Name 'safety'
 if ($null -eq $safety -or
     (Get-PropertyValue -Object $safety -Name 'storyModeOnly') -ne $true -or
     (Get-PropertyValue -Object $safety -Name 'refuseOnlineMode') -ne $true) {
-    throw 'Konfiguracja musi wymuszac safety.storyModeOnly=true i safety.refuseOnlineMode=true.'
+    throw 'The configuration must enforce safety.storyModeOnly=true and safety.refuseOnlineMode=true.'
 }
 
 $bridgeTarget = Join-Path $gameRoot 'CoopStoryBridge.asi'
 $configTarget = Join-Path $gameRoot 'CoopStory.config.json'
 foreach ($target in @($bridgeTarget, $configTarget)) {
     if (-not (Test-PathWithin -Parent $gameRoot -Child $target)) {
-        throw 'Wykryto target poza katalogiem gry.'
+        throw 'A target outside the game directory was detected.'
     }
     if (Test-Path -LiteralPath $target) {
-        throw 'Docelowy plik projektu juz istnieje; instalator odmawia nadpisania.'
+        throw 'The destination project file already exists; the installer refuses to overwrite it.'
     }
 }
 
@@ -292,7 +292,7 @@ $sidecarFiles = @($packageItems |
     } |
     Sort-Object FullName)
 if ($sidecarFiles.Count -eq 0 -or $sidecarFiles.Count -gt 1000) {
-    throw 'Katalog sidecara jest pusty albo przekracza bezpieczny limit 1000 plikow.'
+    throw 'The sidecar directory is empty or exceeds the safe limit of 1000 files.'
 }
 $sidecarLines = New-Object 'System.Collections.Generic.List[string]'
 foreach ($file in $sidecarFiles) {
@@ -338,15 +338,15 @@ $manifest = [ordered]@{
 Write-Output 'Plan wdrozenia:'
 Write-Output '  game root: CoopStoryBridge.asi'
 Write-Output '  game root: CoopStory.config.json'
-Write-Output '  sidecar: pozostaje w workspace\dist\sidecar'
-Write-Output '  ScriptHook/trainer: bez zmian'
+Write-Output '  sidecar: remains in workspace\dist\sidecar'
+Write-Output '  ScriptHook/trainer: unchanged'
 
 if (-not $Apply) {
-    Write-Output 'Dry-run zakonczony. Uzyj -Apply, aby wykonac dokladnie powyzsze operacje.'
+    Write-Output 'Dry run complete. Use -Apply to perform exactly the operations shown above.'
     return
 }
-if (-not $PSCmdlet.ShouldProcess($gameRoot, 'Instalacja dwoch plikow projektu RDR2 Coop Story')) {
-    Write-Output 'Dry-run/WhatIf: nie zmieniono katalogu gry.'
+if (-not $PSCmdlet.ShouldProcess($gameRoot, 'Install two RDR2 Coop Story project files')) {
+    Write-Output 'Dry-run/WhatIf: the game directory was not changed.'
     return
 }
 
@@ -355,7 +355,7 @@ if (-not (Test-Path -LiteralPath $manifestDirectory -PathType Container)) {
     $null = New-Item -ItemType Directory -Path $manifestDirectory
 }
 if (Test-Path -LiteralPath $manifestFull) {
-    throw 'Manifest pojawil sie w trakcie operacji; instalator odmawia nadpisania.'
+    throw 'The manifest appeared during the operation; the installer refuses to overwrite it.'
 }
 
 $deploymentTag = ([string]$manifest.DeploymentId).Replace('-', '')
@@ -371,12 +371,12 @@ try {
     # flushed to disk and verified before either final target becomes visible.
     Copy-FileToStagingExclusive -Source $bridgeSource -Destination $bridgeStaging
     if ((Get-FileSha256 -Path $bridgeStaging) -ne $bridgeHash) {
-        throw 'Weryfikacja stagingu bridge nie powiodla sie.'
+        throw 'Bridge staging verification failed.'
     }
 
     Copy-FileToStagingExclusive -Source $configSource -Destination $configStaging
     if ((Get-FileSha256 -Path $configStaging) -ne $configHash) {
-        throw 'Weryfikacja stagingu konfiguracji nie powiodla sie.'
+        throw 'Configuration staging verification failed.'
     }
 
     # The manifest is durable before the first atomic rename. If the process is
@@ -387,7 +387,7 @@ try {
 
     if ((Test-Path -LiteralPath $bridgeTarget) -or
         (Test-Path -LiteralPath $configTarget)) {
-        throw 'Docelowy plik pojawil sie podczas stagingu; instalator odmawia nadpisania.'
+        throw 'A destination file appeared during staging; the installer refuses to overwrite it.'
     }
 
     [IO.File]::Move($bridgeStaging, $bridgeTarget)
@@ -397,7 +397,7 @@ try {
 
     if ((Get-FileSha256 -Path $bridgeTarget) -ne $bridgeHash -or
         (Get-FileSha256 -Path $configTarget) -ne $configHash) {
-        throw 'Weryfikacja finalnych plikow projektu nie powiodla sie.'
+        throw 'Final project file verification failed.'
     }
 }
 catch {
@@ -437,7 +437,7 @@ catch {
 $runtimePresent = (Test-Path -LiteralPath (Join-Path $gameRoot 'ScriptHookRDR2.dll') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $gameRoot 'dinput8.dll') -PathType Leaf)
 
-Write-Output ('Wdrozenie zakonczone. Manifest: ' + $manifestFull)
+Write-Output ('Deployment complete. Manifest: ' + $manifestFull)
 if (-not $runtimePresent) {
-    Write-Warning 'ScriptHook runtime nie jest obecny. Ten skrypt celowo go nie instaluje ani nie redystrybuuje.'
+    Write-Warning 'The Script Hook runtime is not present. This script intentionally does not install or redistribute it.'
 }
