@@ -1,0 +1,112 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "bridge-vs2026",
+      "displayName": "Bridge simulator and self-tests (VS 2026 x64)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/bridge-vs2026",
+      "cacheVariables": {
+        "COOPSTORY_BUILD_ASI": "OFF",
+        "COOPSTORY_BUILD_SELF_TESTS": "ON",
+        "COOPSTORY_BUILD_SIMULATOR": "ON"
+      }
+    },
+    {
+      "name": "bridge-asi-vs2026",
+      "displayName": "Private validation ASI and self-tests (VS 2026 x64)",
+      "inherits": "bridge-vs2026",
+      "binaryDir": "${sourceDir}/build/bridge-asi-vs2026",
+      "cacheVariables": {
+        "COOPSTORY_BUILD_ASI": "ON",
+        "COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS": "ON",
+        "SCRIPT_HOOK_RDR2_SDK_DIR": "$env{SCRIPT_HOOK_RDR2_SDK_DIR}"
+      }
+    },
+    {
+      "name": "bridge-vs2022",
+      "displayName": "Bridge simulator and self-tests (VS 2022 x64)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/bridge-vs2022",
+      "cacheVariables": {
+        "COOPSTORY_BUILD_ASI": "OFF",
+        "COOPSTORY_BUILD_SELF_TESTS": "ON",
+        "COOPSTORY_BUILD_SIMULATOR": "ON"
+      }
+    },
+    {
+      "name": "bridge-asi-vs2022",
+      "displayName": "Private validation ASI and self-tests (VS 2022 x64)",
+      "inherits": "bridge-vs2022",
+      "binaryDir": "${sourceDir}/build/bridge-asi-vs2022",
+      "cacheVariables": {
+        "COOPSTORY_BUILD_ASI": "ON",
+        "COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS": "ON",
+        "SCRIPT_HOOK_RDR2_SDK_DIR": "$env{SCRIPT_HOOK_RDR2_SDK_DIR}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "bridge-vs2026-release",
+      "configurePreset": "bridge-vs2026",
+      "configuration": "Release"
+    },
+    {
+      "name": "bridge-asi-vs2026-release",
+      "configurePreset": "bridge-asi-vs2026",
+      "configuration": "Release"
+    },
+    {
+      "name": "bridge-vs2022-release",
+      "configurePreset": "bridge-vs2022",
+      "configuration": "Release"
+    },
+    {
+      "name": "bridge-asi-vs2022-release",
+      "configurePreset": "bridge-asi-vs2022",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "bridge-vs2026-release",
+      "configurePreset": "bridge-vs2026",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "bridge-asi-vs2026-release",
+      "configurePreset": "bridge-asi-vs2026",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "bridge-vs2022-release",
+      "configurePreset": "bridge-vs2022",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "bridge-asi-vs2022-release",
+      "configurePreset": "bridge-asi-vs2022",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

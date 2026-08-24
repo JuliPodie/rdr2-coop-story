@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/CoopStory.Protocol/CoopStory.Protocol.csproj" />
+  <Project Path="src/CoopStory.Launcher/CoopStory.Launcher.csproj" />
+  <Project Path="src/CoopStory.Sidecar/CoopStory.Sidecar.csproj" />
+  <Project Path="tests/CoopStory.SelfTest/CoopStory.SelfTest.csproj" />
+  <Project Path="tests/CoopStory.Launcher.SelfTest/CoopStory.Launcher.SelfTest.csproj" />
+</Solution>

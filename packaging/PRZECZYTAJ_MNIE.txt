@@ -1,0 +1,822 @@
+RDR2 COOP STORY — CUTSCENE MISSION OWNERSHIP V31.10 ALPHA (TEST 2 PC)
+=====================================================================
+
+To jest prywatny test techniczny w Story Mode, a nie gotowa kampania coop.
+V31.10 używa protokołu 20 i zachowuje eksperymentalny runtime
+capture Story VM oraz natywne tworzenie dokładnej sceny guesta. Checkbox
+STORY VM CAPTURE obok ANIMGRAPH REPLICA jest domyślnie wyłączony. Po włączeniu
+preflight wymaga przypiętego RDR2 1.0.1491.50 / ScriptHook 1.0.1491.17, siedmiu
+dokładnych RVA oraz zgodnych prologów. Tylko host zakłada detoury i przechwytuje
+zasób, playback, flagi i role. Guest wykonuje ten sam bezpieczny preflight, ale
+nie patchuje Story VM; może utworzyć wyłącznie własną bridge-owned
+AnimScene po handshake Definition -> GuestReady/Rejected -> HostPlayCommit/Abort.
+Nierozwiązany gracz wybiera SAFE_FALLBACK. Pedy, konie oraz rekwizyty aktywnej
+sceny dostają stabilne ID przez ograniczony graf `WorldEntityKind.Object`; dla
+`cutscene@ODR1_INT` definicja może zawierać 22 role; zwolnione już przez grę
+role `p_*`/`w_*` mogą pozostać opcjonalne. Żadna scena nie dostaje LOAD, dopóki
+wszystkie role oznaczone jako wymagane nie istnieją i nie są przypięte.
+Trampolina handlera ról nie
+nadpisuje już `RAX`, więc oryginalna scena hosta zachowuje własne przypisania
+pedów. Instrukcja:
+TEST_V31_ANIMSCENE_HYBRID.md. Obowiązkowo wykonaj oba PC najpierw z Capture OFF,
+a następnie oba PC z Capture ON.
+
+V31.10 nie dotyka globalnego MISSION_FLAG w swobodnej grze. Po rozpoczęciu
+autorytatywnej misji hosta utrzymuje jednak lokalny slot Story guesta zajęty aż
+do terminala, aby nie uruchomiła się druga prywatna misja z `Gang Abandoned`. Straż
+blokuje wyłącznie zweryfikowanego, mission-owned człowieka z rzeczywistym blipem;
+zwykłe M2/rozmowa z NPC i prompt własnego konia pozostają aktywne. Nakładający
+się przycisk talk/mount nie może już stworzyć fałszywego Knockdown i zrzucić
+drugiego gracza z jego konia. Prawdziwe ściągnięcie z siodła ma jawny wariant
+MPUL, a każda relacja rider/mount ponownie sprawdza, że dotyka wyłącznie zdalnej
+repliki, nigdy lokalnego PLAYER_PED_ID.
+
+V31.10 nigdy nie pauzuje ani nie przyspiesza game-owned sceny hosta. Guest
+wykonuje CREATE i wielokrotnie czeka na proxy. LOAD jest zabroniony przy
+niepełnej obsadzie, a po `resource-loaded` wszystkie wymagane role są ponownie
+weryfikowane i
+dopiero wtedy odpowiada `GuestReady`. Timeout nie może wystartować niepełnej
+sceny. Prywatna
+scena Story guesta zachowuje natywne tempo i pozostaje pod stale reassertowaną
+kamerą kwarantanny. Wykryty prywatny handle jest śledzony aż naprawdę przestanie
+działać, zamiast zwalniać kwarantannę po chwilowym braku wyniku skanera.
+Związana obsada
+exact pozostaje widoczna. Ukryty lokalny aktor guesta jest stagingowany poza
+triggerem Story do chwili wspólnego resume, aby nie wystartowała druga prywatna
+misja. Głosy skipu nie wygasają już po pięciu sekundach, ale nadal wymagają
+zgody obu osób. V31.10 ogranicza
+niebezpieczną prezentację mounta do 20 Hz oraz
+rozdziela jej crash breadcrumbs. Odbiorca lassa nie uruchamia rzutu przy samym
+Begin/namierzeniu, a fallback restraint może powalić wyłącznie ofiarę.
+
+V31.10 zachowuje hostowy graf Dutch/Hosea/NPC/koni przy samym wejściu w drugą,
+konną prezentację. Poprzednio guest kasował poprawne proxy, a potem wybierał
+fallback bez obsady. Po końcu sceny przygotowanie powrotu używa świeżej pozycji
+hosta i czeka 250 ms na jej stabilność zamiast używać starego anchoru przejścia.
+Podczas aktywnej misji hosta nieprzypisana do peda/obiektu/pojazdu lokalna kara
+granicy lub pogody jest odcinana już przy 30% zdrowia, zanim prywatny save zdąży
+uruchomić checkpoint reload. Normalne rozpoznane obrażenia fizyczne pozostają
+aktywne. Panel moda pokazuje wspólny autorytet oraz pozycję hosta, lecz dokładny
+tekst vanilla objective nie jest jeszcze częścią protokołu 20.
+
+Po reconnect guest najpierw czyści stary graf i cache, a host odtwarza kolejno
+stan misji, cinematic, role parent-first i dopiero definicję z nową rewizją oraz
+fingerprintem. Opóźniony GuestReady ze starszej próby jest odrzucany. W fazie
+PrepareResume samo HelloAck nie opuszcza bariery przed świeżym streamem guesta;
+host bez guesta nadal kończy scenę normalnie.
+
+V31.1 wiąże replay, akcje graczy i named pipe z konkretną generacją połączenia.
+Stary suffix snapshotu, lasso/interaction albo reset pipe nie może przejść na nową
+sesję. Datagram UDP zawiera uwierzytelnione InstanceId bieżącego handshake TCP i
+ścisły floor sekwencji, więc opóźniony pakiet starego procesu nie przypnie portu
+nowego guesta. Request o replay hosta jest wysyłany dopiero po potwierdzonym,
+pełnym zapisie lokalnego resetu do gotowego bridge'a.
+
+V30.3 wykorzystuje pełne logi HOST/GUEST V30.2. Brak zgodnej lokalnej AnimScene
+nie daje już pustego kadru: pod kamerą hosta widoczna jest niekolizyjna obsada
+proxy z wygładzonym korzeniem i lokalnym idle/lokomocją. Tylko `ATTACHED` daje
+oryginalne gesty, lipsync i audio; `PROXY_CAST_FALLBACK` jest prezentacją
+ograniczoną. Po końcu sceny hosta bridge wykrywa późną lokalną AnimScene guesta
+i podaje jej jedno okno skipu, żeby sceny nie szły jedna po drugiej.
+Mission gate pozostaje zajęty, ale ponieważ RDR2 może zostawić marker żółty,
+właściwą blokadą jest pełnoczasowa straż kontekstu przy aktorze Story i szary
+komunikat moda. Lasso wcześniej rozpoznaje peer na promieniu kamery i nie jest
+restartowane przez stary target-only Sustain. Protokół pozostaje 18.
+V30.2 wykorzystuje dane z nagrania SOLO do naprawy wspólnego odbiornika co-op.
+Stojący zdalny strzał uruchamia krótki natywny graf broni przy wyzerowanej
+amunicji proxy, więc pojawia się impuls strzału/recoil bez drugiego szkodliwego
+pocisku. Cover i crouch mają watchdogy odzyskiwania, a przejście stealth→cover
+nie kasuje już wspólnej gałęzi crouch. Protokół pozostaje 18.
+V30.1 przebudowuje diagnostykę F7. Jeden marker dostaje wspólny identyfikator
+HOST/GUEST, jest przekazywany do drugiego komputera i uruchamia po obu stronach
+15 sekund próbek co 500 ms: transport, pozycje, akcje, lasso, cover, misję,
+kamerę i AnimScene. Eksport dodaje `MARKER_WINDOWS.md/json` z kontekstem 10 sekund
+przed i 15 sekund po błędzie. Protokół pozostaje 18.
+V30.0 naprawia konwencję headingu RDR2 i dodaje osiem kierunków ruchu,
+natywny obrót w miejscu, arm/head/leg/torso IK oraz semantykę brodzenia,
+pływania i zanurzenia. Znormalizowana faza akcji jest wspólnym zegarem
+transakcji, a nie udawanym odczytem fazy klipu. Dokładne clip ID, tackle/hogtie,
+mount, loot/carry i lipsync pozostają ograniczone do czasu zweryfikowania
+wersjonowanego readera. Protokół pozostaje 18.
+V29.6 naprawia problemy potwierdzone logami pełnego testu V29.5: fallback
+cutscenki nie pokazuje już proxy NPC/koni bez lokalnego grafu AnimScene, zgodna
+scena ma jedną próbę wznowienia, a utrata sterowania podczas ładowania nie
+uruchamia pętli kwarantanny i Mission Failed. Mission gate jest zajęty przez cały
+lease guesta, lecz straż kontekstu nie blokuje free-roam ani własnego konia.
+Niewidoczne konie hosta nie trafiają do JOIN. Cios kończy animację po terminalu,
+a lasso zachowuje task i oddaje fizycznej linie pierwszeństwo przed korekcją
+pozycji. Hasło launchera może mieć 4–64 znaki. Protokół pozostaje 18.
+V29.5 przywraca aktywowaną przez misję hosta szarą blokadę/kłódkę lokalnych
+markerów guesta, pokazuje guestowi panel wspólnego celu fabularnego i przebudowuje
+lasso. Zdalny gracz wybiera prawdziwe lasso już podczas Aim, a celowany Begin
+uruchamia natywne `TASK_LASSO_PED` przed potwierdzeniem trafienia. Chybienie nie
+jest już zastępowane sztucznym ragdollem; złapanie, lina i fizyka należą do RDR2.
+V29.4 zachowuje transport AnimScene V29.2 i lobby V29.3, ale zastępuje widoczny
+kod R2C1 hasłem. HOST wpisuje hasło dwa razy, GUEST podaje IPv4 i to samo hasło,
+a launcher pokazuje `HASŁO ZAPISANE`. Hasło nie jest zapisywane jawnie. Lokalny
+save hosta wybiera się teraz w `Ustawieniach`, a panel F8 nie ma HOST/JOIN.
+V29.3 przenosi podstawowe HOST/JOIN do
+launchera. Małe lobby pokazuje nicki, czerwonego HOST-a, niebieskiego GUEST-a,
+stan połączenia oraz ping w ms. Panel F8 jest domyślnie zamknięty i służy tylko
+awaryjnie. V29.2 zachowuje kamerę V28 i dodaje bezpieczne dopasowanie lokalnej AnimScene
+oraz pełny uporządkowany zestaw shop-componentów stroju MetaPed. Host nadal nie
+ogłasza Playing, dopóki guest nie potwierdzi prezentacji i nie istnieje poprawny
+keyframe kamery (awaryjny timeout to 1,5 s). Guest stosuje pozycję, obrót i FOV
+bez gameplayowego wygładzania cięć oraz zachowuje ostatnią klatkę przez 2,5 s
+krótkiej utraty UDP. Aktorzy hostowej sceny mają osobny cinematic root lane 30 Hz;
+nie dostają już powtarzanego TASK_STAND_STILL.
+
+Blokada wszystkich lokalnych misji guesta jest uzbrojona przez cały czas
+uwierzytelnionego połączenia. Waniliowy marker może nadal wyglądać na żółty;
+straż klawiszy kontekstowych jest właściwą blokadą i działa przy pobliskim
+aktorze Story przez cały lease.
+Jeżeli stary save guesta spróbuje nałożyć bezźródłową karę lethal (np. lokalny
+skrypt pogody/granicy rozdziału), nie staje się ona autorytatywnym Downed.
+Protokół 20 nie łączy się ze starszymi paczkami protokołu 19 (V31.5 i starsze).
+
+V29 kopiuje dokładny zestaw komponentów stroju, jeśli model postaci proxy jest
+zgodny. Podczas sceny host wysyła dictionary hash, duration, phase, rate i origin.
+Jeżeli guest ma tę samą lokalną AnimScene, dostaje jej oryginalną kamerę, aktorów,
+dialog, napisy i audio. Jeżeli jej nie ma, mod nie uruchamia drugiej misji i
+pozostaje przy stabilnej kamerze V28. Ten fallback jest poprawnym wynikiem testu.
+
+Pominięcie cutscenki wymaga teraz dwóch głosów w ciągu 5 sekund — hosta i
+guesta. Po konsensusie oba procesy RDR2 pomijają swoją lokalną AnimScene;
+pojedyncze przypadkowe naciśnięcie nie uruchamia skipu. Kucanie ma
+płynne natywne wejście/wyjście, Q/osłona zachowuje krótki stan wejścia i ma
+awaryjną pozę po nieudanym przejęciu lokalnego cover point. Sliding uruchamia
+kontrolowaną odbudowę tasku chodu po 350 ms. Guest skanuje lokalnych aktorów
+misji w promieniu 20 m i blokuje ich kontekst zanim własny marker uruchomi scenę.
+
+V26.1 zawiera pilny hotfix ruchu i lassa po teście V26.0. Zachowuje handshake
+wznowienia cutscenek, osłonę oraz hostowy świat encji, ale nie resetuje już
+AnimGraphu wyłączeniem crouch w każdej klatce. Końcowe Lasso/End jest rozpoznawane
+po actor + actionId nawet wtedy, gdy RDR2 zdążyło wyzerować target. Aktywne lasso
+ma heartbeat, a brak heartbeatów przez 3,5 s awaryjnie oddaje sterowanie graczowi.
+
+V26.0 naprawia handshake wznowienia cutscenek, kucanie, osłonę oraz trwałość
+powalenia i więzów. Rozszerza także hostowy świat encji na czas cutscenki.
+Prawdziwe skrypty, cele, checkpointy i zapis kampanii nadal działają wyłącznie
+u hosta. Protokół 16 odrzuca starsze buildy. Guest otrzymuje hostowe encje,
+generację misji/cutscenki, kamerę oraz kontrolowane wznowienie po scenie.
+
+Interakcje między graczami mają teraz osobny host-authoritative protokół. Host
+sprawdza ID, dystans, świeżość stanu i lifecycle przed zatwierdzeniem revive,
+uwolnienia z lassa oraz operacji mount/dismount. Lasso ma jawny stan
+Free/Lassoed/Hogtied. F9 zawiera `Ratunek awaryjny gracza`, który służy wyłącznie
+do odzyskania postaci z utkniętego downed/ragdoll/constraint.
+
+World Mirror zachowuje stabilne NetEntityId, priorytety ScriptOwned/Combat/
+Interactive, histerezę oraz grace time. Oczekiwanie na model nie jest już
+traktowane jak błąd spawnu i nie powoduje pętli despawn/spawn.
+
+NOWOŚCI I DIAGNOSTYKA V30.3
+----------------------
+
+- Strój każdego gracza ma model, rewizję, fingerprint i do 64 uporządkowanych
+  komponentów MetaPed; zmiana jest niezawodna, a model mismatch nie resetuje proxy.
+- `ANIMSCENE_REPLICA ATTACHED` oznacza pełną lokalną prezentację sceny.
+  `SAFE_FALLBACK` po pełnym skanie oznacza, że guest nie miał zgodnej sceny i
+  użył kamery hosta.
+- Host transportuje tylko AnimScene posiadającą aktywną kamerę, więc scena
+  ambientowa bez kamery nie może zasłonić właściwej cutscenki.
+- Snapshot AnimScene jest dopuszczony przez uwierzytelniony kanał UDP; po stronie
+  guesta licznik `animscene-host-stream` nie powinien już pozostawać zerowy.
+- `SkipPending` jest wykonywany po obu stronach. Późne sceny lokalnego save'a
+  guesta są tłumione przez całą aktywną misję hosta i kwarantannę; bridge-owned
+  exact scene jest z tego globalnego wejścia jawnie wyłączona.
+- `SESSION_HEALTH` pokazuje wiek strumienia sceny, tryb native/fallback oraz
+  rewizję i liczbę komponentów wyglądu.
+
+- Native crouch jest przełączany tylko przy wejściu/wyjściu z kucania. Zwykłe
+  chodzenie, sprint i aim nie są już zerowane w każdej renderowanej klatce.
+- Jeżeli task broni/ruchu zgubi crouch lub natywny cover, odbiorca mierzy brak i
+  wykonuje ograniczone ponowienie. Log rozdziela `stealth-recoveries`,
+  `cover-reacquires` i `cover-fallback-recoveries`.
+- Stojący strzał ma `fire-graph-pulses` oraz `fire-ammo-restores`. Liczba impulsów
+  powinna odpowiadać widocznym strzałom; amunicja proxy nie może pozostać zerowa.
+- Terminal lassa nie wymaga lokalnego target handle. Host zwalnia właściwy stan
+  przez stabilne actorEntityId + actionId i rozsyła Free do obu komputerów.
+- Sustain lassa odświeża tę samą rewizję jako heartbeat. Bridge ma niezależną
+  dzierżawę 3,5 s, więc utracony terminal lub przerwany sidecar nie może trwale
+  pozostawić gracza ani proxy na ziemi.
+
+- Host nie kończy już `PrepareResume` po sztywnych 5 sekundach. Pozostaje za
+  czarnym ekranem i bez sterowania, dopóki aktywny guest nie odeśle
+  `ResumeReady`; rozłączenie guesta zwalnia barierę bez deadlocka.
+- Timer streamingu guesta używa osobnego, stabilnego anchoru. Kamera spectator
+  nie zeruje go już co klatkę, więc normalne potwierdzenie następuje po około
+  250 ms przygotowania świata.
+- Pod zsynchronizowaną kamerą działa osobny graf korzenia aktorów sceny do 30 Hz.
+  Lokalne NPC save'a guesta pozostają zamaskowane. Proxy hostowego grafu świata
+  są ukryte przy `ATTACHED`. Przy `PROXY_CAST_FALLBACK` V30.3 pokazuje je bez
+  kolizji, z wygładzonym korzeniem i lokalnym idle/lokomocją; nie oznacza to
+  dokładnych gestów, lipsyncu ani ścieżek AnimScene.
+- Kucanie używa właściwego grafu ruchu RDR2 po obu stronach. Cover nie restartuje
+  wejścia co sekundę: ma pojedyncze wejście, najwyżej jedną próbę ponowną i
+  podtrzymanie, które nie kasuje pozycji osłony.
+- Downed, zwykły ragdoll oraz hostowy stan Lassoed/Hogtied są podtrzymywane na
+  widocznym proxy, aż niezawodny stan końcowy je zwolni.
+- Log błędu natywnego zawiera teraz etap ticka. Po złapanym access violation mod
+  nie wykonuje ryzykownego drugiego sprzątania natywów w destruktorze, dzięki
+  czemu diagnostyka powinna pozostać dostępna bez kolejnego popupu ScriptHooka.
+
+- F7 zapisuje `USER_MARKER` bez otwierania F9. Gdy coś się rozjedzie, wystarczy,
+  że jedna osoba naciśnie F7. Druga dostanie ten sam identyfikator i komunikat
+  `MARKER ERROR ... ODEBRANY`. Grajcie jeszcze co najmniej 15 sekund przed
+  zatrzymaniem sesji. Dwa różne objawy można oznaczyć dwoma osobnymi markerami.
+- F9 ma dwie kolumny: częste akcje sesji/ratunku po lewej i rzadsze narzędzia
+  testowe po prawej. Strzałki lewo/prawo przełączają grupę.
+- HOST po kliknięciu `HOSTUJ` wpisuje i potwierdza hasło sesji. GUEST po
+  kliknięciu `DOŁĄCZ` wpisuje IPv4 hosta oraz identyczne hasło.
+- PBKDF2 przygotowuje wewnętrzne poświadczenie protokołu 20 poza wątkiem UI;
+  jawne hasło nie trafia do ustawień, konfiguracji ani diagnostyki.
+- Lokalny save hosta jest wybierany na stronie `Ustawienia`. F8 pozostał
+  panelem awaryjnym bez HOST/JOIN i bez zaproszenia ze schowka.
+- Co sekundę zapisywany jest stan sesji, misji, graczy i grafu encji. Osobne
+  zdarzenia opisują początek, podtrzymanie, koniec i powód odrzucenia walki,
+  lassa oraz relacji rider–mount.
+- Sidecar mierzy dla każdego typu wiadomości kierunek, liczbę ramek odebranych,
+  dostarczonych, odrzuconych i scalonych, P95/maksymalną przerwę oraz moment
+  utraty i odzyskania strumienia.
+- Eksport diagnostyki zawiera `TIMELINE.md/json`, `ANOMALIES.md/json` i
+  `MARKER_WINDOWS.md/json`; rotacje są scalane i ograniczane do dwóch najnowszych
+  sesji zapisanych w `DIAGNOSTICS_SESSIONS.json`.
+  Jeden fingerprint i identyfikator markera pozwalają połączyć hosta z guestem,
+  ale sekret sesji, adresy i prywatne ścieżki są redagowane.
+- Kucanie ma awaryjny latch wejścia, Q/osłona osobne flagi i natywny task cover.
+  F9 zawiera osobne `Daj lasso (test)` obok pistoletu.
+- Cel walki korzysta z natywnego lock-on oraz bliskiego dystansu, dzięki czemu
+  powalenie jest wykonywane na komputerze ofiary także po utracie lock-on.
+- Powalenie pamięta przez 1,8 s ostatni atak/grapple i łączy go z późniejszym
+  wejściem proxy w ragdoll. F9 wymusza lasso i od razu je wybiera.
+- Nieobsłużony błąd natywny zapisuje `[FATAL][SEH]` z kodem i adresem do
+  `bridge.log`; eksport klasyfikuje go osobno jako `NATIVE_CRASH`.
+
+Guest widzi syntetyczny żółty znacznik/status celu hosta. Nie jest to tekst z jego
+lokalnego skryptu. Podczas cutscenki klient jest ukryty i zamrożony, lokalna błędna
+obsada oraz jej doczepiona broń/ekwipunek znikają, a mod odtwarza pozycję, obrót
+i FOV kamery hosta. Jeśli snapshot
+kamery chwilowo zaginie, działa bezpieczny follow-camera fallback. Reliable stan
+misji zwalnia kamerę po zakończeniu sceny.
+
+Najważniejsza poprawka NPC: rozpoczęcie misji nie powoduje już odrzucenia całego
+grafu hosta. Zwykli ludzie mają dodatkową klasyfikację `GET_PED_TYPE`, a aktorzy
+script-owned są dopuszczani do 300 m, mają dłuższą retencję i najwyższy priorytet.
+Lokalne NPC guesta są
+maskowane odwracalnie. Podczas cutscenki/ładowania guest przechodzi do natywnej
+kamery spectator i po zakończeniu wraca obok hosta. Checkpoint zwiększa generację,
+czyści stary graf i żąda ponownego osadzenia guesta.
+
+Guest może pomagać hostowi strzelać do aktywnych wrogów misji. V22 pokazuje
+hostowy graf, żółty cel towarzysza i kamerę sceny, ale nie kopiuje całej maszyny
+skryptów, dokładnych napisów vanilla, AnimScene/audio, drzwi, pojazdów ani
+przedmiotów fabularnych. Interakcje fabularne uruchamia wyłącznie host. W trudnym
+fragmencie użyj `Solo override`.
+
+Walka wręcz nie odświeża już autonomicznej kombinacji RDR2: jeden `Begin` może
+uruchomić najwyżej jeden ograniczony cios, a terminal/deadline czyści task.
+Zrzucenie z konia jest wykonywane i potwierdzane na komputerze ofiary, z najwyżej
+jedną kontrolowaną ponowną próbą. Dokładny klip kończyn nadal wymaga dalszego
+odczytu AnimGraphu i nie jest obiecywany w tej wersji.
+
+V20.0 zastępuje ulotne flagi walki niezawodnymi transakcjami z ID, rewizją i
+fazami Begin/Sustain/End/Cancel. Puszczenie ataku jawnie kończy autonomiczny task
+RDR2, a watchdog usuwa go również po utracie końcowego pakietu. Celowanie ma
+osobny task dla stania oraz ruchu i nie jest już omijane przez AnimGraph Replica.
+
+Lasso uruchamia dokładnie jeden natywny TASK_LASSO_PED dla danego actionId,
+potwierdza, czy silnik naprawdę utworzył więź, i podczas tej akcji przejmuje
+kontrolę nad puppet motorem. Zapobiega to nakładaniu lin, rzucaniu całym modelem
+broni i walce korekcji pozycji z fizyką lassa. Po End/Cancel albo po 2,5 s bez
+pakietu lina, task oraz tymczasowe flagi są sprzątane. Awaryjny ragdoll jest
+jednorazowy, nie jest ponawiany co 250 ms.
+
+Koń drugiego gracza ma teraz wspólną tożsamość: guest dosiadający konia hosta
+odwołuje się do tej samej lokalnej encji zamiast spawnować duplikat. Relacja
+rider–mount jest uzgadniana co 250 ms, chwilowy brak stanu ma debounce 8 s,
+a miękka korekcja konia nie zmienia osi Z, aby lokalna fizyka podłoża zachowała IK
+kopyt. Jest to duża poprawka relacji i desynchronizacji; pełna identyczna animacja
+wsiadania/zrzucania nadal wymaga weryfikacji w następnym teście dwóch komputerów.
+
+Eksport diagnostyki zawiera teraz DIAGNOSTICS_SUMMARY.json oraz osobne indeksy
+błędów, ostrzeżeń i podsumowań runtime. Najważniejsze tagi V20 to ACTION_TX,
+ACTION_FSM, ACTION_APPLY, AIM_POSE, LASSO_ROPE, VICTIM_CONSTRAINT, MOUNT_LOCAL,
+REMOTE_MOUNT_RX, REMOTE_MOUNT_RELATION, WORLD_POOL i WORLD_PROXY_PHYSICS.
+
+F9 ma pozycje `Daj pistolet + max ammo (test)` oraz `Daj lasso (test)`. Broń jest dodawana wyłącznie
+lokalnemu graczowi. Zdalna broń jest ponownie osadzana w dłoni, jeżeli task ruchu
+ją schowa. Koń używa łagodnej korekty pozycji zachowującej task i IK; nowe logi
+`REMOTE_MOUNT` podają błąd, liczbę korekt i odstępy snapshotów.
+
+Klient uznaje teraz pusty graf encji hosta za prawidłowy stan po otrzymaniu
+uwierzytelnionego WorldState. Dzięki temu NPC z własnego save'a klienta nie są
+przywracane tylko dlatego, że host w danej chwili nie wysłał żadnego peda.
+
+V18.1 zachowuje AnimGraph State Sync V17.0 oraz poprawki walki/świata V18.0.
+Dodaje wielokrotny cykl sesji bez restartowania gry:
+
+- menu F8 ma `ZATRZYMAJ SESJE - wroc do HOST / JOIN`;
+- STOP kończy TCP/UDP, informuje drugiego gracza, usuwa zdalne repliki i czyści
+  stan roli, świata oraz poprzedniego zaproszenia po obu stronach;
+- sidecar pozostaje uruchomiony, dlatego od razu można ponownie wybrać HOST albo
+  JOIN i użyć świeżego kodu zaproszenia;
+- `WYŁĄCZ COOP` w launcherze nadal całkowicie wyłącza sidecar. Po tej operacji
+  należy użyć START, zanim menu F8 będzie mogło utworzyć nową sesję.
+
+V18.0 dodał poprawki z pierwszego testu walki dwóch graczy:
+
+- walka wręcz ma jawny cel „drugi gracz”, zamiast wybierania najbliższego NPC;
+- lasso wysyła stan złapania i po drugiej stronie uruchamia bezobrażeniowe
+  powalenie; lina nadal jest lokalnym efektem RDR2 i może nie wyglądać identycznie;
+- podczas krótkiej walki wyłącznie między graczami NPC ignorują zajście, a
+  znaczniki przestępstwa są czyszczone bez kasowania wcześniejszego wanted level;
+- awaryjny freeze pauzy został usunięty; natywne menu RDR2 nie może już po
+  wznowieniu pozostawić gry zablokowanej przez `SET_GAME_PAUSED(TRUE)`;
+- F9 również zawiera `Zatrzymaj sesje coop` i korzysta z tego samego powrotu do
+  HOST/JOIN co przycisk STOP w F8;
+- klient ponawia maskowanie lokalnych NPC przywracanych przez skrypty swojego
+  save’a, a diagnostyka podaje liczność puli, kandydatów i ukrytych pedów.
+
+V17.0 rozwija drugi, opcjonalny silnik ruchu i NIE usuwa Marker Lock V13.1:
+
+- w launcherze otwórz Ustawienia i zaznacz ANIMGRAPH REPLICA;
+- po zaznaczeniu zdalny ped nie dostaje pathfindingu ani navmeshu;
+- jego pozycja i obrót są odwzorowywane bezpośrednio z interpolowanego stanu
+  sieciowego, bez narastającej kolejki starych checkpointów;
+- długi lokalny task wizualny utrzymuje natywny graf chodu/biegu/sprintu, ale
+  nie steruje pozycją i nie wybiera trasy;
+- korekcja korzenia zachowuje taski oraz IK, co usuwa przyczynę migotania i
+  T-Pose zaobserwowanych w pierwszym teście V14;
+- niezawodna transakcja skoku/przeskoku uruchamia `TASK_JUMP` lub `TASK_CLIMB`
+  przy zapisanej kotwicy i na krótko oddaje szkielet natywnej fizyce;
+- zwykłe spadanie bez transakcji dostaje jednorazowo pozycję oraz velocity
+  nadawcy, aby RDR2 uruchomiło własny stan falling;
+- seria skoków nie może już zostawić fizycznej repliki wiele metrów za celem:
+  po przekroczeniu 1,5 m korygowana jest wyłącznie pozycja, bez kasowania
+  skoku, wspinania, IK, headingu ani natywnej fizyki;
+- skradanie jest próbkowane u nadawcy, przesyłane w nagraniu/sieci i ustawiane
+  odbiorcy w każdej klatce, aby RDR2 wybrało własny crouch locomotion graph;
+- wejście w ragdoll/powalenie uruchamia lokalną fizyczną animację repliki;
+- tryb walki wręcz przesyła pozycję celu i próbuje związać natywny task walki
+  z odpowiadającym lokalnym pedem (hostowy Entity Graph pozostaje autorytetem);
+- przy tworzeniu repliki jawnie włączane są natywne eventy animacji/audio peda.
+  Jest to bezpieczna próba przywrócenia kroków zależnych od podłoża; V17 nie
+  odtwarza sztucznych dźwięków i nie zgaduje nazw nieudokumentowanych soundsetów;
+- protokół 9 przesyła osobno zweryfikowany stan idle/chód/bieg/sprint;
+- oba komputery muszą zaznaczyć tę samą opcję przed START;
+- odznaczenie opcji przy następnym START przywraca dotychczasowy Task/Navmesh.
+
+To pierwszy testowalny etap, a nie obietnica skopiowania całego wewnętrznego
+AnimGraphu. V17.0 nie odczytuje jeszcze MoveNetwork, wszystkich clipów, warstw,
+faz, wag, IK ani root motion. Nie używa zgadywanych offsetów pamięci i nie miesza
+nowego kontrolera ze starym. Ghost Replay jest obecnie najlepszym testem porównawczym:
+nagraj spacer, sprint, skradanie, serię skoków, schody, płot, powalenie, walkę,
+celowanie i strzał, a potem
+wyeksportuj RDR2-Coop-Diagnostics.zip.
+
+Jeżeli ANIMGRAPH REPLICA pozostaje odznaczone, poniższy opis V13.1 nadal obowiązuje.
+
+V13.1 zachowuje transakcje traversal V13.0 i dodaje priorytet zgodności pozycji:
+
+- jeśli błąd co najmniej 6 m utrzymuje się przez 600 ms, puppet jest bezpiecznie
+  przenoszony do aktualnego markera sieciowego;
+- przy błędzie co najmniej 12 m awaryjny próg skraca oczekiwanie do 200 ms;
+- pojedynczy skok interpolacji nie uruchamia korekty, a po korekcie obowiązuje
+  2-sekundowy cooldown ograniczający serię teleportów;
+- hard resync nie przerywa lokalnego ragdolla/wspinania ani relacji mount–rider;
+- po korekcie stara trasa navmesh i niewykonane przeskoki są usuwane, więc puppet
+  nie biegnie z powrotem do nieaktualnego punktu;
+- nowe logi `PUPPET_HARD_RESYNC`, `hard-resyncs`, `emergency-hard-resyncs`,
+  `hard-resync-max-m` i `hard-resync-max-wait-ms` mierzą każdą korektę.
+
+Log V13.0 potwierdził maksymalny błąd 28,41 m oraz średni błąd ponad 6 m w 11
+z 20 pięciosekundowych okien. Dotychczasowy safe recovery po czterech sekundach
+zawsze zmniejszał błąd do około 1 m, ale reagował zdecydowanie za późno. Marker
+Lock zachowuje próbę płynnego dogonienia przy małym błędzie, lecz nie pozwala
+marionetce przez wiele sekund reprezentować dawnej pozycji gracza.
+
+V13.0 zachowuje Entity Graph V10.1 i kontroler ruchu V12, a przebudowuje
+przeskoki i wspinanie zgodnie z wynikiem ostatniego Ghost Replay:
+
+- naciśnięcie skoku tworzy transakcję przed takeoffem, zamiast czekać aż silnik
+  zgłosi już trwającą animację;
+- osobny komunikat protokołu 8 wysyła transakcję niezawodnie przez TCP, a stan
+  UDP nadal zawiera jej ID jako awaryjne zabezpieczenie;
+- transakcja ma rewizje: jump może zostać uściślony do climb, a po lądowaniu
+  nadawca może dopisać oczekiwany punkt zakończenia;
+- nadawca dołącza prędkość podejścia i przybliżoną geometrię przeszkody z
+  krótkiego capsule probe; odbiorca sprawdza przeszkodę we własnym świecie;
+- puppet podchodzi do kotwicy, lecz navmesh nie może już walczyć z kontrolerem
+  w ostatnich 3 m przed przeskokiem;
+- po maksymalnie 350 ms bez zgodnej geometrii działa bezpieczny fallback do
+  natywnego TASK_CLIMB, żeby różnica świata nie powodowała softlocka;
+- niewykonana akcja wygasa po 3,5 s, więc dawny skok nie uruchomi się kilka
+  sekund później przy przypadkowej przeszkodzie;
+- move-rate wrócił do obsługiwanego maksimum 1,15. Wartość 1,75 z V12.2 była
+  przez grę ograniczana lub ignorowana; większy błąd obsługuje route recovery.
+
+Ostatni log V12.2 miał zdrowe snapshoty 20 Hz. Wszystkie cztery zapisane akcje
+climb dotarły, lecz część została wykonana za późno, gdy puppet był już daleko
+od właściwej przeszkody. Dlatego V13.0 nie zwiększa bez potrzeby ilości zwykłych
+checkpointów — przesyła wcześniej dokładnie tę informację, której brakowało.
+
+V12.1 zachował cały kontroler V12.0 i poprawił replay:
+
+- zdalna flaga skoku/wspinania nie zatrzymuje już pościgu, zanim lokalny puppet
+  naprawdę rozpocznie własną animację traversal;
+- epoka skoku zachowuje trasę dojścia do przeszkody, więc spóźniony puppet może
+  dotrzeć do zakotwiczonego punktu i dopiero tam wykonać akcję;
+- po pełnych 4 sekundach nieskutecznego navmesh ostatnia korekta wybiera najnowszy
+  nagrany punkt trasy, usuwa zaległą kolejkę i nie wraca co timeout o zaledwie 1–3 m;
+- indeks diagnostyki zachowuje najnowsze 300 wpisów każdej kategorii. Pełne logi
+  nadal znajdują się w katalogu logs/ wewnątrz ZIP-a.
+
+V12.0 przebudował synchronizację gracza:
+
+- protokół 8 przesyła intencję lokomocji: kierunek ruchu, prędkość przód/bok,
+  oczekiwany blend chodu, tryb sterowania oraz epokę lokomocji;
+- snapshoty są renderowane na osi czasu nadawcy, z adaptacyjnym opóźnieniem
+  zależnym od jittera i ograniczoną ekstrapolacją zależną od stanu postaci;
+- pozycja między próbkami używa ograniczonej interpolacji Hermite'a, zamiast
+  reagować na nierówne chwile nadejścia UDP;
+- zwykły ruch po ziemi nie używa już `SET_ENTITY_VELOCITY`. Nogi, kolizję,
+  schody i podłoże prowadzi lokomocja RDR2; fizyczna korekta zostaje tylko dla
+  jawnego stanu airborne/ragdoll;
+- `SET_PED_MOVE_RATE_OVERRIDE` jest ograniczony do 1,15. Skala 0–3 pozostaje
+  wyłącznie dla move blend, więc oba różne parametry nie są już mylone;
+- cel ruchu jest wybierany do przodu po zapisanej trasie i skracany na ostrych
+  zakrętach, zamiast przedłużać chwilowy wektor velocity przez ścianę;
+- skok i wspinanie są transakcjami z własnym ID, epoką, punktem rozpoczęcia i
+  headingiem. Odbiorca wykonuje je raz, maksymalnie przez 3 sekundy;
+- jeden kontroler wybiera właściciela pełnego tasku: ruch, aim, traversal,
+  airborne/ragdoll, mount, nav recovery albo hard resync;
+- watchdog korzysta z rzeczywistego postępu peda i błędu trasy; nie restartuje
+  zadania w chronionym przejściu i zwiększa cooldown kolejnych prób;
+- logi `PUPPET_MOTION`, `PUPPET_NAV`, `PUPPET_ACTION` i `motion v13` zapisują
+  tryby kontrolera, jitter, opóźnienie bufora, look-ahead, krzywiznę, epoki i ID.
+
+V11.2 zachowywał Entity Graph V10.1 oraz dodawał:
+
+- blokadę pionowej korekty velocity podczas zwykłego chodzenia: schody i teren
+  przejmuje natywna lokomocja RDR2, bez lewitowania do wyższego markera;
+- awaryjny safe recovery po 4 sekundach nieskutecznego navmesh: tylko do
+  pobliskiego nagranego punktu trasy (0,75-4,5 m), nigdy od razu do gracza;
+- gęstszy ślad co 0,35 m, krótszy cel navmesh 2 m i kolejkę 128 świeżych
+  punktów, aby awaryjna korekta była mała i kontynuowała właściwą trasę;
+- mocniejsze doganianie do move-rate 3,0 oraz szybszą zmianę tempa animacji;
+- skok/wspinanie zakotwiczone w punkcie tuż przed wykrytą akcją, z dłuższym
+  oknem wykonania i ochroną zadania przez 1 sekundę;
+- logi `grounded-vertical-suppressions`, `safe-recovery-teleports` oraz
+  `safe-recovery-max-m`, które pokażą wynik następnego testu.
+
+V11.1 poprawia odtwarzanie nagranej trasy po pierwszym teście w grze:
+
+- usuwa minięte punkty względem najbliższego fragmentu trasy, zamiast wracać
+  do markerów pozostawionych daleko z tyłu;
+- odświeża cel navmesh co 0,75 s i przyspiesza natywne podążanie za trasą;
+- ogranicza pojedyncze recovery navmesh do 8 s, po czym przez 2 s przywraca
+  zwykłe doganianie; recovery nie może już blokować ruchu przez 43 sekundy;
+- zapisany skok lub wspinanie czeka w kolejce na właściwe miejsce trasy i jest
+  wykonywane dopiero, gdy marionetka dotrze do płotu/przeszkody;
+- logi pokazują `waypoint-obsolete`, `recovery-timeouts`, `traversal-pending`,
+  `traversal-deferred` i `traversal-expired`.
+
+V11.0 dodał `Ghost Record`: zapis prawdziwej trasy lokalnego gracza i
+jednorazowe odtworzenie jej przez marionetke przez ten sam sidecar, TCP/UDP,
+Named Pipe i bridge co prawdziwy guest. Nagranie zachowuje dokladne wspolrzedne,
+predkosc, heading, stan ruchu/skoku/wspinania, celowanie, strzaly i ekwipunek.
+Plik jest wersjonowany, walidowany i zapisywany atomowo poza katalogiem gry.
+
+- hostowy rejestr świata ze stabilnymi NetEntityId i rewizjami;
+- graf relacji rodzic–dziecko: koń przed jeźdźcem przy spawn/update oraz
+  jeździec przed koniem przy despawn;
+- oczekiwanie klienta na brakującego rodzica zamiast tworzenia jeźdźca w
+  powietrzu oraz kaskadowe tombstone blokujące stare pakiety UDP;
+- sidecarowy desired-state graph i odtworzenie encji po reconnect bridge'a;
+- dobór limitu 48 encji bez rozdzielania hostowej pary jeździec–koń;
+- twardy limit 48 także podczas grace period: stara replika jest usuwana przed
+  przyjęciem nowej, więc sidecar nie odrzuca chwilowych węzłów 49–50;
+- priorytet encji: script/mission-owned, walka, blip/scenario, jeździec–koń,
+  następnie stabilność istniejącej repliki i odległość;
+- 12 m histerezy oraz dodatkowa ochrona przez pierwsze 3 sekundy ograniczają
+  powtarzające się spawn/despawn NPC na granicy wyboru;
+- inicjalizację outfit/MetaPed dla NPC i koni utworzonych przez CREATE_PED;
+- szczegółowe logi `ENTITY_GRAPH_SAMPLE`, `ENTITY_GRAPH_HOST`,
+  `ENTITY_GRAPH_GUEST` i `ENTITY_GRAPH_RENDER`.
+- wykrywanie puppeta zablokowanego przez ścianę lub przeszkodę;
+- bufor śladu pozycji gracza i awaryjne podążanie tym samym śladem po navmeshu;
+- omijanie budynków, climb-over i drabiny bez bezpośredniego popychania velocity
+  podczas aktywnej nawigacji;
+- osobne stany sieciowe skoku i wspinania oraz test skoku w pętli solo;
+- niebieski `CEL NAVMESH` w teście solo i kategorię logów `PUPPET_NAV`.
+- ślad ograniczony do 64 punktów i 12 sekund, zerowany po dogonieniu celu;
+- od 15 m różnicy bezpośredni navmesh do aktualnego celu zamiast odtwarzania
+  starych checkpointów;
+- zachowanie trybu recovery podczas ragdolla/pobicia bez walki z fizyką;
+- liczniki NPC walczących z hostem/guestem, strzelających oraz uciekających
+  ludzi i koni.
+
+Podsystem Puppet Nav / Action Sync V10.3 sprawdza dodatkowo:
+
+- widoczny niezależny ped `CREATE_PED` z inicjalizacją outfit/MetaPed;
+- stabilny nameplate gracza bez ryzykownego natywu MP gamer-tag;
+- ciągły ruch bez `SET_ENTITY_COORDS` poza spawnem i prawdziwym teleportem;
+- adaptacyjne nadrabianie lokalnego dryfu chodem/biegiem/sprintem, bez warpów;
+- punkt prowadzenia tasku ograniczony do 0,35 s i maksymalnie 2 m;
+- ruchomy cel tasku odświeżany około dwa razy na sekundę już po zmianie 0,5 m,
+  dzięki czemu chód nie kończy się na starym punkcie i nie przechodzi w sprint;
+- solo-only marker `CEL SIECI` z bieżącym błędem w metrach i linią do puppeta;
+- ponawiany co klatkę `move rate override`, maksymalny blend sprintu oraz
+  proporcjonalny velocity catch-up z płynnym narastaniem, wyłączany podczas
+  ragdolla/lassa i działający podczas przeładowania, bez `SET_ENTITY_COORDS`;
+- bezpieczny grant broni: wstrzymany podczas ragdolla/lassa i ograniczony do
+  najwyżej jednej próby na pięć sekund, bez stosu rewolwerów na ziemi;
+- sprzężony kurs akcji: Cattleman Revolver, 120 nabojów, celowanie i pojedynczy
+  strzał przód/góra/dół/lewo/prawo/180 stopni do tyłu oraz przeładowanie;
+- podczas przeładowania syntetyczny cel zatrzymuje się razem z puppetem i
+  wznawia trasę z tego samego miejsca, bez sztucznego 10–15 m dryfu;
+- każdy zdalny strzał uruchamia przy pedzie przestrzenny dźwięk z zasobów RDR2;
+  pocisk nadal ma zerowe obrażenia, a paczka nie zawiera plików audio;
+- autorytet korzenia: przy błędzie od 1,25 m kierunek ruchu pochodzi wyłącznie
+  z markera, a połączony task ruch/celowanie wraca dopiero poniżej 0,5 m;
+- histereza tasku zapobiega przełączaniu sterowania nogami co klatkę, podczas gdy
+  broń, cel, strzały i przeładowanie pozostają osobnym strumieniem akcji;
+- fizyczne doganianie włącza się dopiero od 1,5 m i wyłącza poniżej 0,5 m;
+  synchronizuje także wysokość podczas upadku, ragdolla albo lassa;
+- osobne kategorie diagnostyki `PUPPET_MOTION` i `PUPPET_ACTION`;
+- test `SOLO BOT` uruchamiany z launchera i przełączany w menu F9;
+- wyłącznie dwie najnowsze sesje w surowych logach i posortowanym eksporcie;
+  wybrane początki zapisuje `DIAGNOSTICS_SESSIONS.json`.
+
+HISTORYCZNY OPIS WARSTWY HOST WORLD / ENTITY GRAPH V10.1:
+
+- odporny transport bez zaległych snapshotów po pauzie/loadingach;
+- Player Puppet Motor koryguje drift małymi krokami i odbudowuje utknięty task
+  bez twardego teleportu/auto-rebase do znacznika sieciowego;
+- płynniejszy ruch: dłuższa stabilizacja chodu/biegu, rzadsze restarty tasków oraz
+  wspólny task chodzenia i celowania ograniczają stanie/T-pose/glitch aim;
+- nick, blip, broń, celowanie i wizualne strzały drugiego gracza;
+- autorytatywny czas, datę i pogodę hosta;
+- skan do 96 kandydatów i do 48 hostowych ludzi/koni w promieniu 80 m, do 10 Hz;
+- semantyczne zachowania proxy NPC: idle, ruch, scenario, ucieczkę, walkę,
+  śmierć oraz relację jeździec–koń;
+- osobną, zawsze widoczną replikę własnego konia każdego gracza: model, pozycję,
+  zdrowie, animowany ruch, dosiadanie i zsiadanie;
+- wizualne PvP bez obrażeń gracz kontra gracz;
+- pierwszy tor obrażeń guest -> proxy NPC -> prawdziwy NPC, zawsze
+  walidowany i rozstrzygany przez hosta.
+- wspólną pauzę głosowaną Escape: po zgodzie obu graczy mod próbuje otworzyć
+  prawdziwe menu pauzy RDR2 na obu komputerach;
+- eksperymentalną animację walki wręcz proxy bez obrażeń;
+- odzyskiwanie widoczności repliki po śmierci i vanilla checkpoint retry;
+- autorytet hosta nad World Mirror — lokalne markery misji guesta nie blokują
+  już hostowych encji.
+- wybór dowolnego lokalnego save'a SRDR* hosta i zapis jego nazwy/hashu do
+  konfiguracji diagnostycznej bez kopiowania albo modyfikowania pliku.
+
+WAŻNE OGRANICZENIA
+------------------
+
+- Tylko Story Mode. Nigdy nie uruchamiaj Red Dead Online z modem.
+- Host jest właścicielem misji, checkpointu i wspólnego celu, ale V31.10 nadal nie
+  jest wspólnym skryptem Story VM ani wspólnym zapisem kampanii.
+- Dokładna authored AnimScene guesta wymaga `ATTACHED` albo udanego opt-in
+  `STORY VM CAPTURE` z kompletną definicją i commit. `SAFE_FALLBACK` nie odtwarza
+  pełnych gestów, lipsyncu ani oryginalnego audio.
+- Obiekty przechwycone jako role aktywnej AnimScene mają ograniczony lifecycle;
+  ogólny świat propsów, vehicles i pickups nie jest replikowany. Nierozwiązana
+  wymagana rola AnimScene kończy się fallbackiem.
+- Uporządkowane komponenty MetaPed są replikowane, ale brak lokalnego modelu albo
+  komponentu gry może nadal dać różnicę stroju, twarzy lub włosów.
+- Publikowana jest replika własnego konia i mount-rider, lecz shared mount, więź,
+  stajnia, bagaż i wszystkie authored końskie animacje nie są jeszcze gotowe.
+- Wybranie pliku SRDR* nie ładuje go automatycznie. Host musi wczytać
+  odpowiadający slot zwykłym menu Story Mode.
+- Paczka moda NIE zawiera ScriptHookRDR2.dll, dinput8.dll ani trainera.
+  Każdy gracz pobiera Script Hook RDR2 osobno od autora.
+
+CO MUSI MIEĆ KAŻDY GRACZ
+------------------------
+
+1. Własną legalną kopię RDR2 na PC i własne konto.
+2. Identyczną, obsługiwaną wersję RDR2.exe.
+3. Microsoft .NET 10 Desktop Runtime x64:
+   https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+4. Script Hook RDR2 v1.0.1491.17 pobrany osobno:
+   https://www.dev-c.com/scripthookrdr2/
+   Rozpakuj go do osobnego folderu. Nie instaluj NativeTrainer.asi.
+5. Oba komputery w tej samej prywatnej sieci LAN albo Hamachi.
+   Dla Hamachi używamy IPv4 hosta 25.x.x.x, nie IPv6.
+
+INSTALACJA — NA OBU KOMPUTERACH
+-------------------------------
+
+1. Zamknij RDR2.
+2. Jeśli masz starszy build moda, odinstaluj go jego launcherem.
+3. Rozpakuj cały nowy ZIP do nowego folderu. Nie uruchamiaj go z ZIP-a.
+4. Uruchom URUCHOM_COOP.bat.
+5. Kliknij „Przeglądaj RDR2.exe” i wskaż plik gry.
+6. Kliknij „Przeglądaj ScriptHook” i wskaż OSOBNO rozpakowany Script Hook.
+7. Wpisz nick w polu „Nick w coop”.
+8. Host w `Ustawieniach` wybiera swój lokalny plik save SRDR*, a na ekranie
+   START klika „Wykryj Hamachi/LAN” i sprawdza adres. Po `HOSTUJ` wpisuje hasło
+   dwa razy. Guest wybiera `Dołączam`; `DOŁĄCZ` prosi o IPv4 hosta i to samo
+   hasło. Guest nie wybiera save'a hosta.
+9. Wybierz platformę Steam albo Rockstar.
+10. Kliknij duży przycisk „SPRAWDŹ • ZAINSTALUJ • START”. Launcher sam
+    zweryfikuje instalację, w razie potrzeby doinstaluje mod i uruchomi
+    poprawny wariant HOST/CLIENT na wybranej platformie.
+11. W grze wybierz wyłącznie Story Mode. Host wczytuje slot odpowiadający
+    wskazanemu plikowi SRDR*. Guest wczytuje spokojny save techniczny.
+
+Launcher ma ciemny czerwony motyw, trzy tryby (Test solo / Host / Dołączam),
+wybór Steam / Rockstar i jeden okrągły przycisk START/HOSTUJ/DOŁĄCZ. Lobby
+pokazuje nicki, role oznaczone osobnymi kolorami oraz ping. Font interfejsu znajduje
+się w systemie Windows (Georgia); paczka nie zawiera ani nie redystrybuuje
+zewnętrznego pliku fontu.
+
+JEŚLI INSTALACJA POKAŻE „ACCESS DENIED”
+--------------------------------------
+
+1. Zamknij RDR2 i launcher.
+2. Kliknij prawym przyciskiem CoopStory.Launcher.exe i wybierz
+   „Uruchom jako administrator”.
+3. Użyj podniesionego launchera tylko do instalacji albo deinstalacji.
+4. Po operacji zamknij go.
+5. Do grania uruchom URUCHOM_COOP.bat ponownie normalnie, bez administratora.
+
+Nie zmieniaj ręcznie uprawnień całego katalogu gry i nie wyłączaj zabezpieczeń
+Windows.
+
+TEST SOLO — BEZ DRUGIEGO KOMPUTERA
+----------------------------------
+
+1. W launcherze wskaż RDR2.exe i osobno pobrany Script Hook.
+2. Wybierz tryb `Test solo`, platformę Steam albo Rockstar i kliknij okrągły
+   przycisk `START`.
+3. Wczytaj wyłącznie Story Mode.
+4. Otwórz F9 i wybierz `Test solo: start / stop`.
+5. Obserwuj bota `SOLO BOT` przez 90–120 sekund, a potem pozwól trasie przejść
+   za narożnik budynku lub inną bezpieczną przeszkodę.
+6. Zamknij grę, kliknij `WYŁĄCZ COOP`, potem `Eksportuj diagnostykę`.
+
+Bot nie rusza się przed poleceniem F9. Ponowne użycie polecenia zatrzymuje
+stream i usuwa bota po około pięciu sekundach.
+
+GHOST RECORD — NAGRANIE WLASNEJ TRASY
+-------------------------------------
+
+1. Wybierz `Test solo` i okrągły `START`, potem wczytaj Story Mode i stan w
+   bezpiecznym miejscu.
+2. F9 -> `Ghost Record: start / stop`.
+3. Po komunikacie startu idz lub biegnij wybrana trasa przez 20–60 sekund.
+   Mozesz wejsc przez drzwi, wyjsc, skoczyc, wspiac sie, celowac i strzelic.
+4. F9 -> ponownie `Ghost Record: start / stop`, aby zapisac trase.
+5. Wroc w poblize miejsca startu nagrania.
+6. F9 -> `Ghost Replay: start / stop`.
+7. Obserwuj marionetke `GHOST REPLAY` i marker `CEL SIECI`. Marker pokazuje
+   dokladna zarejestrowana pozycje, a marionetka pokazuje wynik Puppet Motor.
+8. Replay konczy sie sam i nie jest zapetlony. To samo polecenie zatrzymuje go
+   wczesniej. Kolejny start odtwarza trase od poczatku z nowa replika.
+
+Nagranie ma limit 10 minut i 12 000 klatek. Na tym etapie nagrywaj trase pieszo;
+Ghost Record nie odtwarza jeszcze osobnego konia ani interakcji fabularnych.
+Ostatnie nagranie pozostaje dostepne po restarcie launchera i jest dolaczane do
+ZIP-a diagnostycznego jako `recordings/ghost-last.json`.
+
+POŁĄCZENIE
+----------
+
+HOST:
+1. W `Ustawieniach` wybierz lokalny save, potem na ekranie START wybierz HOST,
+   adres Hamachi/LAN i kliknij `HOSTUJ`.
+2. Wpisz hasło dwa razy. Po komunikacie `HASŁO ZAPISANE` wyślij znajomemu
+   prywatną wiadomością tylko IPv4 oraz hasło.
+3. Wczytaj wybrany save hosta w Story Mode. Nie rozpoczynaj jeszcze
+   markera misji — najpierw poczekaj na „REMOTE STREAMING”.
+
+GUEST:
+1. W launcherze wybierz `Dołączam` i kliknij `DOŁĄCZ`.
+2. Podaj IPv4 hosta oraz identyczne hasło, sprawdź `HASŁO ZAPISANE`, potem
+   uruchom grę.
+3. Wczytaj spokojny save poza aktywną misją, cutscenką i stanem downed.
+   Preflight w grze odrzuci niebezpieczny lokalny stan guesta.
+
+Na obu komputerach poczekajcie na „REMOTE STREAMING”. Sam napis
+„IPC CONNECTED” oznacza tylko lokalne połączenie z sidecarem.
+F8 nie otwiera się automatycznie; jest wyłącznie panelem awaryjnym.
+
+TEST 2 PC — KOLEJNOŚĆ
+---------------------
+
+Testujcie na otwartym terenie, bez aktywowania misji.
+
+1. RUCH
+   - chodzenie, bieg, sprint, skręty, zatrzymanie i zmiana ról;
+   - zgłoście każdy warp i przypadek „stoi u mnie, biegnie u niego”.
+
+2. PAUZA I DEAD EYE
+   - pierwsza osoba naciska Escape: obaj widzą prośbę o pauzę;
+   - druga naciska Escape: dopiero wtedy na obu PC powinno otworzyć się
+     prawdziwe menu pauzy RDR2;
+   - wznowienie również wymaga po jednym naciśnięciu Escape od obu graczy;
+   - jeżeli frontend odrzuci otwarcie podczas loadingu, nie jest używany twardy
+     freeze; wyjdźcie z głosowania i spróbujcie ponownie po zakończeniu loadingu;
+   - do menu moda nadal używajcie F8 i F9;
+   - następnie każda osoba uruchamia Dead Eye;
+   - druga strona nie powinna utracić streamu ani dostać starego backlogu.
+
+3. CZAS I POGODA
+   - guest porównuje godzinę, datę i pogodę z hostem;
+   - odczekajcie co najmniej 15 sekund po połączeniu.
+
+4. GRACZE I BROŃ
+   - nick oraz blip powinny być widoczne;
+   - zmieńcie broń, celujcie stojąc i idąc w różne kierunki, potem ją schowajcie;
+   - oddajcie pojedyncze strzały;
+   - można strzelać do proxy drugiego gracza, ale nie powinno tracić zdrowia;
+   - wykonajcie pojedynczy cios i natychmiast odejdźcie: proxy ma przerwać walkę;
+   - osobno sprawdźcie serię ciosów, trzymanie bloku R, grapple i powalenie;
+   - lasso: jeden rzut, chybienie, trafienie, przyciągnięcie, związanie i
+     uwolnienie. Ma istnieć tylko jedna lina i nie może narastać stos modeli broni;
+   - po każdej akcji odczekajcie 3 sekundy. Watchdog nie może zostawić proxy
+     w stanie ciągłego ataku, bloku, celowania ani lassa;
+
+5. WORLD MIRROR I KONIE
+   - podejdźcie razem do małej grupy ludzi i koni hosta;
+   - porównajcie liczbę, modele, pozycje, kierunek ruchu, kategorię zachowania
+     i stan śmierci;
+   - guest strzela do jednego proxy NPC, host sprawdza prawdziwego NPC;
+   - guest tylko zgłasza DamageIntent; zdrowie NPC rozstrzyga host;
+   - oczekiwany limit to 48 encji w promieniu 80 m, aktualizowane do 10 Hz;
+   - każdy osobno woła własnego konia, podchodzi, dosiada, jedzie, zatrzymuje
+     się i zsiada; peer powinien zobaczyć replikę konia i gracza na siodle;
+   - guest dosiada konia hosta: po obu stronach musi to być ten sam jeden koń,
+     bez drugiego modelu w tym samym miejscu i bez wyrzucenia w powietrze;
+   - po zejściu odczekajcie do 8 sekund: chwilowa utrata odczytu konia jest
+     filtrowana, ale zdalny jeździec ostatecznie nie może zostać na siodle;
+   - przejedźcie powoli i szybko po zboczu, aby sprawdzić lokalne Z oraz IK kopyt;
+   - spróbujcie zrzucenia drugiego gracza z siodła i zapiszcie dokładnie, która
+     strona zobaczyła animację. Ta interakcja nadal jest eksperymentalna;
+   - sprawdźcie hostowego NPC na koniu. Nie testujcie od razu w tłocznym mieście.
+
+6. TELEPORTY
+   - HOST i GUEST osobno: F9 -> „Teleport do gracza”;
+   - HOST dodatkowo: „Przywołaj guest (host)”.
+
+7. PROSTA MISJA — TYLKO HOST URUCHAMIA
+   - dopiero po zaliczeniu free-roam host aktywuje jeden prosty marker;
+   - guest nie uruchamia własnego markera; podczas hostowej misji powinien
+     mieć stale zajęty lokalny mission gate i zobaczyć żółty cel/status hosta;
+   - porównajcie hostowych ludzi i konie; zwykli ludzie oraz script-owned aktorzy
+     powinni pojawić się u guesta zamiast jego lokalnych NPC;
+   - guest strzela do jednego aktywnego wroga misji, a host potwierdza obrażenia;
+   - przejdźcie jedną cutscenkę: guest ma zobaczyć ruch/FOV kamery hosta, bez
+     lokalnych T-Pose, a następnie wrócić obok hosta;
+   - uruchomcie jeden checkpoint/retry i sprawdźcie odbudowę gracza oraz grafu;
+   - żółty cel moda jest uniwersalnym fallbackiem; brak identycznego tekstu
+     vanilla nadal jest oczekiwanym ograniczeniem;
+   - jeśli pojawi się softlock, host używa Solo override albo przerywa test.
+
+F10 ukrywa/przywraca pasek statusu. F8 pokazuje/ukrywa awaryjne menu sesji.
+F7 zapisuje znacznik błędu bez otwierania menu. F9 otwiera dwukolumnowe menu
+sesji/ratunku oraz narzędzi testowych.
+
+CZEGO JESZCZE NIE UZNAJEMY ZA GOTOWE
+------------------------------------
+
+- wspólnego save'a i wspólnej listy dostępnych misji;
+- dokładnych triggerów, tekstów i wszystkich blipów vanilla (V22 dodaje własny
+  żółty cel/status hosta);
+- identycznej lokalnej AnimScene/audio/dialogów i napisów checkpointu
+  (V22 synchronizuje kamerę renderowaną, nie cały obiekt AnimScene);
+- identycznego stroju/twarzy/włosów;
+- pełnych task trees, harmonogramów i wszystkich animacji AI;
+- pełnej synchronizacji wszystkich obiektów, drzwi i pojazdów;
+- pełnej animacji wejścia/zrzucenia, więzi/stajni/bagażu i wszystkich końskich IK;
+- pełnej hostowej walki AI oraz revive w kampanii.
+
+PO TEŚCIE
+---------
+
+1. Zamknij RDR2 na obu komputerach.
+2. Kliknij `WYŁĄCZ COOP`.
+3. Na OBU komputerach kliknij „Eksportuj diagnostykę”.
+4. Nazwij ZIP-y HOST i GUEST.
+5. Nazwij ZIP-y zgodnie z przebiegiem, np. `CutsceneMissionV31.10-OFF-HOST.zip`,
+   `CutsceneMissionV31.10-OFF-GUEST.zip`, `CutsceneMissionV31.10-ON-HOST.zip`
+   i `CutsceneMissionV31.10-ON-GUEST.zip`, a następnie wyślij je wraz z
+   krótkim opisem: co działało, co się rozjechało i podczas
+   jakiej czynności.
+6. Nie wysyłaj hasła. Eksporter usuwa wewnętrzny sekret sesji.
+7. Kliknij „Odinstaluj” na obu komputerach przed uruchomieniem RDO.
+
+JEŚLI NIE MA „REMOTE STREAMING”
+-------------------------------
+
+- Sprawdź, czy oba komputery są online w tej samej sieci LAN/Hamachi.
+- Host sprawdza IPv4 25.x.x.x; obie osoby wpisują dokładnie to samo hasło.
+- Gdy Zapora Windows pyta o dostęp, zezwól tylko dla sieci prywatnej.
+- Nie wyłączaj zapory i nie otwieraj publicznych portów routera.
+- Nawet po nieudanej próbie wyeksportuj diagnostykę z obu komputerów.

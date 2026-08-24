@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "role": "Host",
+  "hostAddress": "127.0.0.1",
+  "tcpPort": 43120,
+  "udpPort": 43121,
+  "pipeName": "CoopStory.Bridge.v1",
+  "sessionToken": "",
+  "nickname": "Player",
+  "motionReplicationMode": "task_navmesh",
+  "inGameMenuEnabled": false,
+  "profilePath": "%LOCALAPPDATA%\\RDR2CoopStory\\guest-profile.json",
+  "logPath": "%LOCALAPPDATA%\\RDR2CoopStory\\logs\\sidecar.jsonl",
+  "bubble": {
+    "warningMeters": 200.0,
+    "teleportMeters": 250.0
+  },
+  "replication": {
+    "snapshotRateHz": 20,
+    "interpolationDelayMs": 100
+  },
+  "network": {
+    "heartbeatIntervalMs": 1000,
+    "heartbeatTimeoutMs": 5000,
+    "reconnectMinMs": 500,
+    "reconnectMaxMs": 10000,
+    "diagnosticsIntervalMs": 5000
+  },
+  "safety": {
+    "storyModeOnly": true,
+    "refuseOnlineMode": true
+  }
+}

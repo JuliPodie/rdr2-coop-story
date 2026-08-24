@@ -1,0 +1,60 @@
+# IDE and local tooling
+.vs/
+.vscode/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# Build output
+**/bin/
+**/obj/
+build/
+out/
+dist/
+TestResults/
+*.pdb
+*.ilk
+*.exp
+
+# Runtime state and generated artifacts
+artifacts/
+logs/
+logs_screenshots/
+profiles/
+_backups/
+*.tmp
+*.bak
+CoopStory.config.json
+
+# Local identity, credentials, invitations, and diagnostics
+.env
+.env.*
+!.env.example
+*.coopjoin
+host.config.json
+guest.config.json
+launcher-settings.json
+install-manifest.json
+machine-id.txt
+sidecar.config.json
+guest-profile.json
+ghost-last.json
+*.jsonl
+*.log
+RDR2-Coop-Diagnostics*.zip
+*.pem
+*.pfx
+*.p12
+*.key
+id_rsa
+id_ed25519
+
+# Manually supplied third-party binaries/SDKs (never redistribute)
+ScriptHookRDR2_*/
+prereqs/incoming/*
+!prereqs/incoming/.gitkeep
+*.ttf
+
+# Deployment state
+deployment-manifest.json
