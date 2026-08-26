@@ -11,6 +11,7 @@ using CoopStory.Sidecar.Diagnostics;
 using CoopStory.Sidecar.Ipc;
 using CoopStory.Sidecar.Networking;
 using CoopStory.Sidecar.Persistence;
+using CoopStory.Sidecar.Missions;
 using CoopStory.Sidecar.Session;
 using CoopStory.Sidecar.Simulation;
 
@@ -51,6 +52,8 @@ internal static class Program
         ("host-authoritative world graph orders dependencies and tombstones",
             AuthoritativeWorldGraphAsync),
         ("player identity validation and reliable refresh", PlayerIdentityAsync),
+        ("The New South mission profile defines the opening co-op ride", TheNewSouthProfileAsync),
+        ("player inventories and map loot remain independent", PlayerInventoryAsync),
         ("atomic guest profile write and backup recovery", ProfileRecoveryAsync),
         ("downed and revive state machine", DownedStateAsync),
         ("deterministic network impairment primitives", NetworkImpairmentAsync),
@@ -4280,6 +4283,66 @@ internal static class Program
             identity,
             BinaryPayloadCodec.DecodePlayerIdentity(
                 network.Controls[0].Payload.Span));
+    }
+
+    private static Task TheNewSouthProfileAsync()
+    {
+        var profile = TheNewSouthProfile.Create(new Vector3(1f, 2f, 3f));
+        profile.Validate();
+        Check.Equal("the_new_south", profile.Id);
+        Check.Equal(4, profile.Stages.Count);
+        Check.Equal(MissionStageKind.StartTrigger, profile.Stages[0].Kind);
+        Check.Equal((uint)2, profile.Stages[1].CheckpointGeneration);
+        Check.Equal(MissionPresentationFallback.SpectatorCamera,
+            profile.Stages[^1].Fallback);
+        return Task.CompletedTask;
+    }
+
+    private static Task PlayerInventoryAsync()
+    {
+        var host = NetEntityId.Create(77, 1);
+        var guest = NetEntityId.Create(77, 2);
+        var inventory = new PlayerInventoryRegistry();
+        var loot = new MapLoot(
+            "valentine-general-store-drawer-01",
+            12.50m,
+            [
+                new InventoryItemStack("tonic.health", 1),
+                new InventoryItemStack("ammo.revolver", 12)
+            ]);
+
+        var hostFirstClaim = inventory.ClaimLoot(host, loot);
+        Check.Equal(LootClaimStatus.Granted, hostFirstClaim.Status);
+        Check.Equal(12.50m, hostFirstClaim.Inventory.Money);
+        Check.Equal(12, hostFirstClaim.Inventory.Items["ammo.revolver"]);
+
+        var hostReplay = inventory.ClaimLoot(host, loot);
+        Check.Equal(LootClaimStatus.AlreadyClaimed, hostReplay.Status);
+        Check.Equal(12.50m, hostReplay.Inventory.Money);
+        Check.Equal(1, hostReplay.Inventory.Items["tonic.health"]);
+
+        var guestFirstClaim = inventory.ClaimLoot(guest, loot);
+        Check.Equal(LootClaimStatus.Granted, guestFirstClaim.Status);
+        Check.Equal(12.50m, guestFirstClaim.Inventory.Money);
+        Check.Equal(1, guestFirstClaim.Inventory.Items["tonic.health"]);
+
+        var hostSnapshot = inventory.GetSnapshot(host);
+        Check.Equal(12.50m, hostSnapshot.Money);
+        Check.Equal(2, hostSnapshot.Items.Count);
+        Check.Equal(0m, inventory.GetSnapshot(NetEntityId.Create(77, 3)).Money);
+
+        var rollback = inventory.CaptureTransactionSnapshot();
+        _ = inventory.ClaimLoot(host, new MapLoot("rollback-test", 5m));
+        Check.Equal(17.50m, inventory.GetSnapshot(host).Money);
+        inventory.RestoreTransactionSnapshot(rollback);
+        Check.Equal(12.50m, inventory.GetSnapshot(host).Money);
+
+        var reconnect = inventory.CaptureReconnectState();
+        var restored = new PlayerInventoryRegistry();
+        restored.RestoreReconnectState(reconnect);
+        Check.Equal(12.50m, restored.GetSnapshot(host).Money);
+        Check.Equal(LootClaimStatus.AlreadyClaimed, restored.ClaimLoot(host, loot).Status);
+        return Task.CompletedTask;
     }
 
     private static async Task ProfileRecoveryAsync()
