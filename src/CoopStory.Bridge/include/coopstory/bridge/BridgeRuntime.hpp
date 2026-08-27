@@ -304,6 +304,7 @@ private:
     std::array<LocalPlayerActionRuntime, 8> localPlayerActions_{};
     LocalInteractionRuntime localInteraction_{};
     std::uint32_t localInteractionId_{};
+    std::uint64_t localCapabilityEventId_{};
     std::optional<RestraintStatePayload> remoteRestraintState_{};
     std::optional<RestraintStatePayload> localRestraintState_{};
     std::unordered_map<
@@ -461,6 +462,9 @@ private:
     std::uint64_t nextAppearanceRefreshMs_{};
     std::uint64_t nextMotionDiagnosticsMs_{};
     std::uint64_t nextMissionIsolationDiagnosticsMs_{};
+    // A short release hold prevents a one-frame control/UI transition from
+    // toggling guest spectator presentation repeatedly.
+    std::uint64_t spectatorClassifierReleaseUntilMs_{};
     std::uint64_t nextRuntimeDiagnosticsMs_{};
     std::uint64_t runtimeDiagnosticTickCount_{};
     std::uint64_t runtimeDiagnosticTickElapsedSumMs_{};

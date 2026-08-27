@@ -13,14 +13,18 @@ constexpr std::array kCommands{
     BridgeCommand::ResyncEquipment,
     BridgeCommand::ResyncEntities,
     BridgeCommand::ToggleSoloOverride,
+    BridgeCommand::SaveProblemMarker,
     BridgeCommand::StopSession,
+    BridgeCommand::ProbePoisonThrowingKnifePamphlet,
     BridgeCommand::ToggleDiagnostics,
     BridgeCommand::RetryCheckpoint,
-    BridgeCommand::GrantTestPistol,
     BridgeCommand::GrantTestLasso,
     BridgeCommand::ToggleSoloTest,
     BridgeCommand::ToggleGhostRecord,
     BridgeCommand::ToggleGhostReplay,
+    BridgeCommand::ProbeRepeatingShotgunShopUnlock,
+    BridgeCommand::EnableRepeatingShotgunShopUnlock,
+    BridgeCommand::EnablePoisonThrowingKnifePamphlet,
     BridgeCommand::Unload,
 };
 
@@ -99,6 +103,14 @@ std::string_view MenuController::Label(const BridgeCommand command) noexcept {
             return "Give pistol + max ammo (test)";
         case BridgeCommand::GrantTestLasso:
             return "Give lasso (test)";
+        case BridgeCommand::ProbeRepeatingShotgunShopUnlock:
+            return "Probe Repeating Shotgun shop unlock";
+        case BridgeCommand::EnableRepeatingShotgunShopUnlock:
+            return "Enable Repeating Shotgun shop unlock (test)";
+        case BridgeCommand::ProbePoisonThrowingKnifePamphlet:
+            return "Probe Poison Throwing Knife pamphlet";
+        case BridgeCommand::EnablePoisonThrowingKnifePamphlet:
+            return "Enable Poison Throwing Knife pamphlet (test)";
         case BridgeCommand::EmergencyRecover:
             return "Emergency player recovery";
         case BridgeCommand::RetryCheckpoint:

@@ -414,6 +414,17 @@ internal static class Program
         public string? Optional(string name) =>
             _values.GetValueOrDefault(name);
 
+        public int RequiredInt32(string name)
+        {
+            var text = Required(name);
+            if (!int.TryParse(text, out var value) || value < 0)
+            {
+                throw new ConfigurationException(
+                    $"Option '--{name}' must be a non-negative integer.");
+            }
+            return value;
+        }
+
         public int GetInt(string name, int fallback, int minimum, int maximum)
         {
             var text = Optional(name);

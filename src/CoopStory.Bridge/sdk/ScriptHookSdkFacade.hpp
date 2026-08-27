@@ -111,6 +111,10 @@ public:
         const WorldStatePayload& state) noexcept override;
     [[nodiscard]] bool ApplyRemoteEquipment(
         const EquipmentStatePayload& state) noexcept override;
+    [[nodiscard]] bool UnlockLocalWeaponEntitlement(
+        std::uint32_t weaponHash) noexcept override;
+    [[nodiscard]] bool ApplyCampaignCapability(
+        const CampaignCapabilityPayload& capability) noexcept override;
     [[nodiscard]] bool MaintainRemoteMount(
         const PlayerMountStatePayload& state,
         const std::optional<PlayerMountStatePayload>& localState) noexcept override;

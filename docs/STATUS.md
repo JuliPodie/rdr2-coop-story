@@ -1,71 +1,47 @@
-# Archived project status
+# Current state
 
-## Final state
+This is an advanced replication prototype, not yet a complete playable RDR2 Story co-op mod. Player/world networking and experimental mission presentation exist, but Rockstar's Story script runtime, saves, AI, physics, and campaign state are not fully synchronized.
 
-Development has concluded. Lifeely is sharing the source because it contains a
-substantial first foundation for player and world replication, but completing
-and supporting a shared Story campaign became too complex.
+## Confirmed foundations
 
-The last internal label was **V31.10 Alpha** with **protocol 20**. This is not a
-stable release or a compatibility guarantee.
+| Area | State | Notes |
+| --- | --- | --- |
+| Private host/guest connection, authentication, reconnect | Implemented | Versioned TCP/UDP protocol with host authority and bounded payloads. |
+| Remote player, traversal, actions, basic combat | Implemented foundation | Replicated movement is not deterministic physics. |
+| Nearby host world entities | Partial | Spawn/update/despawn proxy graph; it is not a full AI/physics simulation. |
+| Separate player mounts | Partial | Basic mount replication preserves peer ownership; stable, bonding, cargo, and death are private/unimplemented. |
+| Mission state, objective, camera, checkpoint transport | Experimental | Host state and presentation are transported; Story scripts are still local. |
+| Cutscene/loading spectator | Implemented foundation | Guest spectator is entered for host cinematic/cutscene presentation. |
+| Scripted control-lock spectator | Partial | Host samples control loss, screen transitions, scenario/table use and vehicle entry; release is debounced for 650 ms. QTE and AnimScene/task ownership still need proven game hooks. |
+| Safe return near host | Partial | Deferred safe-ground placement exists. Interior, moving train/wagon/boat, hostile zone, and horse-placement cases remain manual-test gates. |
+| Weapon-shop entitlement | Proven/manual test | Repeating Shotgun `UNLOCK` test makes the item purchasable without granting ownership, money, or ammo. |
+| Recipe entitlement | Proven locally; guest handoff unproven | On 2026-08-28, the guarded Story Mode Poison Throwing Knife test changed `visible=0->1, unlocked=0->1` and a re-probe returned `1->1`. This was one host game with a synthetic guest, not a two-PC guest-save test. |
+| Capability journal | Implemented, deny-by-default | Host-only, atomic JSON + backup journal for shared capabilities; reconnect replay and idempotency are automated. Only the proven Repeating Shotgun and Poison Throwing Knife records may be persisted, forwarded, or applied; unknown records are logged and rejected. It stores no player save, wallet, inventory, horse, or health state. |
+| Inventory authority model | Implemented in isolation | Per-player claims, transaction rollback, reconnect snapshots and persistence are tested. |
+| Vanilla pickup-to-inventory callback | Missing | The SDK can query a known pickup but provides no safe universal vanilla pickup enumeration/callback or reward-value payload. No real game pickup currently calls `ClaimLoot`. |
 
-## Confirmed in dependency-free validation
+## Reward policy
 
-- managed protocol, authentication, codec, interpolation, authority, reconnect,
-  diagnostics, and simulation self-tests;
-- launcher settings, password, invite, install ownership, update, uninstall,
-  runtime separation, and redaction self-tests;
-- SDK-free native bridge simulator tests when a supported C++ toolchain is
-  available;
-- successful Windows Forms launcher compilation with a system-provided Georgia
-  display font and no redistributed font file.
+| Reward | Guest result | Rule |
+| --- | --- | --- |
+| Mission-granted weapon | Capability yes | Grant guest's own entitlement once an authoritative mission reward event is proven. |
+| Weapon shop unlock | Capability yes | Replicate shop eligibility; ownership/ammo remain private. |
+| Satchel, tonic upgrade, recipe | Capability yes | Apply only proven live entitlement records. Unknown records are logged, never copied. |
+| Consumables and money | No | Each player receives, spends, loots, and saves their own local results. |
+| Horse reward/progression | Usually no | Never overwrite guest horse, stable record, bonding, cargo, or cores. |
 
-## Implemented foundations
+## Important limits
 
-- authenticated private TCP/UDP sidecar transport;
-- host/guest session generations and reconnect gates;
-- remote player state interpolation and identity;
-- action, traversal, mount, equipment, and world-entity contracts;
-- host-authoritative interaction and world graph registries;
-- mission state, camera, objective, cinematic, MetaPed, and AnimScene
-  experiments;
-- launcher UI, safe package validation, manifest-owned install/uninstall, and
-  redacted diagnostic export;
-- synthetic peer, network impairment, ghost recording, and correlated timeline
-  diagnostics.
+- No savegame merging or active-save replacement is part of the runtime.
+- Completing a host mission does **not** yet generically detect and replicate every unlock; the journal only makes an observed capability durable.
+- All map loot, corpse loot, plants, drawers, documents, crafting materials, pelts, carcasses, and cash remain unsynchronized until a verified game event source identifies the exact local pickup.
+- Full mission co-op, deterministic animals/NPC AI, physics, law, audio, card games, crafting activities, and vehicles remain future work.
 
-## Not completed or supported
+## Automated verification (2026-08-28)
 
-- a finished playable cooperative campaign;
-- synchronized Rockstar Story scripts or merged save progress;
-- deterministic AI, physics, audio, cutscenes, doors, vehicles, or mission
-  objects across both PCs;
-- compatibility with current or future RDR2 builds;
-- public servers, matchmaking, NAT traversal, or WAN deployment;
-- a ready-to-install public binary release;
-- ongoing maintenance, issue support, or security response.
+- Native bridge build and `ctest`: **1/1 passed**.
+- Managed protocol/sidecar self-test: **48/48 passed**.
+- Launcher self-test: **28/28 passed**.
+- Manual Story Mode recipe test: **passed locally** (`0->1`, then `1->1` re-probe); exit this disposable session **without saving**. Guest-native application, ordinary-save persistence, and two-PC replay remain unproven.
 
-## Known risk areas
-
-- game updates can invalidate native addresses, layouts, and hooks;
-- mission and cinematic presentation may desynchronize or fall back;
-- action, mount, world, and physics corrections can conflict with local game
-  behavior;
-- Script Hook and SDK redistribution is outside this project license;
-- Rockstar's published single-player mod assurance does not cover this private
-  multiplayer design.
-
-## Recommended continuation order
-
-Anyone continuing the work should first:
-
-1. preserve Story Mode and game-version fail-closed behavior;
-2. keep third-party binaries and SDK files outside the repository;
-3. run every dependency-free self-test before touching game hooks;
-4. verify transport and player replication on two isolated test PCs;
-5. treat mission/cinematic work as experimental presentation, not shared script
-   execution;
-6. obtain an independent legal and security review before distributing binaries.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md), [PROTOCOL.md](PROTOCOL.md),
-[TESTING.md](TESTING.md), and the root [LEGAL.md](../LEGAL.md).
+The next high-value manual test is a controlled mission with a cutscene, control-lock release, checkpoint, and reconnect. The next entitlement test must use a real guest game to verify native application, acknowledgement, reconnect replay, and normal save/restart persistence.

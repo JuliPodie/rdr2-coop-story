@@ -27,7 +27,7 @@ public sealed record SidecarConfig
     public string Nickname { get; init; } = "Player";
 
     public MotionReplicationMode MotionReplicationMode { get; init; } =
-        MotionReplicationMode.TaskNavmesh;
+        MotionReplicationMode.AnimGraphReplica;
 
     public bool AnimSceneStoryVmProbeEnabled { get; init; }
 
@@ -37,6 +37,12 @@ public sealed record SidecarConfig
 
     public string ProfilePath { get; init; } =
         "%LOCALAPPDATA%\\RDR2CoopStory\\guest-profile.json";
+
+    // Host-only, append-safe state for campaign permissions which may be
+    // replayed after a guest reconnects.  This deliberately is not an RDR2
+    // save path and must never contain private player inventory or money.
+    public string CapabilityJournalPath { get; init; } =
+        "%LOCALAPPDATA%\\RDR2CoopStory\\campaign-capabilities.json";
 
     public string LogPath { get; init; } =
         "%LOCALAPPDATA%\\RDR2CoopStory\\logs\\sidecar.jsonl";
@@ -128,6 +134,7 @@ public sealed record SidecarConfig
         HostSave?.Validate();
 
         if (string.IsNullOrWhiteSpace(ProfilePath) ||
+            string.IsNullOrWhiteSpace(CapabilityJournalPath) ||
             string.IsNullOrWhiteSpace(LogPath))
         {
             throw new ConfigurationException("profilePath and logPath cannot be empty.");
@@ -149,6 +156,8 @@ public sealed record SidecarConfig
     }
 
     public string ExpandedProfilePath => ExpandPath(ProfilePath);
+
+    public string ExpandedCapabilityJournalPath => ExpandPath(CapabilityJournalPath);
 
     public string ExpandedLogPath => ExpandPath(LogPath);
 

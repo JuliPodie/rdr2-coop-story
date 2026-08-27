@@ -387,10 +387,19 @@ template <typename T>
     constexpr auto kCheckpointRecovery =
         static_cast<std::uint8_t>(
             MissionStateFlag::CheckpointRecovery);
+    constexpr auto kScriptedControlLock =
+        static_cast<std::uint8_t>(MissionStateFlag::ScriptedControlLock);
+    constexpr auto kScreenTransition =
+        static_cast<std::uint8_t>(MissionStateFlag::ScreenTransition);
+    constexpr auto kScenarioActivity =
+        static_cast<std::uint8_t>(MissionStateFlag::ScenarioActivity);
     constexpr auto kKnownFlags =
         kAnchorValid |
         kMissionActive |
-        kCheckpointRecovery;
+        kCheckpointRecovery |
+        kScriptedControlLock |
+        kScreenTransition |
+        kScenarioActivity;
     const auto phase =
         static_cast<std::uint8_t>(payload.phase);
     const bool anchorValid =
@@ -1305,7 +1314,59 @@ bool IsKnownMessageType(const std::uint16_t value) noexcept {
     return value >= static_cast<std::uint16_t>(MessageType::Hello) &&
            value <=
                static_cast<std::uint16_t>(
-                   MessageType::AnimSceneControl);
+                   MessageType::CampaignCapabilityAck);
+}
+
+std::vector<std::uint8_t> EncodeCampaignCapability(
+    const CampaignCapabilityPayload& payload) {
+    const auto kind = static_cast<std::uint8_t>(payload.kind);
+    if (kind < static_cast<std::uint8_t>(CampaignCapabilityKind::WeaponShopEligibility) ||
+        kind > static_cast<std::uint8_t>(CampaignCapabilityKind::ActivityGate) ||
+        payload.recordHash == 0U || payload.hostEventId == 0U ||
+        payload.grantedAtUnixMilliseconds <= 0) {
+        throw std::invalid_argument("invalid campaign capability payload");
+    }
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(kCampaignCapabilityPayloadSize);
+    AppendLittleEndian(bytes, payload.kind);
+    AppendLittleEndian(bytes, std::uint8_t{0U});
+    AppendLittleEndian(bytes, std::uint16_t{0U});
+    AppendLittleEndian(bytes, payload.recordHash);
+    AppendLittleEndian(bytes, payload.hostEventId);
+    AppendLittleEndian(bytes, payload.grantedAtUnixMilliseconds);
+    return bytes;
+}
+
+std::optional<CampaignCapabilityPayload> DecodeCampaignCapability(
+    const std::span<const std::uint8_t> bytes) {
+    if (bytes.size() != kCampaignCapabilityPayloadSize) return std::nullopt;
+    std::size_t offset{};
+    const auto kind = ReadLittleEndian<std::uint8_t>(bytes, offset);
+    const auto reservedByte = ReadLittleEndian<std::uint8_t>(bytes, offset);
+    const auto reserved = ReadLittleEndian<std::uint16_t>(bytes, offset);
+    CampaignCapabilityPayload payload{static_cast<CampaignCapabilityKind>(kind),
+        ReadLittleEndian<std::uint32_t>(bytes, offset),
+        ReadLittleEndian<std::uint64_t>(bytes, offset),
+        ReadLittleEndian<std::int64_t>(bytes, offset)};
+    if (kind < static_cast<std::uint8_t>(CampaignCapabilityKind::WeaponShopEligibility) ||
+        kind > static_cast<std::uint8_t>(CampaignCapabilityKind::ActivityGate) ||
+        reservedByte != 0U || reserved != 0U || payload.recordHash == 0U ||
+        payload.hostEventId == 0U || payload.grantedAtUnixMilliseconds <= 0) return std::nullopt;
+    return payload;
+}
+
+std::vector<std::uint8_t> EncodeCampaignCapabilityAck(const CampaignCapabilityAckPayload& payload) {
+    const auto kind = static_cast<std::uint8_t>(payload.kind);
+    if (kind < static_cast<std::uint8_t>(CampaignCapabilityKind::WeaponShopEligibility) || kind > static_cast<std::uint8_t>(CampaignCapabilityKind::ActivityGate) || payload.recordHash == 0U || payload.hostEventId == 0U) throw std::invalid_argument("invalid campaign capability acknowledgement");
+    std::vector<std::uint8_t> bytes; bytes.reserve(kCampaignCapabilityAckPayloadSize);
+    AppendLittleEndian(bytes, payload.kind); AppendLittleEndian(bytes, std::uint8_t{0U}); AppendLittleEndian(bytes, std::uint16_t{0U}); AppendLittleEndian(bytes, payload.recordHash); AppendLittleEndian(bytes, payload.hostEventId); return bytes;
+}
+
+std::optional<CampaignCapabilityAckPayload> DecodeCampaignCapabilityAck(const std::span<const std::uint8_t> bytes) {
+    if (bytes.size() != kCampaignCapabilityAckPayloadSize) return std::nullopt;
+    std::size_t offset{}; const auto kind = ReadLittleEndian<std::uint8_t>(bytes, offset); const auto b = ReadLittleEndian<std::uint8_t>(bytes, offset); const auto r = ReadLittleEndian<std::uint16_t>(bytes, offset);
+    CampaignCapabilityAckPayload payload{static_cast<CampaignCapabilityKind>(kind), ReadLittleEndian<std::uint32_t>(bytes, offset), ReadLittleEndian<std::uint64_t>(bytes, offset)};
+    if (kind < static_cast<std::uint8_t>(CampaignCapabilityKind::WeaponShopEligibility) || kind > static_cast<std::uint8_t>(CampaignCapabilityKind::ActivityGate) || b != 0U || r != 0U || payload.recordHash == 0U || payload.hostEventId == 0U) return std::nullopt; return payload;
 }
 
 std::vector<std::uint8_t> FrameCodec::Encode(const Frame& frame) {

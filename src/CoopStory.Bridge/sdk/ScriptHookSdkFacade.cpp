@@ -38,6 +38,37 @@ namespace {
 
 constexpr std::uintmax_t kBridgeLogMaxBytes = 8U * 1024U * 1024U;
 constexpr unsigned int kBridgeLogArchiveCount = 3U;
+
+// Shared capabilities are intentionally opt-in.  A valid wire record is not
+// enough authority to alter a Story save: each native mapping has to be
+// manually proven against this game build first.  Add records here only with a
+// matching guarded in-game probe and automated protocol coverage.
+constexpr std::uint32_t kRepeatingShotgunWeaponHash = 1'674'213'418U;
+constexpr std::uint32_t kPoisonThrowingKnifePamphletHash = 0x366089E7U;
+
+[[nodiscard]] bool IsSupportedCampaignCapability(
+    const CampaignCapabilityPayload& capability) noexcept {
+    switch (capability.kind) {
+        case CampaignCapabilityKind::WeaponShopEligibility:
+            return capability.recordHash == kRepeatingShotgunWeaponHash;
+        case CampaignCapabilityKind::Recipe:
+            return capability.recordHash == kPoisonThrowingKnifePamphletHash;
+        case CampaignCapabilityKind::CapacityUpgrade:
+        case CampaignCapabilityKind::ActivityGate:
+            return false;
+    }
+    return false;
+}
+
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+// The bundled 1207 SDK exposes the UNLOCK family but omits the name of this
+// read-only resolver. rdr3-natives documents 0x865F36299079FB75 as
+// _GET_WEAPON_UNLOCK(Hash weaponHash) -> Hash. Keep it local instead of
+// editing vendored SDK headers.
+[[nodiscard]] Hash GetWeaponUnlock(const Hash weaponHash) {
+    return ::invoke<Hash>(0x865F36299079FB75ULL, weaponHash);
+}
+#endif
 // A movement task contains a fixed destination. Updating it only after three
 // metres made a walking replica reach an old point, stop, and then sprint to
 // the next one. Route intent can update roughly three times per second without
@@ -3168,14 +3199,27 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
     sample.healthFraction =
         maximumHealth > 0.0F ? health / maximumHealth : 0.0F;
     sample.missionActive = GAMEPLAY::GET_MISSION_FLAG() != FALSE;
+    sample.controlLocked =
+        PLAYER::IS_PLAYER_CONTROL_ON(PLAYER::PLAYER_ID()) == FALSE &&
+        UI::IS_PAUSE_MENU_ACTIVE() == FALSE;
+    sample.screenTransition =
+        CAM::IS_SCREEN_FADED_OUT() != FALSE ||
+        CAM::IS_SCREEN_FADING_OUT() != FALSE ||
+        CAM::IS_SCREEN_FADING_IN() != FALSE;
+    sample.scenarioActive =
+        PED::IS_PED_USING_ANY_SCENARIO(ped) != FALSE ||
+        AI::IS_PED_ACTIVE_IN_SCENARIO(ped, TRUE) != FALSE;
+    sample.vehicleEntryTransition =
+        PED::IS_PED_GETTING_INTO_A_VEHICLE(ped) != FALSE;
     // Several Story AnimScenes take player control without reporting the
     // generic cinematic camera native. Treat that mission-owned control loss
     // as a scene as well, while excluding the ordinary pause frontend.
     sample.cutsceneActive =
         CAM::IS_CINEMATIC_CAM_RENDERING() != FALSE ||
-        (sample.missionActive &&
-         PLAYER::IS_PLAYER_CONTROL_ON(PLAYER::PLAYER_ID()) == FALSE &&
-         UI::IS_PAUSE_MENU_ACTIVE() == FALSE);
+        sample.screenTransition ||
+        (sample.controlLocked &&
+         (sample.missionActive || sample.scenarioActive ||
+          sample.vehicleEntryTransition));
     const bool lethalGuardThresholdReached =
         realtimePolicyActive_ && maximumHealth > 0.0F &&
         health > 0.0F &&
@@ -5218,7 +5262,11 @@ MenuInputState ScriptHookSdkFacade::ReadMenuInput() noexcept {
         .down = Pressed(VK_DOWN),
         .left = Pressed(VK_LEFT),
         .right = Pressed(VK_RIGHT),
-        .confirm = Pressed(VK_RETURN),
+        // Some virtual-key input sources (including accessibility remoting)
+        // do not surface their Return event as VK_RETURN to GetAsyncKeyState.
+        // Space is the conventional alternate menu-confirm key and gives the
+        // emergency/test panel an equivalent, reliable activation path.
+        .confirm = Pressed(VK_RETURN) || Pressed(VK_SPACE),
         .cancel = Pressed(VK_ESCAPE)};
 }
 
@@ -5949,6 +5997,93 @@ bool ScriptHookSdkFacade::ExecuteCommand(
                 return false;
             }
 #else
+            return false;
+#endif
+        }
+        case BridgeCommand::ProbeRepeatingShotgunShopUnlock:
+        case BridgeCommand::EnableRepeatingShotgunShopUnlock: {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+            try {
+                char weaponName[] = "WEAPON_SHOTGUN_REPEATING";
+                const auto weapon = GAMEPLAY::GET_HASH_KEY(weaponName);
+                if (weapon == 0U || WEAPON::IS_WEAPON_VALID(weapon) == FALSE) {
+                    Log("[ERROR][SHOP_UNLOCK] Repeating Shotgun is not a valid weapon hash");
+                    return false;
+                }
+
+                const auto unlock = GetWeaponUnlock(weapon);
+                if (unlock == 0U) {
+                    Log("[ERROR][SHOP_UNLOCK] weapon-to-unlock resolver returned zero for Repeating Shotgun");
+                    return false;
+                }
+
+                const auto beforeVisible =
+                    UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+                const auto beforeUnlocked =
+                    UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+                const bool enable =
+                    command == BridgeCommand::EnableRepeatingShotgunShopUnlock;
+                if (enable) {
+                    UNLOCK::_0x46B901A8ECDB5A61(unlock, TRUE);
+                    UNLOCK::_0x1B7C5ADA8A6910A0(unlock, TRUE);
+                }
+                const auto afterVisible =
+                    UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+                const auto afterUnlocked =
+                    UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+                Log(
+                    std::string{"[INFO][SHOP_UNLOCK] item=Repeating Shotgun, weaponHash="} +
+                    std::to_string(weapon) +
+                    ", unlockHash=" + std::to_string(unlock) +
+                    ", mode=" + (enable ? "enable" : "probe") +
+                    ", visible=" + std::to_string(beforeVisible ? 1 : 0) +
+                    "->" + std::to_string(afterVisible ? 1 : 0) +
+                    ", unlocked=" + std::to_string(beforeUnlocked ? 1 : 0) +
+                    "->" + std::to_string(afterUnlocked ? 1 : 0));
+                return !enable || (afterVisible && afterUnlocked);
+            } catch (...) {
+                Log("[ERROR][SHOP_UNLOCK] Repeating Shotgun unlock test raised an exception");
+                return false;
+            }
+#else
+            Log("[ERROR][SHOP_UNLOCK] native bindings are disabled; unlock test was not run");
+            return false;
+#endif
+        }
+        case BridgeCommand::ProbePoisonThrowingKnifePamphlet:
+        case BridgeCommand::EnablePoisonThrowingKnifePamphlet: {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+            try {
+                // Confirmed item-database identifier: DOCUMENT_PAMPHLET_POISON_THROWING_KNIFE.
+                char itemName[] = "DOCUMENT_PAMPHLET_POISON_THROWING_KNIFE";
+                const auto unlock = GAMEPLAY::GET_HASH_KEY(itemName);
+                constexpr Hash kExpectedUnlock = 0x366089E7U;
+                if (unlock != kExpectedUnlock) {
+                    Log("[ERROR][RECIPE_UNLOCK] Poison Throwing Knife pamphlet hash mismatch");
+                    return false;
+                }
+                const auto beforeVisible = UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+                const auto beforeUnlocked = UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+                const bool enable = command == BridgeCommand::EnablePoisonThrowingKnifePamphlet;
+                if (enable) {
+                    UNLOCK::_0x46B901A8ECDB5A61(unlock, TRUE);
+                    UNLOCK::_0x1B7C5ADA8A6910A0(unlock, TRUE);
+                }
+                const auto afterVisible = UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+                const auto afterUnlocked = UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+                Log(std::string{"[RECIPE_UNLOCK] item=Poison Throwing Knife Pamphlet, unlockHash="} +
+                    std::to_string(unlock) + ", mode=" + (enable ? "enable" : "probe") +
+                    ", visible=" + std::to_string(beforeVisible ? 1 : 0) + "->" +
+                    std::to_string(afterVisible ? 1 : 0) + ", unlocked=" +
+                    std::to_string(beforeUnlocked ? 1 : 0) + "->" +
+                    std::to_string(afterUnlocked ? 1 : 0));
+                return !enable || (afterVisible && afterUnlocked);
+            } catch (...) {
+                Log("[ERROR][RECIPE_UNLOCK] Poison Throwing Knife pamphlet probe raised an exception");
+                return false;
+            }
+#else
+            Log("[ERROR][RECIPE_UNLOCK] native bindings are disabled; recipe probe was not run");
             return false;
 #endif
         }
@@ -11646,6 +11781,79 @@ bool ScriptHookSdkFacade::ApplyRemoteEquipment(
     } catch (...) {
         // Equipment replication is cosmetic on the receiving client.
     }
+    return false;
+}
+
+bool ScriptHookSdkFacade::UnlockLocalWeaponEntitlement(
+    const std::uint32_t weaponHash) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        const auto weapon = static_cast<Hash>(weaponHash);
+        if (weapon == 0U || WEAPON::IS_WEAPON_VALID(weapon) == FALSE) {
+            return false;
+        }
+        const auto unlock = GetWeaponUnlock(weapon);
+        if (unlock == 0U) {
+            return false;
+        }
+        const auto visible = UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+        const auto unlocked = UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+        if (visible && unlocked) {
+            return true;
+        }
+        if (!visible) {
+            UNLOCK::_0x46B901A8ECDB5A61(unlock, TRUE);
+        }
+        if (!unlocked) {
+            UNLOCK::_0x1B7C5ADA8A6910A0(unlock, TRUE);
+        }
+        const bool applied =
+            UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE &&
+            UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+        Log(std::string{"[WEAPON_ENTITLEMENT] weaponHash="} +
+            std::to_string(weaponHash) + ", unlockHash=" +
+            std::to_string(unlock) + ", visible=" +
+            std::to_string(visible ? 1 : 0) + "->" +
+            std::to_string(applied ? 1 : 0) + ", unlocked=" +
+            std::to_string(unlocked ? 1 : 0) + "->" +
+            std::to_string(applied ? 1 : 0));
+        return applied;
+#else
+        (void)weaponHash;
+#endif
+    } catch (...) {
+        // A local unlock hand-off must never interrupt normal replication.
+    }
+    return false;
+}
+
+bool ScriptHookSdkFacade::ApplyCampaignCapability(
+    const CampaignCapabilityPayload& capability) noexcept {
+    if (!IsSupportedCampaignCapability(capability)) {
+        Log(std::string{"[CAPABILITY] unsupported record rejected kind="} +
+            std::to_string(static_cast<unsigned int>(capability.kind)) +
+            ", recordHash=" + std::to_string(capability.recordHash));
+        return false;
+    }
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+    try {
+        if (capability.kind == CampaignCapabilityKind::WeaponShopEligibility) {
+            return UnlockLocalWeaponEntitlement(capability.recordHash);
+        }
+        if (capability.kind == CampaignCapabilityKind::Recipe) {
+            const auto unlock = static_cast<Hash>(capability.recordHash);
+            UNLOCK::_0x46B901A8ECDB5A61(unlock, TRUE);
+            UNLOCK::_0x1B7C5ADA8A6910A0(unlock, TRUE);
+            return UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE &&
+                UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+        }
+        Log("[CAPABILITY] unsupported capability kind rejected");
+    } catch (...) {
+        Log("[CAPABILITY] native application raised an exception");
+    }
+#else
+    (void)capability;
+#endif
     return false;
 }
 

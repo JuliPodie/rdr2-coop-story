@@ -59,7 +59,7 @@ void FrameCodecRoundTrip() {
     CHECK(bytes[1] == static_cast<std::uint8_t>('2'));
     CHECK(bytes[2] == static_cast<std::uint8_t>('C'));
     CHECK(bytes[3] == static_cast<std::uint8_t>('P'));
-    CHECK(bytes[4] == 20U);
+    CHECK(bytes[4] == 22U);
     CHECK(bytes[5] == 0U);
     CHECK(bytes[6] == 4U);
     CHECK(bytes[7] == 0U);
@@ -73,6 +73,17 @@ void FrameCodecRoundTrip() {
     CHECK(decoded.frame->header.sequence == source.header.sequence);
     CHECK(decoded.frame->header.tick == source.header.tick);
     CHECK(decoded.frame->payload == source.payload);
+
+    const CampaignCapabilityPayload capability{
+        CampaignCapabilityKind::Recipe, 0x366089E7U, 91U, 1'700'000'000'000LL};
+    const auto capabilityBytes = EncodeCampaignCapability(capability);
+    CHECK(capabilityBytes.size() == kCampaignCapabilityPayloadSize);
+    const auto decodedCapability = DecodeCampaignCapability(capabilityBytes);
+    CHECK(decodedCapability.has_value());
+    CHECK(decodedCapability->kind == capability.kind);
+    CHECK(decodedCapability->recordHash == capability.recordHash);
+    CHECK(decodedCapability->hostEventId == capability.hostEventId);
+    CHECK(decodedCapability->grantedAtUnixMilliseconds == capability.grantedAtUnixMilliseconds);
 
     FrameStreamDecoder stream;
     stream.Append(
@@ -1304,7 +1315,7 @@ void PayloadContracts() {
 }
 
 void AnimationReplicationPayloadContracts() {
-    CHECK(kProtocolVersion == 20U);
+    CHECK(kProtocolVersion == 22U);
     CHECK(
         static_cast<std::uint16_t>(MessageType::PlayerAnimationState) ==
         28U);
@@ -1984,8 +1995,8 @@ void MenuEdges() {
     (void)soloMenu.Update(MenuInputState{.up = true});
     CHECK(
         soloMenu.Commands()[soloMenu.Selection()] ==
-        BridgeCommand::StopSession);
-    CHECK(soloMenu.Commands().size() == 16U);
+        BridgeCommand::ProbePoisonThrowingKnifePamphlet);
+    CHECK(soloMenu.Commands().size() == 20U);
     CHECK(
         soloMenu.Commands()[0U] ==
         BridgeCommand::SkipCutscene);
@@ -2018,6 +2029,18 @@ void MenuEdges() {
     CHECK(
         MenuController::Label(BridgeCommand::GrantTestLasso) ==
         "Give lasso (test)");
+    CHECK(
+        MenuController::Label(
+            BridgeCommand::ProbeRepeatingShotgunShopUnlock) ==
+        "Probe Repeating Shotgun shop unlock");
+    CHECK(
+        MenuController::Label(
+            BridgeCommand::EnableRepeatingShotgunShopUnlock) ==
+        "Enable Repeating Shotgun shop unlock (test)");
+    CHECK(
+        MenuController::Label(
+            BridgeCommand::ProbePoisonThrowingKnifePamphlet) ==
+        "Probe Poison Throwing Knife pamphlet");
     CHECK(
         MenuController::Label(BridgeCommand::SkipCutscene) ==
         "Vote: skip cutscene");
@@ -3271,6 +3294,11 @@ public:
         remoteEquipment.push_back(state);
         return true;
     }
+    bool UnlockLocalWeaponEntitlement(
+        const std::uint32_t weaponHash) noexcept override {
+        weaponEntitlements.push_back(weaponHash);
+        return true;
+    }
     bool MaintainRemoteMount(
         const PlayerMountStatePayload& state,
         const std::optional<PlayerMountStatePayload>& localState) noexcept override {
@@ -3502,6 +3530,7 @@ public:
     std::vector<PlayerIdentityPayload> remoteIdentities{};
     std::vector<WorldStatePayload> appliedWorldStates{};
     std::vector<EquipmentStatePayload> remoteEquipment{};
+    std::vector<std::uint32_t> weaponEntitlements{};
     std::vector<PlayerMountStatePayload> remoteMountStates{};
     std::vector<std::optional<PlayerMountStatePayload>>
         remoteMountLocalStates{};
@@ -4523,6 +4552,8 @@ void RuntimeLoopback() {
     CHECK(
         facade.remoteEquipment.back().weaponHash ==
         0xAABBCCDDU);
+    CHECK(facade.weaponEntitlements.size() == 1U);
+    CHECK(facade.weaponEntitlements.back() == 0xAABBCCDDU);
     CHECK(facade.remoteMountStates.size() == 1U);
     CHECK(facade.remoteMountLocalStates.size() == 1U);
     CHECK(facade.remoteMountLocalStates.back().has_value());
@@ -4534,7 +4565,9 @@ void RuntimeLoopback() {
     facade.tick += 49U;
     runtime.Tick();
     CHECK(facade.remoteMountStates.size() == 1U);
-    facade.tick += 1U;
+    // Spectator release is intentionally debounced so that a brief UI or
+    // control handoff cannot flicker the guest back into the local mission.
+    facade.tick += 651U;
     runtime.Tick();
     CHECK(facade.remoteMountStates.size() == 2U);
 
@@ -7402,7 +7435,9 @@ void RuntimeCinematicChainsLoadingAndWaitsForResumeReady() {
     CHECK(state->phase == MissionCinematicPhase::Completed);
     CHECK(!facade.remoteMissionParticipantHidden);
     CHECK(!facade.missionResumeBarrierActive);
-    facade.tick += 1U;
+    // The classifier keeps the guest spectating briefly after a cinematic
+    // terminal handoff, avoiding a one-frame control/UI flicker.
+    facade.tick += 651U;
     runtime.Tick();
     const auto mission = LastSentMissionState(transport);
     CHECK(mission.has_value());

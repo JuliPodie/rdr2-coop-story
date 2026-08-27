@@ -51,6 +51,9 @@ internal static class Program
         ("host-authoritative world graph orders dependencies and tombstones",
             AuthoritativeWorldGraphAsync),
         ("player identity validation and reliable refresh", PlayerIdentityAsync),
+        ("player inventories and map loot remain independent", PlayerInventoryAsync),
+        ("campaign capability journal is idempotent and recovers atomically",
+            CapabilityJournalRecoveryAsync),
         ("atomic guest profile write and backup recovery", ProfileRecoveryAsync),
         ("downed and revive state machine", DownedStateAsync),
         ("deterministic network impairment primitives", NetworkImpairmentAsync),
@@ -405,7 +408,7 @@ internal static class Program
 
     private static Task MissionCinematicProtocolAsync()
     {
-        Check.Equal((ushort)20, ProtocolConstants.Version);
+        Check.Equal((ushort)22, ProtocolConstants.Version);
         Check.Equal((ushort)35, (ushort)MessageType.MissionCinematicState);
         Check.Equal((ushort)36, (ushort)MessageType.MissionCinematicAction);
 
@@ -564,7 +567,7 @@ internal static class Program
 
     private static Task AppearanceAndAnimSceneProtocolAsync()
     {
-        Check.Equal((ushort)20, ProtocolConstants.Version);
+        Check.Equal((ushort)22, ProtocolConstants.Version);
         Check.Equal((ushort)37, (ushort)MessageType.PlayerAppearanceState);
         Check.Equal((ushort)38, (ushort)MessageType.AnimSceneReplicaState);
         Check.Equal((ushort)39, (ushort)MessageType.AnimSceneDefinition);
@@ -1856,7 +1859,7 @@ internal static class Program
 
     private static Task PlayerActionProtocolAsync()
     {
-        Check.Equal((ushort)20, ProtocolConstants.Version);
+        Check.Equal((ushort)22, ProtocolConstants.Version);
         Check.Equal((ushort)30, (ushort)MessageType.PlayerAction);
 
         var guestId = NetEntityId.Create(0x11223344, 2);
@@ -2054,7 +2057,7 @@ internal static class Program
 
     private static Task InteractionAuthorityProtocolAsync()
     {
-        Check.Equal((ushort)20, ProtocolConstants.Version);
+        Check.Equal((ushort)22, ProtocolConstants.Version);
         Check.Equal((ushort)32, (ushort)MessageType.InteractionIntent);
         Check.Equal((ushort)33, (ushort)MessageType.InteractionResult);
         Check.Equal((ushort)34, (ushort)MessageType.RestraintState);
@@ -3077,7 +3080,7 @@ internal static class Program
 
     private static Task AnimationReplicationPayloadsAsync()
     {
-        Check.Equal((ushort)20, ProtocolConstants.Version);
+        Check.Equal((ushort)22, ProtocolConstants.Version);
         Check.Equal((ushort)28, (ushort)MessageType.PlayerAnimationState);
         Check.Equal((ushort)29, (ushort)MessageType.MotionReplicationConfig);
 
@@ -3297,7 +3300,7 @@ internal static class Program
 
     private static Task WorldAndEquipmentAsync()
     {
-        Check.Equal((ushort)20, ProtocolConstants.Version);
+        Check.Equal((ushort)22, ProtocolConstants.Version);
         Check.Equal((ushort)23, (ushort)MessageType.WorldState);
         Check.Equal((ushort)24, (ushort)MessageType.EquipmentState);
         Check.Equal((ushort)25, (ushort)MessageType.PauseVote);
@@ -4280,6 +4283,137 @@ internal static class Program
             identity,
             BinaryPayloadCodec.DecodePlayerIdentity(
                 network.Controls[0].Payload.Span));
+    }
+
+    private static Task PlayerInventoryAsync()
+    {
+        var host = NetEntityId.Create(77, 1);
+        var guest = NetEntityId.Create(77, 2);
+        var inventory = new PlayerInventoryRegistry();
+        var loot = new MapLoot(
+            "valentine-general-store-drawer-01",
+            12.50m,
+            [
+                new InventoryItemStack("tonic.health", 1),
+                new InventoryItemStack("ammo.revolver", 12)
+            ]);
+
+        var hostFirstClaim = inventory.ClaimLoot(host, loot);
+        Check.Equal(LootClaimStatus.Granted, hostFirstClaim.Status);
+        Check.Equal(12.50m, hostFirstClaim.Inventory.Money);
+        Check.Equal(12, hostFirstClaim.Inventory.Items["ammo.revolver"]);
+
+        var hostReplay = inventory.ClaimLoot(host, loot);
+        Check.Equal(LootClaimStatus.AlreadyClaimed, hostReplay.Status);
+        Check.Equal(12.50m, hostReplay.Inventory.Money);
+        Check.Equal(1, hostReplay.Inventory.Items["tonic.health"]);
+
+        var guestFirstClaim = inventory.ClaimLoot(guest, loot);
+        Check.Equal(LootClaimStatus.Granted, guestFirstClaim.Status);
+        Check.Equal(12.50m, guestFirstClaim.Inventory.Money);
+        Check.Equal(1, guestFirstClaim.Inventory.Items["tonic.health"]);
+
+        var hostSnapshot = inventory.GetSnapshot(host);
+        Check.Equal(12.50m, hostSnapshot.Money);
+        Check.Equal(2, hostSnapshot.Items.Count);
+        Check.Equal(0m, inventory.GetSnapshot(NetEntityId.Create(77, 3)).Money);
+
+        var rollback = inventory.CaptureTransactionSnapshot();
+        _ = inventory.ClaimLoot(host, new MapLoot("rollback-test", 5m));
+        Check.Equal(17.50m, inventory.GetSnapshot(host).Money);
+        inventory.RestoreTransactionSnapshot(rollback);
+        Check.Equal(12.50m, inventory.GetSnapshot(host).Money);
+
+        var reconnect = inventory.CaptureReconnectState();
+        var restored = new PlayerInventoryRegistry();
+        restored.RestoreReconnectState(reconnect);
+        Check.Equal(12.50m, restored.GetSnapshot(host).Money);
+        Check.Equal(LootClaimStatus.AlreadyClaimed, restored.ClaimLoot(host, loot).Status);
+        return Task.CompletedTask;
+    }
+
+    private static async Task CapabilityJournalRecoveryAsync()
+    {
+        var verifiedCapability = new CampaignCapabilityPayload(
+            CampaignCapabilityKind.Recipe,
+            0x366089E7U,
+            9U,
+            1_700_000_000_000L);
+        var unknownCapability = verifiedCapability with
+        {
+            RecordHash = 0xDEADBEEFU
+        };
+        var verifiedEnvelope = new ProtocolEnvelope(
+            MessageType.CampaignCapability,
+            1U,
+            1U,
+            BinaryPayloadCodec.EncodeCampaignCapability(verifiedCapability));
+        var unknownEnvelope = new ProtocolEnvelope(
+            MessageType.CampaignCapability,
+            2U,
+            2U,
+            BinaryPayloadCodec.EncodeCampaignCapability(unknownCapability));
+        Check.True(SidecarRuntime.IsSupportedCampaignCapability(
+            verifiedCapability));
+        Check.False(SidecarRuntime.IsSupportedCampaignCapability(
+            unknownCapability));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host,
+            verifiedEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest,
+            verifiedEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host,
+            unknownEnvelope));
+        Check.False(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest,
+            unknownEnvelope));
+
+        var root = Path.Combine(Path.GetTempPath(), "CoopStory.SelfTest", Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(root, "capabilities.json");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var journal = new CapabilityJournal();
+            var weapon = new CapabilityGrant("weapon:repeating", CapabilityKind.WeaponShopEligibility,
+                1_674_213_418U, 10U, 1_700_000_000_000L);
+            var replacement = new CapabilityGrant("weapon:repeating", CapabilityKind.WeaponShopEligibility,
+                1_674_213_418U, 11U, 1_700_000_000_100L);
+            Check.True(journal.Record(weapon));
+            Check.False(journal.Record(weapon));
+            Check.True(journal.Record(replacement));
+            Check.Equal(2, journal.CaptureState().Count);
+            Check.Equal(11UL, journal.CaptureReplay().Single().HostEventId);
+            Check.True(journal.Acknowledge(11U, 1_700_000_000_200L));
+            Check.False(journal.Acknowledge(11U, 1_700_000_000_201L));
+            Check.Equal(1_700_000_000_200L,
+                journal.CaptureReplay().Single().GuestAcknowledgedAtUnixMilliseconds!.Value);
+
+            var store = new CapabilityJournalStore();
+            await store.SaveAsync(path, journal).ConfigureAwait(false);
+            var loaded = await store.LoadAsync(path).ConfigureAwait(false);
+            Check.Equal(2, loaded.CaptureState().Count);
+            Check.Equal(11UL, loaded.CaptureReplay().Single().HostEventId);
+            Check.Equal(1_700_000_000_200L,
+                loaded.CaptureReplay().Single().GuestAcknowledgedAtUnixMilliseconds!.Value);
+
+            // A second write creates a recoverable backup. Corrupting the
+            // primary must never cause the store to invent capabilities.
+            await store.SaveAsync(path, loaded).ConfigureAwait(false);
+            await File.WriteAllTextAsync(path, "{bad-json").ConfigureAwait(false);
+            var recovered = await store.LoadAsync(path).ConfigureAwait(false);
+            Check.Equal(2, recovered.CaptureState().Count);
+            Check.Equal(11UL, recovered.CaptureReplay().Single().HostEventId);
+
+            var empty = await store.LoadAsync(Path.Combine(root, "missing.json"))
+                .ConfigureAwait(false);
+            Check.Equal(0, empty.CaptureState().Count);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     private static async Task ProfileRecoveryAsync()
@@ -6095,10 +6229,10 @@ internal static class Program
                     firstToken)
                 .ConfigureAwait(false);
             Check.True(rotatedToken.HasValue);
-            Check.True(rotatedToken.Value.IsValid);
-            Check.False(firstToken == rotatedToken.Value);
+            Check.True(rotatedToken.GetValueOrDefault().IsValid);
+            Check.False(firstToken == rotatedToken.GetValueOrDefault());
             Check.False(server.IsConnectionCurrent(firstToken));
-            Check.True(server.IsConnectionCurrent(rotatedToken.Value));
+            Check.True(server.IsConnectionCurrent(rotatedToken.GetValueOrDefault()));
             var rotatedFrame = new ProtocolEnvelope(
                 MessageType.Heartbeat,
                 40,
@@ -6109,7 +6243,7 @@ internal static class Program
                     .ConfigureAwait(false));
             var firstRead = ProtocolCodec.ReadAsync(firstClient).AsTask();
             Check.True(
-                await server.SendAsync(rotatedToken.Value, rotatedFrame)
+                await server.SendAsync(rotatedToken.GetValueOrDefault(), rotatedFrame)
                     .ConfigureAwait(false));
             var firstReceived = await firstRead
                 .WaitAsync(TimeSpan.FromSeconds(2))
@@ -6134,10 +6268,10 @@ internal static class Program
             Check.True(secondToken.IsValid);
             Check.True(server.IsConnectionCurrent(secondToken));
             Check.False(firstToken == secondToken);
-            Check.False(rotatedToken.Value == secondToken);
+            Check.False(rotatedToken.GetValueOrDefault() == secondToken);
             Check.False(
                 (await server.RotateConnectionTokenAsync(
-                        rotatedToken.Value)
+                        rotatedToken.GetValueOrDefault())
                     .ConfigureAwait(false)).HasValue,
                 "A stale logical token rotated its replacement pipe.");
             Check.True(server.IsConnectionCurrent(secondToken));
@@ -6159,7 +6293,7 @@ internal static class Program
                     .ConfigureAwait(false),
                 "A send for the disconnected pipe generation targeted its replacement.");
             Check.False(
-                await server.SendAsync(rotatedToken.Value, stale)
+                await server.SendAsync(rotatedToken.GetValueOrDefault(), stale)
                     .ConfigureAwait(false),
                 "A logically rotated token targeted a later physical pipe.");
             Check.True(
@@ -6335,7 +6469,7 @@ internal static class Program
                             stop.Token)
                         .ConfigureAwait(false);
                     Check.True(rotated.HasValue);
-                    currentConnection = rotated.Value;
+                    currentConnection = rotated.GetValueOrDefault();
                     ClearSimulatedSessionState();
                     Volatile.Write(
                         ref readyGeneration,
@@ -8758,7 +8892,7 @@ internal static class Program
         Check.Equal(20, config.Replication.SnapshotRateHz);
         Check.Equal(100, config.Replication.InterpolationDelayMs);
         Check.Equal(
-            MotionReplicationMode.TaskNavmesh,
+            MotionReplicationMode.AnimGraphReplica,
             config.MotionReplicationMode);
         Check.Equal(5000, config.Network.DiagnosticsIntervalMs);
         Check.Equal("Player", config.Nickname);

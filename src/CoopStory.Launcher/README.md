@@ -17,9 +17,8 @@ tied to one engine revision. It provides:
 - install, one-operation package update, and uninstall ownership manifests;
 - nickname, local save, LAN/Hamachi IPv4, and password-derived session configuration;
 - a separate settings page whose values survive release-folder replacement;
-- an optional experimental AnimGraph/Direct Replica motion engine; the existing
-  Task/Navmesh engine remains the default and both endpoints must select the
-  same mode;
+- an experimental AnimGraph/Direct Replica motion engine enabled by default;
+  both endpoints must select the same mode, and Task/Navmesh remains available;
 - sidecar lifecycle and an activity log;
 - pre-warmed, composited page switching and a throttled start-button animation
   to avoid black placeholder rectangles on slower GPUs;

@@ -455,8 +455,8 @@ static void TestMotionReplicationModeConfig()
     var defaultSettings = new LauncherSettings();
     Assert(
         defaultSettings.MotionReplicationMode ==
-        LauncherMotionReplicationMode.TaskNavmesh,
-        "New launcher settings did not default to Task/Navmesh.");
+        LauncherMotionReplicationMode.AnimGraphReplica,
+        "New launcher settings did not default to AnimGraph Replica.");
     Assert(
         !defaultSettings.AnimSceneStoryVmProbeEnabled,
         "New launcher settings enabled Story VM Probe by default.");
@@ -515,8 +515,8 @@ static void TestMotionReplicationModeConfig()
         "{\"schemaVersion\":1}");
     Assert(
         store.Load().MotionReplicationMode ==
-        LauncherMotionReplicationMode.TaskNavmesh,
-        "Legacy launcher settings did not safely fall back to Task/Navmesh.");
+        LauncherMotionReplicationMode.AnimGraphReplica,
+        "Legacy launcher settings did not fall back to AnimGraph Replica.");
     Assert(
         !store.Load().AnimSceneStoryVmProbeEnabled,
         "Legacy launcher settings did not keep Story VM Probe disabled.");

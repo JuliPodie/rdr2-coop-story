@@ -1,7 +1,7 @@
 # Testing guide
 
-This guide validates the archived source foundation. It does not certify a
-finished co-op campaign or authorize public distribution of binaries.
+This guide validates the current prototype. It does not certify a finished
+co-op campaign or authorize public distribution of binaries.
 
 ## Managed build and self-tests
 
@@ -16,20 +16,32 @@ dotnet run --project .\tests\CoopStory.Launcher.SelfTest -c Release
 Expected results for the archived source are:
 
 - solution build: zero errors;
-- protocol/sidecar self-test: `46/46`;
+- protocol/sidecar self-test: `48/48`;
 - launcher self-test: `28/28`.
 
 Test counts may change if the project is extended; a failure must be understood
 before any in-game test.
 
+## Native entitlement probes
+
+The guarded Repeating Shotgun developer probe validates whether a live Story
+Mode `UNLOCK` record can make a shop item available without granting the item
+or rewriting a save. Follow [SHOP_UNLOCK_PROBE.md](SHOP_UNLOCK_PROBE.md) on a
+throwaway save before any co-op entitlement replication is added.
+
+The Poison Throwing Knife pamphlet uses the same native family. Its guarded
+host-side result is documented in [RECIPE_UNLOCK_PROBE.md](RECIPE_UNLOCK_PROBE.md).
+It has passed one disposable Story Mode test, but must still be applied and
+acknowledged by a real guest before it is considered a co-op entitlement.
+
 ## Native SDK-free simulator
 
-With CMake 3.25+ and Visual Studio Build Tools 2022/MSVC v143:
+With CMake 3.25+ and the installed Visual Studio 2026 toolchain:
 
 ```powershell
-cmake --preset bridge-vs2022
-cmake --build --preset bridge-vs2022-release
-ctest --preset bridge-vs2022-release
+cmake --preset bridge-asi-vs2026
+cmake --build build\bridge-asi-vs2026 --config Release --parallel
+ctest --test-dir build\bridge-asi-vs2026 -C Release --output-on-failure
 ```
 
 This exercises native bridge logic without Script Hook or the game.

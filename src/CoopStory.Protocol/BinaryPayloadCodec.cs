@@ -43,6 +43,45 @@ public static class BinaryPayloadCodec
     public const int InteractionIntentSize = 40;
     public const int InteractionResultSize = 44;
     public const int RestraintStateSize = 28;
+    public const int CampaignCapabilitySize = 24;
+    public const int CampaignCapabilityAckSize = 16;
+
+    public static byte[] EncodeCampaignCapabilityAck(CampaignCapabilityAckPayload payload)
+    {
+        ValidateCampaignCapabilityAck(payload);
+        var bytes = new byte[CampaignCapabilityAckSize];
+        bytes[0] = (byte)payload.Kind;
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), payload.RecordHash);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), payload.HostEventId);
+        return bytes;
+    }
+
+    public static CampaignCapabilityAckPayload DecodeCampaignCapabilityAck(ReadOnlySpan<byte> payload)
+    {
+        RequireLength(payload, CampaignCapabilityAckSize, nameof(CampaignCapabilityAckPayload));
+        var result = new CampaignCapabilityAckPayload((CampaignCapabilityKind)payload[0], BinaryPrimitives.ReadUInt32LittleEndian(payload[4..]), BinaryPrimitives.ReadUInt64LittleEndian(payload[8..]));
+        ValidateCampaignCapabilityAck(result);
+        return result;
+    }
+
+    public static byte[] EncodeCampaignCapability(CampaignCapabilityPayload payload)
+    {
+        ValidateCampaignCapability(payload);
+        var bytes = new byte[CampaignCapabilitySize];
+        bytes[0] = (byte)payload.Kind;
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), payload.RecordHash);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), payload.HostEventId);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(16), payload.GrantedAtUnixMilliseconds);
+        return bytes;
+    }
+
+    public static CampaignCapabilityPayload DecodeCampaignCapability(ReadOnlySpan<byte> payload)
+    {
+        RequireLength(payload, CampaignCapabilitySize, nameof(CampaignCapabilityPayload));
+        var result = new CampaignCapabilityPayload((CampaignCapabilityKind)payload[0], BinaryPrimitives.ReadUInt32LittleEndian(payload[4..]), BinaryPrimitives.ReadUInt64LittleEndian(payload[8..]), BinaryPrimitives.ReadInt64LittleEndian(payload[16..]));
+        ValidateCampaignCapability(result);
+        return result;
+    }
 
     public static byte[] EncodePlayerState(PlayerStatePayload payload)
     {
@@ -2664,6 +2703,18 @@ public static class BinaryPayloadCodec
             throw new ProtocolException(
                 "Pause-vote request must not carry authoritative state flags.");
         }
+    }
+
+    private static void ValidateCampaignCapability(CampaignCapabilityPayload payload)
+    {
+        if (!Enum.IsDefined(payload.Kind) || payload.RecordHash == 0 || payload.HostEventId == 0 || payload.GrantedAtUnixMilliseconds <= 0)
+            throw new ProtocolException("Campaign capability payload is invalid.");
+    }
+
+    private static void ValidateCampaignCapabilityAck(CampaignCapabilityAckPayload payload)
+    {
+        if (!Enum.IsDefined(payload.Kind) || payload.RecordHash == 0 || payload.HostEventId == 0)
+            throw new ProtocolException("Campaign capability acknowledgement is invalid.");
     }
 
     private static bool IsFinite(Vector3 value) =>

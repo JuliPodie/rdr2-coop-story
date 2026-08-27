@@ -77,6 +77,9 @@ public sealed class SidecarRuntime : IAsyncDisposable
         _missionCinematicStateCache = new();
     private readonly AuthoritativeAnimSceneDefinitionCache
         _animSceneDefinitionCache = new();
+    private readonly CapabilityJournal _capabilityJournal = new();
+    private readonly CapabilityJournalStore _capabilityJournalStore = new();
+    private readonly SemaphoreSlim _capabilityJournalPersistenceGate = new(1, 1);
     private readonly GuestReconnectResyncGate
         _guestReconnectResyncGate = new();
     private readonly PeerControlSendGate _peerControlSendGate = new();
@@ -177,6 +180,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        await RestoreCapabilityJournalAsync(cancellationToken).ConfigureAwait(false);
         if (!_config.InGameMenuEnabled)
         {
             await EnsureGuestProfileAsync(cancellationToken).ConfigureAwait(false);
@@ -288,6 +292,69 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
         await _bridge.DisposeAsync().ConfigureAwait(false);
         _bridgeSessionGenerationGate.Dispose();
+        _capabilityJournalPersistenceGate.Dispose();
+    }
+
+    private async Task RestoreCapabilityJournalAsync(CancellationToken cancellationToken)
+    {
+        // The host owns the source-of-truth log. Guests receive a replay from
+        // it and apply those permissions to their own local game state.
+        if (_config.Role != SessionRole.Host || _config.InGameMenuEnabled)
+        {
+            return;
+        }
+
+        var path = _config.ExpandedCapabilityJournalPath;
+        try
+        {
+            var restored = await _capabilityJournalStore.LoadAsync(path, cancellationToken)
+                .ConfigureAwait(false);
+            _capabilityJournal.Restore(restored.CaptureState());
+            await _logger.InfoAsync(
+                "campaign.capability-journal-restored",
+                "Restored shared campaign capability permissions for reconnect replay.",
+                new Dictionary<string, object?>
+                {
+                    ["path"] = path,
+                    ["eventCount"] = _capabilityJournal.CaptureState().Count
+                }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or JsonException or ArgumentException)
+        {
+            // Do not let a malformed optional co-op journal prevent Story
+            // Mode from starting. The journal is kept intact for diagnosis.
+            await _logger.WarningAsync(
+                "campaign.capability-journal-unavailable",
+                "Could not restore the campaign capability journal; starting an empty in-memory journal.",
+                new Dictionary<string, object?>
+                {
+                    ["path"] = path,
+                    ["error"] = exception.Message
+                }, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task PersistCapabilityJournalAsync(CancellationToken cancellationToken)
+    {
+        if (_config.Role != SessionRole.Host || _config.InGameMenuEnabled)
+        {
+            return;
+        }
+
+        await _capabilityJournalPersistenceGate.WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+        try
+        {
+            await _capabilityJournalStore.SaveAsync(
+                    _config.ExpandedCapabilityJournalPath,
+                    _capabilityJournal,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _capabilityJournalPersistenceGate.Release();
+        }
     }
 
     private async Task RunNetworkAfterSelectionAsync(
@@ -595,6 +662,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             _activeInviteCode = activation.InviteCode;
             _sessionFingerprint =
                 activation.Credentials.SessionId.ToString("N")[..12];
+            await RestoreCapabilityJournalAsync(cancellationToken)
+                .ConfigureAwait(false);
             var network = CreateNetwork(
                 activation.Config,
                 activation.Credentials);
@@ -1374,6 +1443,23 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 },
                 cancellationToken)
             .ConfigureAwait(false);
+        if (peerAccepted && result.Completed)
+        {
+            foreach (var grant in _capabilityJournal.CaptureReplay())
+            {
+                var payload = BinaryPayloadCodec.EncodeCampaignCapability(
+                    new CampaignCapabilityPayload(
+                        (CampaignCapabilityKind)grant.Kind,
+                        grant.RecordHash,
+                        grant.HostEventId,
+                        grant.GrantedAtUnixMilliseconds));
+                _ = await SendPeerControlAsync(
+                        network, peer, MessageType.CampaignCapability,
+                        payload, unchecked((ulong)Environment.TickCount64),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
         var plan = capturedPlan ?? new AuthoritativePeerResyncReplayPlan(
             [],
             AuthoritativePeerResyncDefinitionDisposition.NotCached);
@@ -2517,6 +2603,23 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
 
         ValidateBinaryControlPayload(envelope);
+
+        if (envelope.Type == MessageType.CampaignCapability &&
+            !IsSupportedCampaignCapability(
+                BinaryPayloadCodec.DecodeCampaignCapability(
+                    envelope.Payload.Span)))
+        {
+            _messageFlowDiagnostics.MarkDropped(
+                MessageFlowDirection.BridgeToNetwork,
+                envelope.Type);
+            await _logger.WarningAsync(
+                "campaign.capability-unknown-record",
+                "Dropped an unverified campaign capability record; unknown records are never replayed or applied.",
+                CreateCapabilityDiagnosticsData(envelope, "bridge-to-network"),
+                cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (!IsLocalBridgeEnvelopeAuthorized(_config.Role, envelope))
         {
             await _logger.WarningAsync(
@@ -2530,6 +2633,24 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             return;
+        }
+
+        if (_config.Role == SessionRole.Host &&
+            envelope.Type == MessageType.CampaignCapability)
+        {
+            var capability = BinaryPayloadCodec.DecodeCampaignCapability(
+                envelope.Payload.Span);
+            var recorded = _capabilityJournal.Record(new CapabilityGrant(
+                $"{capability.Kind}:0x{capability.RecordHash:X8}",
+                (CapabilityKind)capability.Kind,
+                capability.RecordHash,
+                capability.HostEventId,
+                capability.GrantedAtUnixMilliseconds));
+            if (recorded)
+            {
+                await PersistCapabilityJournalAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         if (ShouldSerializeHostReplayStateMutation(envelope.Type))
@@ -3142,6 +3263,24 @@ public sealed class SidecarRuntime : IAsyncDisposable
             return;
         }
 
+        ValidateBinaryControlPayload(envelope);
+
+        if (envelope.Type == MessageType.CampaignCapability &&
+            !IsSupportedCampaignCapability(
+                BinaryPayloadCodec.DecodeCampaignCapability(
+                    envelope.Payload.Span)))
+        {
+            _messageFlowDiagnostics.MarkDropped(
+                MessageFlowDirection.NetworkToBridge,
+                envelope.Type);
+            await _logger.WarningAsync(
+                "campaign.capability-unknown-record",
+                "Dropped an unverified campaign capability record; unknown records are never forwarded to the game.",
+                CreateCapabilityDiagnosticsData(envelope, "network-to-bridge"),
+                cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (!IsPeerEnvelopeAuthorized(_config.Role, envelope))
         {
             _messageFlowDiagnostics.MarkDropped(
@@ -3160,7 +3299,27 @@ public sealed class SidecarRuntime : IAsyncDisposable
             return;
         }
 
-        ValidateBinaryControlPayload(envelope);
+        if (_config.Role == SessionRole.Host &&
+            envelope.Type == MessageType.CampaignCapabilityAck)
+        {
+            var acknowledgement = BinaryPayloadCodec.DecodeCampaignCapabilityAck(
+                envelope.Payload.Span);
+            var matchingGrant = _capabilityJournal.CaptureState().SingleOrDefault(
+                grant => grant.HostEventId == acknowledgement.HostEventId &&
+                    grant.Kind == (CapabilityKind)acknowledgement.Kind &&
+                    grant.RecordHash == acknowledgement.RecordHash);
+            if (matchingGrant is null)
+            {
+                _messageFlowDiagnostics.MarkDropped(MessageFlowDirection.NetworkToBridge, envelope.Type);
+                return;
+            }
+            if (_capabilityJournal.Acknowledge(acknowledgement.HostEventId,
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+            {
+                await PersistCapabilityJournalAsync(cancellationToken).ConfigureAwait(false);
+            }
+            return;
+        }
 
         if (TryDecodeDiagnosticMarker(envelope, out _))
         {
@@ -5407,6 +5566,21 @@ public sealed class SidecarRuntime : IAsyncDisposable
             }
         }
 
+        if (envelope.Type == MessageType.CampaignCapability)
+        {
+            try
+            {
+                var capability = BinaryPayloadCodec.DecodeCampaignCapability(envelope.Payload.Span);
+                return $"{envelope.Type}/{capability.Kind}/0x{capability.RecordHash:X8}/event={capability.HostEventId}";
+            }
+            catch (ProtocolException) { return $"{envelope.Type}/Invalid"; }
+        }
+        if (envelope.Type == MessageType.CampaignCapabilityAck)
+        {
+            var acknowledgement = BinaryPayloadCodec.DecodeCampaignCapabilityAck(envelope.Payload.Span);
+            return $"{envelope.Type}/{acknowledgement.Kind}/0x{acknowledgement.RecordHash:X8}/event={acknowledgement.HostEventId}";
+        }
+
         if (envelope.Type == MessageType.PlayerAction)
         {
             try
@@ -5621,6 +5795,12 @@ public sealed class SidecarRuntime : IAsyncDisposable
             case MessageType.EquipmentState:
                 _ = BinaryPayloadCodec.DecodeEquipmentState(envelope.Payload.Span);
                 break;
+            case MessageType.CampaignCapability:
+                _ = BinaryPayloadCodec.DecodeCampaignCapability(envelope.Payload.Span);
+                break;
+            case MessageType.CampaignCapabilityAck:
+                _ = BinaryPayloadCodec.DecodeCampaignCapabilityAck(envelope.Payload.Span);
+                break;
             case MessageType.PlayerAppearanceState:
                 _ = BinaryPayloadCodec.DecodePlayerAppearanceState(
                     envelope.Payload.Span);
@@ -5725,6 +5905,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
         SessionRole localRole,
         MessageType messageType)
     {
+        if (messageType == MessageType.CampaignCapability)
+        {
+            return localRole == SessionRole.Guest;
+        }
+        if (messageType == MessageType.CampaignCapabilityAck)
+        {
+            return localRole == SessionRole.Host;
+        }
         if (messageType == MessageType.MotionReplicationConfig)
         {
             return false;
@@ -5763,6 +5951,19 @@ public sealed class SidecarRuntime : IAsyncDisposable
         };
     }
 
+    // This is the sidecar half of the native capability allowlist.  A new
+    // campaign record must be added here and in ScriptHookSdkFacade only after
+    // its game-native mapping has been independently proven.
+    internal static bool IsSupportedCampaignCapability(
+        CampaignCapabilityPayload capability) => capability.Kind switch
+    {
+        CampaignCapabilityKind.WeaponShopEligibility =>
+            capability.RecordHash == 1_674_213_418U,
+        CampaignCapabilityKind.Recipe =>
+            capability.RecordHash == 0x366089E7U,
+        _ => false
+    };
+
     internal static bool IsPeerEnvelopeAuthorized(
         SessionRole localRole,
         ProtocolEnvelope envelope)
@@ -5775,6 +5976,12 @@ public sealed class SidecarRuntime : IAsyncDisposable
         if (envelope.Type == MessageType.DamageApplied)
         {
             return localRole == SessionRole.Guest;
+        }
+
+        if (envelope.Type == MessageType.CampaignCapability)
+        {
+            return IsSupportedCampaignCapability(
+                BinaryPayloadCodec.DecodeCampaignCapability(envelope.Payload.Span));
         }
 
         if (envelope.Type == MessageType.PauseVote)
@@ -5896,6 +6103,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
         SessionRole localRole,
         MessageType messageType)
     {
+        if (messageType == MessageType.CampaignCapability)
+        {
+            return localRole == SessionRole.Host;
+        }
+        if (messageType == MessageType.CampaignCapabilityAck)
+        {
+            return localRole == SessionRole.Guest;
+        }
         if (messageType == MessageType.MotionReplicationConfig)
         {
             return false;
@@ -5947,6 +6162,12 @@ public sealed class SidecarRuntime : IAsyncDisposable
         if (envelope.Type == MessageType.DamageApplied)
         {
             return localRole == SessionRole.Host;
+        }
+
+        if (envelope.Type == MessageType.CampaignCapability)
+        {
+            return IsSupportedCampaignCapability(
+                BinaryPayloadCodec.DecodeCampaignCapability(envelope.Payload.Span));
         }
 
         if (envelope.Type == MessageType.PauseVote)
@@ -6055,6 +6276,24 @@ public sealed class SidecarRuntime : IAsyncDisposable
                     AnimSceneControlKind.GuestRejected,
             _ => false
         });
+
+    private static Dictionary<string, object?> CreateCapabilityDiagnosticsData(
+        ProtocolEnvelope envelope,
+        string direction)
+    {
+        var capability = BinaryPayloadCodec.DecodeCampaignCapability(
+            envelope.Payload.Span);
+        return new Dictionary<string, object?>
+        {
+            ["messageType"] = envelope.Type.ToString(),
+            ["direction"] = direction,
+            ["kind"] = capability.Kind.ToString(),
+            ["recordHash"] = $"0x{capability.RecordHash:X8}",
+            ["hostEventId"] = capability.HostEventId,
+            ["grantedAtUnixMilliseconds"] =
+                capability.GrantedAtUnixMilliseconds
+        };
+    }
 
     private static bool IsHostAuthoritativeCommand(
         CommandOpcode opcode) =>
