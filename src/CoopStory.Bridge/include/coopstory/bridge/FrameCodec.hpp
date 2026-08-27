@@ -12,7 +12,7 @@
 namespace coopstory::bridge {
 
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
-inline constexpr std::uint16_t kProtocolVersion = 20U;
+inline constexpr std::uint16_t kProtocolVersion = 22U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
@@ -58,6 +58,8 @@ enum class MessageType : std::uint16_t {
     AnimSceneReplicaState = 38,
     AnimSceneDefinition = 39,
     AnimSceneControl = 40,
+    CampaignCapability = 41,
+    CampaignCapabilityAck = 42,
 };
 
 [[nodiscard]] bool IsKnownMessageType(std::uint16_t value) noexcept;
@@ -627,6 +629,9 @@ enum class MissionStateFlag : std::uint8_t {
     MissionActive = 1U << 0U,
     AnchorValid = 1U << 1U,
     CheckpointRecovery = 1U << 2U,
+    ScriptedControlLock = 1U << 3U,
+    ScreenTransition = 1U << 4U,
+    ScenarioActivity = 1U << 5U,
 };
 
 struct MissionStatePayload final {
@@ -1036,7 +1041,40 @@ enum class BridgeCommand : std::uint16_t {
     GrantTestLasso = 15,
     SkipCutscene = 16,
     EmergencyRecover = 17,
+    ProbeRepeatingShotgunShopUnlock = 18,
+    EnableRepeatingShotgunShopUnlock = 19,
+    ProbePoisonThrowingKnifePamphlet = 20,
+    EnablePoisonThrowingKnifePamphlet = 21,
 };
+
+enum class CampaignCapabilityKind : std::uint8_t {
+    WeaponShopEligibility = 1,
+    Recipe = 2,
+    CapacityUpgrade = 3,
+    ActivityGate = 4,
+};
+
+struct CampaignCapabilityPayload final {
+    CampaignCapabilityKind kind{CampaignCapabilityKind::WeaponShopEligibility};
+    std::uint32_t recordHash{};
+    std::uint64_t hostEventId{};
+    std::int64_t grantedAtUnixMilliseconds{};
+};
+
+inline constexpr std::size_t kCampaignCapabilityPayloadSize = 24U;
+[[nodiscard]] std::vector<std::uint8_t> EncodeCampaignCapability(
+    const CampaignCapabilityPayload& payload);
+[[nodiscard]] std::optional<CampaignCapabilityPayload> DecodeCampaignCapability(
+std::span<const std::uint8_t> bytes);
+
+struct CampaignCapabilityAckPayload final {
+    CampaignCapabilityKind kind{CampaignCapabilityKind::WeaponShopEligibility};
+    std::uint32_t recordHash{};
+    std::uint64_t hostEventId{};
+};
+inline constexpr std::size_t kCampaignCapabilityAckPayloadSize = 16U;
+[[nodiscard]] std::vector<std::uint8_t> EncodeCampaignCapabilityAck(const CampaignCapabilityAckPayload& payload);
+[[nodiscard]] std::optional<CampaignCapabilityAckPayload> DecodeCampaignCapabilityAck(std::span<const std::uint8_t> bytes);
 
 // Wire opcodes are shared with the C# sidecar. They are intentionally separate
 // from the local F9 menu enum above and must never be converted by numeric cast.

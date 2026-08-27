@@ -1,4 +1,6 @@
 #include "coopstory/bridge/BridgeRuntime.hpp"
+
+#include <chrono>
 #include "coopstory/bridge/RemoteMotion.hpp"
 
 #include <algorithm>
@@ -103,6 +105,10 @@ constexpr std::uint32_t kTransientPlayerActionDurationMilliseconds =
         case BridgeCommand::ToggleGhostReplay:
         case BridgeCommand::GrantTestPistol:
         case BridgeCommand::GrantTestLasso:
+        case BridgeCommand::ProbeRepeatingShotgunShopUnlock:
+        case BridgeCommand::EnableRepeatingShotgunShopUnlock:
+        case BridgeCommand::ProbePoisonThrowingKnifePamphlet:
+        case BridgeCommand::EnablePoisonThrowingKnifePamphlet:
         case BridgeCommand::StopSession:
         case BridgeCommand::SaveProblemMarker:
         case BridgeCommand::SkipCutscene:
@@ -3293,10 +3299,16 @@ void BridgeRuntime::TickMissionAuthority(
         localMissionCinematicState_.has_value() &&
         IsCinematicPresentationPhase(
             localMissionCinematicState_->phase);
-    const bool effectiveCutsceneActive =
+    const bool rawCutsceneActive =
         cinematicPresentationLatched ||
         (sample.cutsceneActive &&
          !localCinematicTerminalLatchActive_);
+    if (rawCutsceneActive) {
+        spectatorClassifierReleaseUntilMs_ = nowMs + 650U;
+    }
+    const bool effectiveCutsceneActive = rawCutsceneActive ||
+        (spectatorClassifierReleaseUntilMs_ != 0U &&
+         nowMs < spectatorClassifierReleaseUntilMs_);
     const auto phase =
         soloOverride_
             ? MissionPhase::SoloOverride
@@ -3319,6 +3331,18 @@ void BridgeRuntime::TickMissionAuthority(
     if (recovering) {
         flags |= static_cast<std::uint8_t>(
             MissionStateFlag::CheckpointRecovery);
+    }
+    if (effectiveCutsceneActive && sample.controlLocked) {
+        flags |= static_cast<std::uint8_t>(
+            MissionStateFlag::ScriptedControlLock);
+    }
+    if (effectiveCutsceneActive && sample.screenTransition) {
+        flags |= static_cast<std::uint8_t>(
+            MissionStateFlag::ScreenTransition);
+    }
+    if (effectiveCutsceneActive && sample.scenarioActive) {
+        flags |= static_cast<std::uint8_t>(
+            MissionStateFlag::ScenarioActivity);
     }
 
     MissionStatePayload next{
@@ -7434,12 +7458,45 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
                 break;
             }
             remoteEquipment_ = *equipment;
+            const bool isGuestReceivingHostEquipment =
+                localSlot_ == PlayerSlot::Guest &&
+                remoteReplicaId_.IsValid() &&
+                equipment->entityId == remoteReplicaId_ &&
+                (equipment->flags &
+                 static_cast<std::uint32_t>(
+                     EquipmentStateFlag::Equipped)) != 0U &&
+                equipment->weaponHash != 0U;
+            if (isGuestReceivingHostEquipment &&
+                !facade_.UnlockLocalWeaponEntitlement(equipment->weaponHash) &&
+                diagnostics_) {
+                facade_.Log("host weapon shop entitlement could not be applied to guest");
+            }
             if (remoteReplicaId_.IsValid() &&
                 !remoteParticipantSceneIsolated_ &&
                 !facade_.ApplyRemoteEquipment(*equipment) &&
                 diagnostics_) {
                 facade_.Log(
                     "remote equipment could not be applied");
+            }
+            break;
+        }
+        case MessageType::CampaignCapability: {
+            const auto capability = DecodeCampaignCapability(frame.payload);
+            if (localSlot_ != PlayerSlot::Guest || !capability.has_value()) {
+                facade_.Log("[CAPABILITY] rejected non-host or malformed capability");
+                break;
+            }
+            if (!facade_.ApplyCampaignCapability(*capability)) {
+                facade_.Log("[CAPABILITY] guest capability could not be applied");
+            } else {
+                Frame acknowledgement;
+                acknowledgement.header.type = MessageType::CampaignCapabilityAck;
+                acknowledgement.header.sequence = sequencer_.Next();
+                acknowledgement.header.tick = facade_.TickMilliseconds();
+                acknowledgement.payload = EncodeCampaignCapabilityAck(
+                    CampaignCapabilityAckPayload{capability->kind,
+                        capability->recordHash, capability->hostEventId});
+                SendBestEffort(std::move(acknowledgement));
             }
             break;
         }
@@ -8089,12 +8146,56 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
         return;
     }
     if (command == BridgeCommand::GrantTestPistol ||
-        command == BridgeCommand::GrantTestLasso) {
-        if (!facade_.ExecuteCommand(command)) {
-            facade_.Log(
-                command == BridgeCommand::GrantTestLasso
-                    ? "[ERROR][TEST_WEAPON] failed to grant the test lasso"
-                    : "[ERROR][TEST_WEAPON] failed to grant the test pistol");
+        command == BridgeCommand::GrantTestLasso ||
+        command == BridgeCommand::ProbeRepeatingShotgunShopUnlock ||
+        command == BridgeCommand::EnableRepeatingShotgunShopUnlock ||
+        command == BridgeCommand::ProbePoisonThrowingKnifePamphlet ||
+        command == BridgeCommand::EnablePoisonThrowingKnifePamphlet) {
+        const bool executed = facade_.ExecuteCommand(command);
+        if (!executed) {
+            facade_.Log(command == BridgeCommand::ProbeRepeatingShotgunShopUnlock
+                            ? "[ERROR][SHOP_UNLOCK] Repeating Shotgun unlock probe failed"
+                        : command == BridgeCommand::EnableRepeatingShotgunShopUnlock
+                            ? "[ERROR][SHOP_UNLOCK] Repeating Shotgun unlock enable test failed"
+                        : command == BridgeCommand::ProbePoisonThrowingKnifePamphlet
+                            ? "[ERROR][RECIPE_UNLOCK] Poison Throwing Knife pamphlet probe failed"
+                        : command == BridgeCommand::EnablePoisonThrowingKnifePamphlet
+                            ? "[ERROR][RECIPE_UNLOCK] Poison Throwing Knife pamphlet enable test failed"
+                        : command == BridgeCommand::GrantTestLasso
+                            ? "[ERROR][TEST_WEAPON] failed to grant the test lasso"
+                            : "[ERROR][TEST_WEAPON] failed to grant the test pistol");
+        } else if (localSlot_ == PlayerSlot::Host &&
+                   (command == BridgeCommand::EnableRepeatingShotgunShopUnlock ||
+                    command == BridgeCommand::EnablePoisonThrowingKnifePamphlet)) {
+            const auto recordHash =
+                command == BridgeCommand::EnableRepeatingShotgunShopUnlock
+                    ? 1'674'213'418U
+                    : 0x366089E7U;
+            const auto kind =
+                command == BridgeCommand::EnableRepeatingShotgunShopUnlock
+                    ? CampaignCapabilityKind::WeaponShopEligibility
+                    : CampaignCapabilityKind::Recipe;
+            // The journal persists beyond a bridge process.  A simple counter would
+            // restart at one after each game launch and could be mistaken for an
+            // already-applied grant.  Keep a per-millisecond sequence in the low
+            // bits and use wall-clock milliseconds as the restart-safe prefix.
+            const auto grantedAtUnixMilliseconds = static_cast<std::int64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+            const auto sequence = static_cast<std::uint16_t>(
+                static_cast<std::uint16_t>(localCapabilityEventId_) + 1U);
+            localCapabilityEventId_ =
+                (static_cast<std::uint64_t>(grantedAtUnixMilliseconds) << 16U) |
+                static_cast<std::uint64_t>(sequence == 0U ? 1U : sequence);
+            Frame frame;
+            frame.header.type = MessageType::CampaignCapability;
+            frame.header.sequence = sequencer_.Next();
+            frame.header.tick = facade_.TickMilliseconds();
+            frame.payload = EncodeCampaignCapability(CampaignCapabilityPayload{
+                kind, recordHash, localCapabilityEventId_,
+                grantedAtUnixMilliseconds});
+            SendBestEffort(std::move(frame));
+            facade_.Log("[CAPABILITY] host developer entitlement emitted");
         }
         return;
     }

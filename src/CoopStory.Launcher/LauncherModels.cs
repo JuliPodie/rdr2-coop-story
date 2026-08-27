@@ -76,7 +76,7 @@ public sealed record LauncherSettings
 
     [JsonConverter(typeof(JsonStringEnumConverter<LauncherMotionReplicationMode>))]
     public LauncherMotionReplicationMode MotionReplicationMode { get; init; } =
-        LauncherMotionReplicationMode.TaskNavmesh;
+        LauncherMotionReplicationMode.AnimGraphReplica;
 
     public bool AnimSceneStoryVmProbeEnabled { get; init; }
 

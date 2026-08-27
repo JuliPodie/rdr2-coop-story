@@ -48,6 +48,12 @@ struct LocalPlayerSample final {
     float healthFraction{1.0F};
     bool missionActive{};
     bool cutsceneActive{};
+    // Raw game-side observations used by the host's spectator classifier.
+    // They are not player-owned state and must never be persisted.
+    bool controlLocked{};
+    bool screenTransition{};
+    bool scenarioActive{};
+    bool vehicleEntryTransition{};
     bool downed{};
     bool mounted{};
     bool aiming{};
@@ -395,6 +401,19 @@ public:
         const WorldStatePayload& state) noexcept = 0;
     [[nodiscard]] virtual bool ApplyRemoteEquipment(
         const EquipmentStatePayload& state) noexcept = 0;
+    // A host weapon observation is a capability signal, not an inventory
+    // transfer.  The guest receives only the local shop/unlock entitlement;
+    // weapon ownership, ammo, upgrades and money remain private.
+    [[nodiscard]] virtual bool UnlockLocalWeaponEntitlement(
+        std::uint32_t weaponHash) noexcept {
+        (void)weaponHash;
+        return false;
+    }
+    [[nodiscard]] virtual bool ApplyCampaignCapability(
+        const CampaignCapabilityPayload& capability) noexcept {
+        (void)capability;
+        return false;
+    }
     [[nodiscard]] virtual bool MaintainRemoteMount(
         const PlayerMountStatePayload& state,
         const std::optional<PlayerMountStatePayload>& localState) noexcept = 0;

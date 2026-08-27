@@ -25,6 +25,26 @@ public sealed record ErrorPayload(string Code, string Message, bool Fatal);
 
 public sealed record GoodbyePayload(string Reason);
 
+public enum CampaignCapabilityKind : byte
+{
+    WeaponShopEligibility = 1,
+    Recipe = 2,
+    CapacityUpgrade = 3,
+    ActivityGate = 4
+}
+
+// Host-authoritative, idempotent entitlement. It contains no private player data.
+public readonly record struct CampaignCapabilityPayload(
+    CampaignCapabilityKind Kind,
+    uint RecordHash,
+    ulong HostEventId,
+    long GrantedAtUnixMilliseconds);
+
+public readonly record struct CampaignCapabilityAckPayload(
+    CampaignCapabilityKind Kind,
+    uint RecordHash,
+    ulong HostEventId);
+
 public enum PlayerLifecycle : byte
 {
     Alive = 0,
@@ -463,7 +483,10 @@ public enum MissionStateFlags : byte
     None = 0,
     MissionActive = 1 << 0,
     AnchorValid = 1 << 1,
-    CheckpointRecovery = 1 << 2
+    CheckpointRecovery = 1 << 2,
+    ScriptedControlLock = 1 << 3,
+    ScreenTransition = 1 << 4,
+    ScenarioActivity = 1 << 5
 }
 
 public readonly record struct MissionStatePayload(
