@@ -71,6 +71,10 @@ public sealed class SidecarRuntime : IAsyncDisposable
     private readonly ReplicatedEntityRegistry _entities;
     private readonly AuthoritativeWorldGraphRegistry _worldGraph;
     private readonly AuthoritativeInteractionRegistry _interactions = new();
+    // This gate owns semantic progression for combat and physics-affecting
+    // actions. It is deliberately separate from the bridge replica: a remote
+    // task is never allowed to promote an intent into a state transition.
+    private readonly AuthoritativePlayerActionStateMachine _playerActions = new();
     private readonly PlayerIdentityPublisher _identityPublisher;
     private readonly AuthoritativeMissionStateCache _missionStateCache = new();
     private readonly AuthoritativeMissionCinematicStateCache
@@ -501,6 +505,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 token =>
                 {
                     _interactions.Clear(emitFreeStates: false);
+                    _playerActions.Clear();
                     return ValueTask.FromResult(true);
                 },
                 CancellationToken.None)
@@ -2270,7 +2275,9 @@ public sealed class SidecarRuntime : IAsyncDisposable
         var processed = await PeerBridgeAuthorityTransaction.RunAsync<
                 PeerGuestPlayerActionAuthorityResolution,
                 PeerAuthorityControlFrame,
-                AuthoritativeInteractionRegistry.TransactionSnapshot>(
+                (
+                    AuthoritativeInteractionRegistry.TransactionSnapshot Interactions,
+                    AuthoritativePlayerActionStateMachine.TransactionSnapshot Actions)>(
                 _bridgeSessionGenerationGate,
                 _peerControlSendGate,
                 sourceNetwork,
@@ -2293,12 +2300,26 @@ public sealed class SidecarRuntime : IAsyncDisposable
                         bridge,
                         intent.ActorEntityId);
                 },
-                _interactions.CaptureTransactionSnapshot,
+                () => (
+                    _interactions.CaptureTransactionSnapshot(),
+                    _playerActions.CaptureTransactionSnapshot()),
                 () =>
                 {
                     evaluation = terminalRestraintCleanup
                         ? EvaluateTerminalRestraintCleanup(intent)
                         : EvaluateGuestPlayerAction(intent);
+                    if (evaluation.Resolved is { } candidate &&
+                        !terminalRestraintCleanup &&
+                        !_playerActions.TryAuthorize(
+                            candidate,
+                            out var actionRejection))
+                    {
+                        evaluation = (
+                            null,
+                            actionRejection,
+                            evaluation.ActorAgeMilliseconds,
+                            evaluation.TargetAgeMilliseconds);
+                    }
                     var restraint = evaluation.Resolved is { } resolved
                         ? _interactions.ObserveAuthoritativePlayerAction(
                             resolved)
@@ -2307,7 +2328,13 @@ public sealed class SidecarRuntime : IAsyncDisposable
                         evaluation.Resolved,
                         restraint);
                 },
-                _interactions.RestoreTransactionSnapshot,
+                snapshot =>
+                {
+                    _interactions.RestoreTransactionSnapshot(
+                        snapshot.Interactions);
+                    _playerActions.RestoreTransactionSnapshot(
+                        snapshot.Actions);
+                },
                 static resolution => resolution.Resolved is
                     { } resolved
                         ? resolution.Restraint is { } restraint
@@ -2370,6 +2397,17 @@ public sealed class SidecarRuntime : IAsyncDisposable
     {
         var action = BinaryPayloadCodec.DecodePlayerAction(
             envelope.Payload.Span);
+        if (!_playerActions.TryAuthorize(action, out var actionRejection))
+        {
+            await LogRejectedGuestPlayerActionAsync(
+                    action,
+                    actionRejection,
+                    actorAgeMilliseconds: null,
+                    targetAgeMilliseconds: null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return true;
+        }
         BridgePipeConnectionToken? bridgeConnection = null;
         return await NegotiatedPeerMutationTransaction.RunAsync(
                 _peerControlSendGate,
@@ -2445,6 +2483,17 @@ public sealed class SidecarRuntime : IAsyncDisposable
             await LogRejectedGuestPlayerActionAsync(
                     intent,
                     evaluation.Rejection,
+                    evaluation.ActorAgeMilliseconds,
+                    evaluation.TargetAgeMilliseconds,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+        if (!_playerActions.TryAuthorize(resolved, out var actionRejection))
+        {
+            await LogRejectedGuestPlayerActionAsync(
+                    intent,
+                    actionRejection,
                     evaluation.ActorAgeMilliseconds,
                     evaluation.TargetAgeMilliseconds,
                     cancellationToken)
