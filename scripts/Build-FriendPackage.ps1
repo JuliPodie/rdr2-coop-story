@@ -368,7 +368,7 @@ if ($publishedRuntimePaths.Count -eq 0) {
 }
 
 $allowedPackagePaths = @(
-    $publishedRuntimePaths + @(
+    ($publishedRuntimePaths + @(
     'CoopStory.Launcher.deps.json',
     'CoopStory.Launcher.dll',
     'CoopStory.Launcher.exe',
@@ -385,8 +385,7 @@ $allowedPackagePaths = @(
     'sidecar\CoopStory.Sidecar.exe',
     'sidecar\CoopStory.Sidecar.runtimeconfig.json',
     'sidecar\sidecar.config.example.json'
-    )
-    | Sort-Object -Unique
+    ) | Sort-Object -Unique)
 )
 $unexpectedPackageFiles = @(Get-ChildItem `
     -LiteralPath $packageRoot `
