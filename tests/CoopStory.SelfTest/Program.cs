@@ -2054,6 +2054,74 @@ internal static class Program
             SessionRole.Guest,
             hostIntentEnvelope));
 
+        // The host accepts only a legal, revisioned lifecycle before either
+        // bridge is allowed to create a physics-sensitive task. This makes a
+        // delayed combat/lasso packet harmless instead of letting it revive a
+        // completed action on the other player's replica.
+        var actionAuthority = new AuthoritativePlayerActionStateMachine();
+        var grappleBegin = hostResolvedGuest with
+        {
+            ActionId = 51,
+            Revision = 1,
+            Kind = PlayerActionKind.Grapple,
+            Phase = PlayerActionPhase.Begin,
+            Flags = PlayerActionFlags.Authoritative |
+                PlayerActionFlags.ActorAnchorValid,
+            TargetEntityId = NetEntityId.None,
+            TargetPoint = Vector3.Zero,
+            DurationMilliseconds = 800,
+            PhaseElapsedMilliseconds = 0,
+            VariantHash = 0,
+            AnimationSampleSequence = 0,
+            NormalizedPhase = 0
+        };
+        Check.True(actionAuthority.TryAuthorize(grappleBegin, out _));
+        var grappleImpact = grappleBegin with
+        {
+            Revision = 2,
+            Phase = PlayerActionPhase.Impact,
+            PhaseElapsedMilliseconds = 300
+        };
+        Check.True(actionAuthority.TryAuthorize(grappleImpact, out _));
+        Check.False(actionAuthority.TryAuthorize(
+            grappleImpact with { Revision = 3, Phase = PlayerActionPhase.Begin },
+            out var invalidTransition));
+        Check.Equal("illegal-action-phase-transition", invalidTransition);
+        var grappleEnd = grappleImpact with
+        {
+            Revision = 3,
+            Phase = PlayerActionPhase.End
+        };
+        Check.True(actionAuthority.TryAuthorize(grappleEnd, out _));
+        Check.False(actionAuthority.TryAuthorize(
+            grappleEnd with { Revision = 4, Phase = PlayerActionPhase.Sustain },
+            out var afterTerminal));
+        Check.Equal("continuation-after-terminal-action", afterTerminal);
+
+        var lassoResync = grappleBegin with
+        {
+            ActionId = 52,
+            Revision = 1,
+            Kind = PlayerActionKind.Lasso,
+            Phase = PlayerActionPhase.Snapshot,
+            Flags = PlayerActionFlags.Authoritative |
+                PlayerActionFlags.Persistent |
+                PlayerActionFlags.ResyncSnapshot |
+                PlayerActionFlags.ActorAnchorValid
+        };
+        Check.True(actionAuthority.TryAuthorize(lassoResync, out _));
+        Check.False(actionAuthority.TryAuthorize(
+            grappleBegin with
+            {
+                ActionId = 53,
+                Kind = PlayerActionKind.Aim,
+                Flags = PlayerActionFlags.Authoritative |
+                    PlayerActionFlags.ActorAnchorValid |
+                    PlayerActionFlags.PhysicalTargetEffect
+            },
+            out var invalidPhysicalEffect));
+        Check.Equal("physical-effect-not-valid-for-action", invalidPhysicalEffect);
+
         return Task.CompletedTask;
     }
 

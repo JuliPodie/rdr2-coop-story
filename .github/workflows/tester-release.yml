@@ -1,0 +1,115 @@
+name: Publish tester build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A release is created only after all checks and the package allowlist pass.
+# The official ScriptHook SDK is deliberately not stored in this repository;
+# this job therefore runs only on the maintainer's prepared Windows runner.
+permissions:
+  contents: write
+
+concurrency:
+  group: tester-release-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish private tester package
+    runs-on: [self-hosted, Windows, X64, rdr2-coop-story-release]
+    env:
+      SCRIPT_HOOK_RDR2_SDK_DIR: ${{ vars.SCRIPT_HOOK_RDR2_SDK_DIR }}
+    steps:
+      - name: Check out the merged main revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install the managed build SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Verify the private runner prerequisites
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SCRIPT_HOOK_RDR2_SDK_DIR) -or
+              -not (Test-Path -LiteralPath $env:SCRIPT_HOOK_RDR2_SDK_DIR -PathType Container)) {
+            throw 'Set the repository variable SCRIPT_HOOK_RDR2_SDK_DIR to the official SDK path on this self-hosted runner.'
+          }
+          if (-not (Get-Command cmake.exe -ErrorAction SilentlyContinue)) {
+            throw 'CMake is required on the self-hosted release runner.'
+          }
+          if (-not (Get-Command gh.exe -ErrorAction SilentlyContinue)) {
+            throw 'GitHub CLI is required on the self-hosted release runner.'
+          }
+
+      - name: Build and test the managed projects
+        shell: pwsh
+        run: |
+          dotnet build CoopStory.slnx -c Release --nologo
+          dotnet run --project tests/CoopStory.SelfTest/CoopStory.SelfTest.csproj -c Release --no-build
+          dotnet run --project tests/CoopStory.Launcher.SelfTest/CoopStory.Launcher.SelfTest.csproj -c Release --no-build
+
+      - name: Configure, build, and test the ASI bridge
+        shell: pwsh
+        run: |
+          $preset = '${{ vars.COOPSTORY_ASI_PRESET }}'
+          if ([string]::IsNullOrWhiteSpace($preset)) {
+            $preset = 'bridge-asi-vs2022'
+          }
+          "COOPSTORY_ASI_PRESET=$preset" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          cmake --preset $preset
+          cmake --build --preset "$preset-release"
+          ctest --preset "$preset-release"
+
+      - name: Create the verified self-contained tester package
+        id: package
+        shell: pwsh
+        run: |
+          $bridgeRoot = Join-Path 'build' $env:COOPSTORY_ASI_PRESET
+          $bridges = @(Get-ChildItem -LiteralPath $bridgeRoot -Recurse -File -Filter CoopStoryBridge.asi)
+          if ($bridges.Count -ne 1) {
+            throw "Expected exactly one release bridge ASI below build, found $($bridges.Count)."
+          }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Build-FriendPackage.ps1 -BridgePath $bridges[0].FullName
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Tester package build failed.'
+          }
+          $packages = @(Get-ChildItem -LiteralPath artifacts/releases -File -Filter '*.zip' | Sort-Object LastWriteTimeUtc -Descending)
+          if ($packages.Count -ne 1) {
+            throw "Expected exactly one completed tester ZIP, found $($packages.Count)."
+          }
+          "path=$($packages[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Retain the exact package from this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: RDR2-CoopStory-Tester-${{ github.run_number }}
+          path: ${{ steps.package.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the GitHub pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_PATH: ${{ steps.package.outputs.path }}
+        run: |
+          $tag = "tester-build-$env:GITHUB_RUN_NUMBER"
+          $title = "RDR2 Coop Story tester build #$env:GITHUB_RUN_NUMBER"
+          $notes = @"
+          Automated self-contained private tester package for commit $env:GITHUB_SHA.
+
+          Story Mode only. Install ScriptHookRDR2 separately from its official author page; it is not bundled.
+          "@
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $env:PACKAGE_PATH --clobber
+            gh release edit $tag --title $title --notes $notes --prerelease
+          }
+          else {
+            gh release create $tag $env:PACKAGE_PATH --target $env:GITHUB_SHA --title $title --notes $notes --prerelease
+          }
