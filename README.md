@@ -7,46 +7,35 @@ creating the inital project.
 
 ## Install the tester build — no compiling required
 
-This is for two private testers on Windows with legitimate RDR2 PC copies.
-Both players must use the exact same current tester ZIP from the
-[GitHub Releases page](https://github.com/JuliPodie/rdr2-coop-story/releases).
-The package is self-contained, so it does not require a separate .NET
-installation.
-
-Both PCs must be on the same trusted private network. A normal LAN is ideal;
-if that is not practical, use a private Hamachi network and share the host's
-Hamachi IPv4 address. Never expose the project ports to the public internet.
-
-For the full mission, dialogue, and progression features, use separate safe
-saves at the same campaign progress, with the same upcoming mission available
-and incomplete on both PCs. The mod does not copy or merge save files. A guest
-whose save is ahead, behind, or otherwise cannot start the host's exact mission
-can still join as a companion, but those matching-mission features stay off.
-
-Each player controls their own character from their own local save file. Save
-normally in each game to keep that character's progress; one player's save is
-never used as, copied over, or automatically saved for the other player. Where
-an eligible matching mission applies a verified guest progression update, it is
-written only to that guest's local game and still needs that player to save
-their own game normally.
-
-1. Download the current tester ZIP, extract it to a normal folder, and run
+1. Use two Windows PCs, two legitimate RDR2 PC copies, and the exact same
+   current tester ZIP from the [GitHub Releases page](https://github.com/JuliPodie/rdr2-coop-story/releases).
+   The tester ZIP is self-contained: do not install .NET just to run it.
+2. Put both PCs on the same trusted private network. Prefer a normal LAN; if
+   that is not practical, create a private Hamachi network. Never expose the
+   project ports to the public internet.
+3. Download the tester ZIP on both PCs, extract it to a normal folder, and run
    `START_COOP.bat`. Do not run it inside the ZIP.
-2. In the launcher, select your `RDR2.exe` with **BROWSE**.
-3. If Script Hook is missing, click **GET SCRIPT HOOK**. It opens the original
-   author's page; download and extract it yourself, then select that extracted
-   folder with **BROWSE**. The launcher verifies it before installing anything.
-4. Choose **HOST** on one PC and **GUEST** on the other. The host enters a
+4. In the launcher, select your `RDR2.exe` with **BROWSE**.
+5. If Script Hook is missing, click **GET SCRIPT HOOK**, download and extract it
+   yourself from the original author's page, then select that extracted folder
+   with **BROWSE**. The launcher verifies it before installing anything.
+6. Back up both local saves. For full mission, dialogue, and progression tests,
+   keep separate saves at the same campaign progress, with the same upcoming
+   mission available and incomplete on both PCs.
+7. Load and keep using your own character and your own local save. Save normally
+   in each game to retain your progress: the mod never copies, merges,
+   substitutes, or saves one player's file for the other. A verified matching
+   mission update is written only to the eligible guest's own local game.
+8. Choose **HOST** on one PC and **GUEST** on the other. The host enters a
    private session password and shares their LAN or Hamachi IPv4 address plus
    that password with the guest.
-5. Start RDR2 in **Story Mode only**, load safe local saves, and begin the
-   session from the launcher. Export diagnostics from both PCs after a problem.
-6. Use the launcher to uninstall the project-owned files before ever opening
-   Red Dead Online.
-
-The current tester profile enables AnimGraph replication and diagnostic
-controls. It is experimental: campaign scripts and saves are not fully shared,
-so test one feature group at a time and keep backup saves.
+9. Start RDR2 in **Story Mode only**, load the prepared saves, and begin the
+   session from the launcher. A guest whose save cannot start the host's exact
+   mission remains a companion, so matching-mission features stay off.
+10. Test one feature group at a time. Export diagnostics from both PCs after a
+    problem.
+11. Use the launcher to uninstall the project-owned files before ever opening
+    Red Dead Online.
 
 ## What is included
 
@@ -115,6 +104,37 @@ and self-tests. Building an ASI requires a separately obtained Script Hook SDK
 and an additional legal/licensing review. See [BUILDING.md](BUILDING.md). For
 the exact tester scope, progression boundary, and two-PC checklist, see
 [docs/STATUS.md](docs/STATUS.md) and [docs/TESTING.md](docs/TESTING.md).
+
+### Fast local development refresh
+
+For a local developer test installation, close RDR2 and the sidecar, then run:
+
+```powershell
+.\scripts\Refresh-DevTest.ps1
+```
+
+It builds the managed projects, runs managed self-tests, builds and tests the
+private ASI, stages a fresh development package, updates only manifest-owned
+project files in the game directory, and verifies/installs the separately
+obtained local Script Hook runtime. It never installs Native Trainer.
+
+Available flags:
+
+- `-GamePath 'D:\Games\Red Dead Redemption 2'` selects the RDR2 installation.
+- `-SdkPath 'D:\Tools\ScriptHookRDR2_SDK_1.0.1207.73'` selects the separately
+  extracted Script Hook SDK.
+- `-BridgePreset bridge-asi-vs2026` selects the native build preset (the
+  default); `bridge-asi-vs2022` is also supported.
+- `-SkipNativeBuild` reuses the already-built ASI at that preset's expected
+  path; use it only when that ASI is current.
+- `-Launch` starts the local Story Mode test after the refresh completes.
+
+For example:
+
+```powershell
+.\scripts\Refresh-DevTest.ps1 `
+  -Launch
+```
 
 ## Safety and legal status
 
