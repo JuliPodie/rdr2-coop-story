@@ -2,13 +2,16 @@
 
 An experimental, non-commercial private-tester build of a two-player,
 host-authoritative replication layer for Red Dead Redemption 2 PC Story Mode.
+Big thanks to [u/Lifeely\_ on Reddit](https://www.reddit.com/user/Lifeely_/) for
+creating the inital project.
 
 ## Install the tester build — no compiling required
 
 This is for two private testers on Windows with legitimate RDR2 PC copies.
-Both players must use the exact same current tester ZIP listed in
-[releases/README.md](releases/README.md). The package is self-contained, so it
-does not require a separate .NET installation.
+Both players must use the exact same current tester ZIP from the
+[GitHub Releases page](https://github.com/JuliPodie/rdr2-coop-story/releases).
+The package is self-contained, so it does not require a separate .NET
+installation.
 
 1. Download the current tester ZIP, extract it to a normal folder, and run
    `START_COOP.bat`. Do not run it inside the ZIP.
@@ -60,14 +63,14 @@ author. Never upload those files to this repository or attach them to a release.
 
 ## Historical development versions
 
-| Component | Version used |
-|---|---|
-| Target RDR2 PC file version | `1.0.1491.50` |
-| Script Hook RDR2 runtime | `1.0.1491.17` |
-| Script Hook RDR2 SDK | `1.0.1207.73` |
-| .NET SDK | `10.0.203` |
-| Native build | C++20, CMake 3.25+, MSVC x64 |
-| Private tester build | protocol `23` |
+| Component                   | Version used                 |
+| --------------------------- | ---------------------------- |
+| Target RDR2 PC file version | `1.0.1491.50`                |
+| Script Hook RDR2 runtime    | `1.0.1491.17`                |
+| Script Hook RDR2 SDK        | `1.0.1207.73`                |
+| .NET SDK                    | `10.0.203`                   |
+| Native build                | C++20, CMake 3.25+, MSVC x64 |
+| Private tester build        | protocol `23`                |
 
 The Script Hook runtime and SDK are not vendored. The original author’s page is
 [dev-c.com/rdr2/scripthookrdr2](http://www.dev-c.com/rdr2/scripthookrdr2/).
@@ -107,7 +110,7 @@ advice before public distribution or continued development.
 
 ## Author and attribution
 
-The project was developed by **Lifeely** with support from **OpenAI Codex**,
+The project was initally developed by **Lifeely** with support from **OpenAI Codex**,
 which helped with architecture, programming, testing, documentation, and
 preparation of the project website.
 
@@ -115,15 +118,8 @@ The project is not created, supported, endorsed, or authorized by Rockstar
 Games, Take-Two Interactive, Alexander Blade, or any other third-party tool
 author.
 
-Contact: [u/Lifeely_ on Reddit](https://www.reddit.com/user/Lifeely_/)
-
 ## License
 
-Original project code is available under the [MIT License](LICENSE). That
-license applies only to rights Lifeely can grant in the original code. It does
+Original project code is available under the [MIT License](LICENSE). It does
 not license or grant rights to any game, trademark, third-party software, SDK,
 or other intellectual property. See [NOTICE.md](NOTICE.md).
-
-The original Polish internal notes were removed or consolidated into the
-English documents under `docs`. Follow [PUBLISHING.md](PUBLISHING.md) to publish
-the repository and website through GitHub Pages.
