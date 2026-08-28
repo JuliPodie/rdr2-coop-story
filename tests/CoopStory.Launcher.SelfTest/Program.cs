@@ -458,8 +458,8 @@ static void TestMotionReplicationModeConfig()
         LauncherMotionReplicationMode.AnimGraphReplica,
         "New launcher settings did not default to AnimGraph Replica.");
     Assert(
-        !defaultSettings.AnimSceneStoryVmProbeEnabled,
-        "New launcher settings enabled Story VM Probe by default.");
+        defaultSettings.AnimSceneStoryVmProbeEnabled,
+        "Private tester launcher settings did not enable Story VM Probe by default.");
     var defaultBytes = SidecarConfiguration.CreateBytes(
         context.Settings with
         {
@@ -475,10 +475,10 @@ static void TestMotionReplicationModeConfig()
                 .GetString() == "task_navmesh",
             "Default sidecar config did not select task_navmesh.");
         Assert(
-            !defaultDocument.RootElement
+            defaultDocument.RootElement
                 .GetProperty("animSceneStoryVmProbeEnabled")
                 .GetBoolean(),
-            "Default sidecar config enabled Story VM Probe.");
+            "Private tester sidecar config did not enable Story VM Probe.");
     }
 
     var experimental = context.Settings with
@@ -518,8 +518,8 @@ static void TestMotionReplicationModeConfig()
         LauncherMotionReplicationMode.AnimGraphReplica,
         "Legacy launcher settings did not fall back to AnimGraph Replica.");
     Assert(
-        !store.Load().AnimSceneStoryVmProbeEnabled,
-        "Legacy launcher settings did not keep Story VM Probe disabled.");
+        store.Load().AnimSceneStoryVmProbeEnabled,
+        "Legacy launcher settings did not use the private tester Story VM Probe default.");
 }
 
 static void TestHostConfigValidation()

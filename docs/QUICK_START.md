@@ -1,7 +1,9 @@
-# Quick start for source review
+# Quick start for private testers and source review
 
-This repository is source-only. It does not contain a supported installer,
-ready-to-run ASI, Script Hook files, SDK files, or game assets.
+The source tree does not contain Script Hook files, SDK files, game assets,
+or saves. Private tester releases contain a prebuilt launcher, sidecar, and
+project-owned ASI so testers do not need to compile; obtain the remaining
+Script Hook prerequisite independently from its original author.
 
 ## Requirements
 

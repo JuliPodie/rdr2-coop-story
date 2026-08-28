@@ -1,6 +1,6 @@
-# Protocol 20 overview
+# Protocol 23 overview
 
-Protocol 20 is the final internal wire revision preserved in this archive. The
+Protocol 23 is the private tester wire revision. The
 implementation in `src/CoopStory.Protocol` and the corresponding native bridge
 code are the source of truth; this document describes the design rather than a
 stable public API.

@@ -7,8 +7,9 @@
   "pipeName": "CoopStory.Bridge.v1",
   "sessionToken": "",
   "nickname": "Player",
-  "motionReplicationMode": "task_navmesh",
-  "inGameMenuEnabled": false,
+  "motionReplicationMode": "animgraph_replica",
+  "animSceneStoryVmProbeEnabled": true,
+  "inGameMenuEnabled": true,
   "profilePath": "%LOCALAPPDATA%\\RDR2CoopStory\\guest-profile.json",
   "logPath": "%LOCALAPPDATA%\\RDR2CoopStory\\logs\\sidecar.jsonl",
   "bubble": {

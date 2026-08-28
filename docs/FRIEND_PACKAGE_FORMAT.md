@@ -44,7 +44,7 @@ ZIP. Give `guest.config.json` directly to the invited tester only when using
 the headless workflow.
 
 `create-session` rejects loopback, wildcard, broadcast and multicast
-destinations. Protocol 20 supports IPv4. The normal Host sidecar listens on
+destinations. Protocol 23 supports IPv4. The normal Host sidecar listens on
 all IPv4 LAN/Hamachi interfaces on TCP `43120` and UDP `43121` by default. `local-test`
 and `simulate` bind only to `127.0.0.1`.
 
@@ -69,12 +69,13 @@ RDR2-CoopStory-Friend-Test/
   SHA256SUMS.txt
 ```
 
-`BUILD_INFO.json` is part of the signed allowlist. For V31.10 it must report
-`protocol: 20`, `engineVersion: 31.10`,
+`BUILD_INFO.json` is part of the signed allowlist. For the private tester build
+it must report `protocol: 23`, `engineVersion: tester-protocol23`,
 `animSceneRuntimeCaptureEnabled: true` and
 `animSceneNativeCreateEnabled: true`. These fields describe an opt-in capability,
-not the default: launcher setting `STORY VM CAPTURE` remains local and defaults
-to off. Exact capture must stay pinned to the supported game/ScriptHook layout,
+the tester-profile default. The launcher setting `STORY VM CAPTURE` remains
+local and can be turned off for an isolation retry. Exact capture must stay
+pinned to the supported game/ScriptHook layout,
 fail closed on any RVA/prologue mismatch, and never delete a game-owned scene.
 Only the Host installs Story VM detours. The Guest performs the same read-only
 handler validation and may create a bridge-owned replica, but leaves all
@@ -91,13 +92,13 @@ and documentation. It must not contain:
   settings, diagnostics, logs, or other machine-specific state.
 
 Script Hook RDR2 remains a separate prerequisite obtained by each tester from
-its author. If the package stays framework-dependent, the matching .NET 10 x64
-runtime is also a separate prerequisite. Both PCs need the supported legal PC
-game build and must use Story Mode only.
+its author. The private tester ZIP is self-contained and needs no separately
+installed .NET runtime. Both PCs need the supported legal PC game build and
+must use Story Mode only.
 
 For a direct LAN or Hamachi IPv4 test, the host may need to allow the host application on
 Windows **Private networks**. The package must not silently create firewall
-rules. Protocol 20 has no NAT traversal; an Internet test needs networking
+rules. Protocol 23 has no NAT traversal; an Internet test needs networking
 arranged by the testers outside this project.
 
 ## Diagnostics

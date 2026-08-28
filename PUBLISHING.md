@@ -1,7 +1,7 @@
 # Publishing on GitHub
 
-This folder is the reviewed public-source package. Publish its **contents as the
-root of a new repository**; do not publish the parent development workspace.
+This folder is the reviewed source package. Publish its **contents as the root
+of a new repository**; do not publish the parent development workspace.
 
 ## First publication
 
@@ -34,8 +34,14 @@ dotnet run --project .\tests\CoopStory.Launcher.SelfTest -c Release
 
 Then review the complete diff, confirm no personal data or third-party binaries
 were added, and push to `main`. Never commit `ScriptHookRDR2.dll`, `dinput8.dll`,
-SDK files, game assets, ready-to-install mod binaries, secrets, logs, or local
-network details.
+SDK files, game assets, saves, secrets, logs, or local network details.
+
+For private tester couples, build `artifacts\releases\RDR2-CoopStory-Tester-Protocol23-*.zip`
+with `scripts\Build-FriendPackage.ps1` and attach that ZIP to a private GitHub
+Release. It may include only the project-owned launcher, sidecar, ASI, test
+guide, and checksums. Do not attach Script Hook, SDK, game, trainer, save, or
+other-mod files. Testers can then download a matching prebuilt package without
+compiling the repository.
 
 ## Repository settings worth enabling
 

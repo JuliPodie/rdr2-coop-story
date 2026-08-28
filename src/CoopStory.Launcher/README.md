@@ -12,7 +12,9 @@ tied to one engine revision. It provides:
   persisting the clear-text password;
 - Steam and Rockstar platform cards with matching start-button colors;
 - safe selection, common-location detection, and verification of `RDR2.exe`;
-- separate selection of the user-downloaded Script Hook RDR2 runtime;
+- Script Hook readiness workflow: validates an existing selected runtime or
+  opens the official author page, then asks the tester to select the extracted
+  folder locally;
 - host save selection on the Settings page rather than the session start card;
 - install, one-operation package update, and uninstall ownership manifests;
 - nickname, local save, LAN/Hamachi IPv4, and password-derived session configuration;
