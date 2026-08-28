@@ -7,34 +7,29 @@ creating the inital project.
 
 ## Install the tester build — no compiling required
 
-1. Use two Windows PCs, two legitimate RDR2 PC copies, and the exact same
-   current tester ZIP from the [GitHub Releases page](https://github.com/JuliPodie/rdr2-coop-story/releases).
-   The tester ZIP is self-contained: do not install .NET just to run it.
-2. Put both PCs on the same trusted private network. Prefer a normal LAN; if
+1. Put both PCs on the same trusted private network. Prefer a normal LAN; if
    that is not practical, create a private Hamachi network. Never expose the
    project ports to the public internet.
-3. Download the tester ZIP on both PCs, extract it to a normal folder, and run
+2. Download the tester ZIP from the [GitHub Releases page](https://github.com/JuliPodie/rdr2-coop-story/releases) on both PCs, extract it to a normal folder, and run
    `START_COOP.bat`. Do not run it inside the ZIP.
-4. In the launcher, select your `RDR2.exe` with **BROWSE**.
-5. If Script Hook is missing, click **GET SCRIPT HOOK**, download and extract it
+3. In the launcher, select your `RDR2.exe` with **BROWSE**.
+4. If Script Hook is missing, click **GET SCRIPT HOOK**, download and extract it
    yourself from the original author's page, then select that extracted folder
    with **BROWSE**. The launcher verifies it before installing anything.
-6. Back up both local saves. For full mission, dialogue, and progression tests,
+5. Back up both local saves. For full mission, dialogue, and progression tests,
    keep separate saves at the same campaign progress, with the same upcoming
    mission available and incomplete on both PCs.
-7. Load and keep using your own character and your own local save. Save normally
+6. Load and keep using your own character and your own local save. Save normally
    in each game to retain your progress: the mod never copies, merges,
    substitutes, or saves one player's file for the other. A verified matching
    mission update is written only to the eligible guest's own local game.
-8. Choose **HOST** on one PC and **GUEST** on the other. The host enters a
+7. Choose **HOST** on one PC and **GUEST** on the other. The host enters a
    private session password and shares their LAN or Hamachi IPv4 address plus
    that password with the guest.
-9. Start RDR2 in **Story Mode only**, load the prepared saves, and begin the
+8. Start RDR2 in **Story Mode only**, load the prepared saves, and begin the
    session from the launcher. A guest whose save cannot start the host's exact
    mission remains a companion, so matching-mission features stay off.
-10. Test one feature group at a time. Export diagnostics from both PCs after a
-    problem.
-11. Use the launcher to uninstall the project-owned files before ever opening
+9. Use the launcher to uninstall the project-owned files before ever opening
     Red Dead Online.
 
 ## What is included
