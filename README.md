@@ -13,9 +13,10 @@ host-authoritative replication layer for Red Dead Redemption 2 PC Story Mode.
 ## Install the tester build — no compiling required
 
 This is for two private testers on Windows with legitimate RDR2 PC copies.
-Both players must use the exact same current tester ZIP listed in
-[releases/README.md](releases/README.md). The package is self-contained, so it
-does not require a separate .NET installation.
+Both players must use the exact same current tester ZIP from the
+[GitHub Releases page](https://github.com/JuliPodie/rdr2-coop-story/releases).
+The package is self-contained, so it does not require a separate .NET
+installation.
 
 1. Download the current tester ZIP, extract it to a normal folder, and run
    `START_COOP.bat`. Do not run it inside the ZIP.

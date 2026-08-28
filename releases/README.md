@@ -1,10 +1,9 @@
 # Private tester downloads
 
-This folder contains timestamped prebuilt private-tester ZIPs for protocol 23.
-Use the newest timestamped ZIP only; both players must use that same ZIP and
-verify its SHA-256 before testing. The current self-contained ZIP is
-`RDR2-CoopStory-Tester-Protocol23-20260828T103737Z.zip` with SHA-256
-`F0CC7D02912A7F78E5AAD79CC38296E1C98D8EE0DDA9CB5DDC334DCEE2A03E4C`.
+Download tester ZIPs from the repository's
+[GitHub Releases page](https://github.com/JuliPodie/rdr2-coop-story/releases),
+not from the source tree. Both players must use the same current release asset
+and verify the SHA-256 published in its release notes before testing.
 
 The package contains the project-owned launcher, sidecar, bridge ASI, sample
 configuration, test guide, and internal checksums. It deliberately does not
