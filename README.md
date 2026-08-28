@@ -3,13 +3,6 @@
 An experimental, non-commercial private-tester build of a two-player,
 host-authoritative replication layer for Red Dead Redemption 2 PC Story Mode.
 
-> **Private test build — not a finished co-op campaign.**
->
-> I am no longer developing this project because the remaining work became too
-> complex for me to continue. I am sharing the foundation so the player
-> replication work can be studied, tested safely, or continued by someone who
-> understands the technical and legal risks.
-
 ## Install the tester build — no compiling required
 
 This is for two private testers on Windows with legitimate RDR2 PC copies.
