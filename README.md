@@ -13,6 +13,16 @@ Both players must use the exact same current tester ZIP from the
 The package is self-contained, so it does not require a separate .NET
 installation.
 
+Both PCs must be on the same trusted private network. A normal LAN is ideal;
+if that is not practical, use a private Hamachi network and share the host's
+Hamachi IPv4 address. Never expose the project ports to the public internet.
+
+For the full mission, dialogue, and progression features, use separate safe
+saves at the same campaign progress, with the same upcoming mission available
+and incomplete on both PCs. The mod does not copy or merge save files. A guest
+whose save is ahead, behind, or otherwise cannot start the host's exact mission
+can still join as a companion, but those matching-mission features stay off.
+
 1. Download the current tester ZIP, extract it to a normal folder, and run
    `START_COOP.bat`. Do not run it inside the ZIP.
 2. In the launcher, select your `RDR2.exe` with **BROWSE**.
@@ -20,8 +30,8 @@ installation.
    author's page; download and extract it yourself, then select that extracted
    folder with **BROWSE**. The launcher verifies it before installing anything.
 4. Choose **HOST** on one PC and **GUEST** on the other. The host enters a
-   private session password and shares their private IPv4 address plus that
-   password with the guest.
+   private session password and shares their LAN or Hamachi IPv4 address plus
+   that password with the guest.
 5. Start RDR2 in **Story Mode only**, load safe local saves, and begin the
    session from the launcher. Export diagnostics from both PCs after a problem.
 6. Use the launcher to uninstall the project-owned files before ever opening
