@@ -1794,6 +1794,37 @@ InspectNativeHandlerMemory(const void* handler) {
     return SelectGroundSafePosition(position, ProbeGroundZ(position));
 }
 
+[[nodiscard]] Vec3 TeleportSafePosition(
+    const Vec3& position) noexcept {
+    if (!IsFinite(position)) {
+        return position;
+    }
+
+    // GET_SAFE_COORD_FOR_PED is the engine's collision/navmesh-aware choice.
+    // Keep it tightly bounded: an interior or unloaded remote area may return
+    // a legitimate but distant coordinate, which is unsafe for co-op resume.
+    STREAMING::REQUEST_COLLISION_AT_COORD(
+        position.x,
+        position.y,
+        position.z);
+    Vector3 safeCoordinate{};
+    if (PATHFIND::GET_SAFE_COORD_FOR_PED(
+            position.x,
+            position.y,
+            position.z,
+            TRUE,
+            &safeCoordinate,
+            0) != FALSE) {
+        const auto safe = ToBridgeVector(safeCoordinate);
+        if (IsFinite(safe) && Distance(safe, position) <= 6.0F) {
+            return safe;
+        }
+    }
+    // Keep the existing height-only correction as a conservative fallback
+    // while collision/navmesh data is still streaming.
+    return GroundSafePosition(position);
+}
+
 [[nodiscard]] Vec3 CameraFallbackAimTarget() noexcept {
     const auto cameraPosition =
         ToBridgeVector(CAM::GET_GAMEPLAY_CAM_COORD());
@@ -3211,15 +3242,14 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
         AI::IS_PED_ACTIVE_IN_SCENARIO(ped, TRUE) != FALSE;
     sample.vehicleEntryTransition =
         PED::IS_PED_GETTING_INTO_A_VEHICLE(ped) != FALSE;
-    // Several Story AnimScenes take player control without reporting the
-    // generic cinematic camera native. Treat that mission-owned control loss
-    // as a scene as well, while excluding the ordinary pause frontend.
+    sample.minigameActive = GAMEPLAY::IS_MINIGAME_IN_PROGRESS() != FALSE;
+    // Keep this signal limited to camera/fade presentation. Mission-owned
+    // locks, AnimScenes, QTEs, and scripted mounting are classified and
+    // debounced in BridgeRuntime, where they can be distinguished from a
+    // normal free-roam interaction.
     sample.cutsceneActive =
         CAM::IS_CINEMATIC_CAM_RENDERING() != FALSE ||
-        sample.screenTransition ||
-        (sample.controlLocked &&
-         (sample.missionActive || sample.scenarioActive ||
-          sample.vehicleEntryTransition));
+        sample.screenTransition;
     const bool lethalGuardThresholdReached =
         realtimePolicyActive_ && maximumHealth > 0.0F &&
         health > 0.0F &&
@@ -6376,7 +6406,7 @@ bool ScriptHookSdkFacade::ApplyNetworkCommand(
             }
 
             const auto safePosition =
-                GroundSafePosition(command.position);
+                TeleportSafePosition(command.position);
             Entity teleportRoot = static_cast<Entity>(localPed);
             bool mountedRoot{};
             if (PED::IS_PED_ON_MOUNT(localPed) != FALSE) {
@@ -13773,6 +13803,12 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
     const bool synchronizedPaused) noexcept {
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        if (active) {
+            ObserveVanillaPickupCollection();
+            ObserveScriptEvents();
+        } else {
+            observedVanillaPickups_.clear();
+        }
         // Keep the bridge thread alive inside the real RDR2 frontend. Escape
         // is blocked before consensus; after both votes we inject the normal
         // frontend-pause control on both PCs so each opens the game's own
@@ -14034,6 +14070,132 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
     } catch (...) {
         // A best-effort time policy must never take down the script thread.
     }
+}
+
+void ScriptHookSdkFacade::ObserveVanillaPickupCollection() noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        const auto now = TickMilliseconds();
+        if (previousPickupObservationMs_ != 0U && now >= previousPickupObservationMs_ &&
+            now - previousPickupObservationMs_ < 250U) {
+            return;
+        }
+        previousPickupObservationMs_ = now;
+
+        constexpr int kMaximumPickups = 256;
+        std::array<int, kMaximumPickups> pickups{};
+        const auto count = std::clamp(worldGetAllPickups(pickups.data(), kMaximumPickups), 0, kMaximumPickups);
+        std::unordered_set<int> live;
+        for (int index = 0; index < count; ++index) {
+            const auto pickup = static_cast<Pickup>(pickups[static_cast<std::size_t>(index)]);
+            if (pickup == 0) continue;
+            live.insert(static_cast<int>(pickup));
+            const auto pickupHash = static_cast<std::uint32_t>(OBJECT::_GET_PICKUP_HASH(pickup));
+            const auto coordinates = OBJECT::GET_PICKUP_COORDS(pickup);
+            const auto quantize = [](const float value) noexcept {
+                return static_cast<std::int32_t>(std::lround(value * 10.0F));
+            };
+            auto collectionId = std::uint64_t{1469598103934665603ULL};
+            const auto mix = [&collectionId](const std::uint64_t value) noexcept {
+                collectionId ^= value;
+                collectionId *= 1099511628211ULL;
+            };
+            mix(pickupHash);
+            mix(static_cast<std::uint32_t>(quantize(coordinates.x)));
+            mix(static_cast<std::uint32_t>(quantize(coordinates.y)));
+            mix(static_cast<std::uint32_t>(quantize(coordinates.z)));
+            const auto [entry, firstSeen] = observedVanillaPickups_.try_emplace(static_cast<int>(pickup), collectionId);
+            if (!firstSeen && OBJECT::HAS_PICKUP_BEEN_COLLECTED(pickup) != FALSE) {
+                Log("[PICKUP_OBSERVED] collected handle=" + std::to_string(pickup) +
+                    ", pickupHash=" + std::to_string(pickupHash) +
+                    "; collection is positive-native evidence only; no private inventory copied");
+                pendingVanillaPickupCollections_.push_back(
+                    VanillaPickupCollection{
+                        entry->second, pickupHash});
+                observedVanillaPickups_.erase(entry);
+            }
+        }
+        std::erase_if(observedVanillaPickups_, [&live](const auto& entry) {
+            return !live.contains(entry.first);
+        });
+#endif
+    } catch (...) {
+    }
+}
+
+void ScriptHookSdkFacade::ObserveScriptEvents() noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        const auto now = TickMilliseconds();
+        if (previousScriptEventObservationMs_ != 0U &&
+            now >= previousScriptEventObservationMs_ &&
+            now - previousScriptEventObservationMs_ < 1'000U) {
+            return;
+        }
+        previousScriptEventObservationMs_ = now;
+        // The SDK exposes script-event enumeration but not payload schemas.
+        // Record only bounded group/index/type metadata until a specific
+        // campaign event has been independently decoded and verified.
+        constexpr int kEventGroups = 3;
+        constexpr int kMaximumEventsPerGroup = 32;
+        for (int group = 0; group < kEventGroups; ++group) {
+            const auto count = std::clamp(
+                SCRIPT::GET_NUMBER_OF_EVENTS(group), 0, kMaximumEventsPerGroup);
+            for (int index = 0; index < count; ++index) {
+                if (SCRIPT::GET_EVENT_EXISTS(group, index) == FALSE) continue;
+                Log("[PROGRESSION_EVENT_OBSERVED] group=" +
+                    std::to_string(group) + ", index=" +
+                    std::to_string(index) + ", eventId=" +
+                    std::to_string(SCRIPT::GET_EVENT_AT_INDEX(group, index)) +
+                    "; diagnostic only, no capability emitted");
+            }
+        }
+        // The official SDK exposes ownership checks but no supported
+        // enumeration of a ped's entire weapon inventory. Poll only
+        // individually proven capability records. A false-to-true edge proves
+        // acquisition without requiring the player to equip the weapon.
+        constexpr std::array<std::uint32_t, 1> kObservedWeaponCapabilities{
+            kRepeatingShotgunWeaponHash};
+        const auto ped = PLAYER::PLAYER_PED_ID();
+        if (ped == 0 || ENTITY::DOES_ENTITY_EXIST(ped) == FALSE) {
+            return;
+        }
+        for (const auto weaponHash : kObservedWeaponCapabilities) {
+            const bool owned = WEAPON::HAS_PED_GOT_WEAPON(
+                ped, static_cast<Hash>(weaponHash), FALSE, FALSE) != FALSE;
+            const auto [iterator, inserted] =
+                observedCampaignWeaponOwnership_.emplace(weaponHash, owned);
+            if (inserted) {
+                continue;
+            }
+            if (!iterator->second && owned) {
+                pendingCampaignCapabilityObservations_.push_back(
+                    CampaignCapabilityObservation{
+                        CampaignCapabilityKind::WeaponShopEligibility,
+                        weaponHash});
+                Log("[CAPABILITY_OBSERVED] host acquired proven weapon capability hash=" +
+                    std::to_string(weaponHash) +
+                    "; equipment selection was not required");
+            }
+            iterator->second = owned;
+        }
+#endif
+    } catch (...) {
+    }
+}
+
+std::vector<VanillaPickupCollection>
+ScriptHookSdkFacade::DrainVanillaPickupCollections() noexcept {
+    auto result = std::move(pendingVanillaPickupCollections_);
+    pendingVanillaPickupCollections_.clear();
+    return result;
+}
+
+std::vector<CampaignCapabilityObservation>
+ScriptHookSdkFacade::DrainCampaignCapabilityObservations() noexcept {
+    auto result = std::move(pendingCampaignCapabilityObservations_);
+    pendingCampaignCapabilityObservations_.clear();
+    return result;
 }
 
 GuestMissionIsolationStatus
@@ -14562,11 +14724,11 @@ ScriptHookSdkFacade::PrepareMissionCinematicResume(
                 (std::numbers::pi_v<float> / 180.0F);
             const Vec3 right{std::cos(radians), -std::sin(radians), 0.0F};
             const Vec3 forward{std::sin(radians), std::cos(radians), 0.0F};
-            missionResumePosition_ = GroundSafePosition(
+            missionResumePosition_ = TeleportSafePosition(
                 {effectiveAnchor.x + (right.x * 1.5F),
                  effectiveAnchor.y + (right.y * 1.5F),
                  effectiveAnchor.z + 0.25F});
-            missionResumeMountPosition_ = GroundSafePosition(
+            missionResumeMountPosition_ = TeleportSafePosition(
                 {effectiveAnchor.x - (right.x * 1.75F) - forward.x,
                  effectiveAnchor.y - (right.y * 1.75F) - forward.y,
                  effectiveAnchor.z + 0.25F});

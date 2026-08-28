@@ -45,6 +45,13 @@ public readonly record struct CampaignCapabilityAckPayload(
     uint RecordHash,
     ulong HostEventId);
 
+// Positive native collection evidence only. No money, items, or private
+// inventory is allowed on this channel.
+public readonly record struct PickupCollectedPayload(
+    NetEntityId ActorEntityId,
+    ulong CollectionId,
+    uint PickupHash);
+
 public enum PlayerLifecycle : byte
 {
     Alive = 0,

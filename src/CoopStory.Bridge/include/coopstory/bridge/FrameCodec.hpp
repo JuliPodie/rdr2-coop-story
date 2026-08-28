@@ -12,7 +12,7 @@
 namespace coopstory::bridge {
 
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
-inline constexpr std::uint16_t kProtocolVersion = 22U;
+inline constexpr std::uint16_t kProtocolVersion = 23U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
@@ -60,6 +60,7 @@ enum class MessageType : std::uint16_t {
     AnimSceneControl = 40,
     CampaignCapability = 41,
     CampaignCapabilityAck = 42,
+    PickupCollected = 43,
 };
 
 [[nodiscard]] bool IsKnownMessageType(std::uint16_t value) noexcept;
@@ -632,6 +633,8 @@ enum class MissionStateFlag : std::uint8_t {
     ScriptedControlLock = 1U << 3U,
     ScreenTransition = 1U << 4U,
     ScenarioActivity = 1U << 5U,
+    ScriptedVehicleTransition = 1U << 6U,
+    MinigameActivity = 1U << 7U,
 };
 
 struct MissionStatePayload final {
@@ -1072,6 +1075,14 @@ struct CampaignCapabilityAckPayload final {
     std::uint32_t recordHash{};
     std::uint64_t hostEventId{};
 };
+struct PickupCollectedPayload final {
+    NetEntityId actorEntityId{};
+    std::uint64_t collectionId{};
+    std::uint32_t pickupHash{};
+};
+inline constexpr std::size_t kPickupCollectedPayloadSize = 24U;
+[[nodiscard]] std::vector<std::uint8_t> EncodePickupCollected(const PickupCollectedPayload& payload);
+[[nodiscard]] std::optional<PickupCollectedPayload> DecodePickupCollected(std::span<const std::uint8_t> bytes);
 inline constexpr std::size_t kCampaignCapabilityAckPayloadSize = 16U;
 [[nodiscard]] std::vector<std::uint8_t> EncodeCampaignCapabilityAck(const CampaignCapabilityAckPayload& payload);
 [[nodiscard]] std::optional<CampaignCapabilityAckPayload> DecodeCampaignCapabilityAck(std::span<const std::uint8_t> bytes);

@@ -79,6 +79,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         _animSceneDefinitionCache = new();
     private readonly CapabilityJournal _capabilityJournal = new();
     private readonly CapabilityJournalStore _capabilityJournalStore = new();
+    private readonly PlayerInventoryRegistry _pickupClaims = new();
+    private readonly InventoryStateStore _pickupClaimStateStore = new();
     private readonly SemaphoreSlim _capabilityJournalPersistenceGate = new(1, 1);
     private readonly GuestReconnectResyncGate
         _guestReconnectResyncGate = new();
@@ -181,6 +183,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         await RestoreCapabilityJournalAsync(cancellationToken).ConfigureAwait(false);
+        await RestorePickupClaimsAsync(cancellationToken).ConfigureAwait(false);
         if (!_config.InGameMenuEnabled)
         {
             await EnsureGuestProfileAsync(cancellationToken).ConfigureAwait(false);
@@ -356,6 +359,22 @@ public sealed class SidecarRuntime : IAsyncDisposable
             _capabilityJournalPersistenceGate.Release();
         }
     }
+
+    private async Task RestorePickupClaimsAsync(CancellationToken cancellationToken)
+    {
+        if (_config.Role != SessionRole.Host || _config.InGameMenuEnabled) return;
+        try { _pickupClaims.RestoreReconnectState(await _pickupClaimStateStore.LoadAsync(_config.ExpandedPickupClaimStatePath, cancellationToken).ConfigureAwait(false)); }
+        catch (FileNotFoundException) { }
+        catch (Exception exception) when (exception is IOException or JsonException or ArgumentException)
+        {
+            await _logger.WarningAsync("pickup.claim-state-unavailable", "Could not restore pickup claim cursors; starting empty.", new Dictionary<string, object?> { ["error"] = exception.Message }, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private Task PersistPickupClaimsAsync(CancellationToken cancellationToken) =>
+        _config.Role == SessionRole.Host && !_config.InGameMenuEnabled
+            ? _pickupClaimStateStore.SaveAsync(_config.ExpandedPickupClaimStatePath, _pickupClaims.CaptureReconnectState(), cancellationToken)
+            : Task.CompletedTask;
 
     private async Task RunNetworkAfterSelectionAsync(
         CancellationToken cancellationToken)
@@ -2652,6 +2671,18 @@ public sealed class SidecarRuntime : IAsyncDisposable
                     .ConfigureAwait(false);
             }
         }
+        if (_config.Role == SessionRole.Host &&
+            envelope.Type == MessageType.PickupCollected)
+        {
+            var pickup = BinaryPayloadCodec.DecodePickupCollected(envelope.Payload.Span);
+            var claim = _pickupClaims.ClaimLoot(pickup.ActorEntityId,
+                new MapLoot($"pickup:{pickup.PickupHash:X8}:{pickup.CollectionId:X16}"));
+            await PersistPickupClaimsAsync(cancellationToken).ConfigureAwait(false);
+            await _logger.InfoAsync("pickup.claimed",
+                $"Recorded native pickup claim ({claim.Status}); no private inventory copied.",
+                new Dictionary<string, object?> { ["actorEntityId"] = pickup.ActorEntityId.Value, ["pickupHash"] = $"0x{pickup.PickupHash:X8}", ["collectionId"] = pickup.CollectionId },
+                cancellationToken).ConfigureAwait(false);
+        }
 
         if (ShouldSerializeHostReplayStateMutation(envelope.Type))
         {
@@ -3318,6 +3349,19 @@ public sealed class SidecarRuntime : IAsyncDisposable
             {
                 await PersistCapabilityJournalAsync(cancellationToken).ConfigureAwait(false);
             }
+            return;
+        }
+        if (_config.Role == SessionRole.Host &&
+            envelope.Type == MessageType.PickupCollected)
+        {
+            var pickup = BinaryPayloadCodec.DecodePickupCollected(envelope.Payload.Span);
+            var claim = _pickupClaims.ClaimLoot(pickup.ActorEntityId,
+                new MapLoot($"pickup:{pickup.PickupHash:X8}:{pickup.CollectionId:X16}"));
+            await PersistPickupClaimsAsync(cancellationToken).ConfigureAwait(false);
+            await _logger.InfoAsync("pickup.claimed",
+                $"Recorded peer native pickup claim ({claim.Status}); no private inventory copied.",
+                new Dictionary<string, object?> { ["actorEntityId"] = pickup.ActorEntityId.Value, ["pickupHash"] = $"0x{pickup.PickupHash:X8}", ["collectionId"] = pickup.CollectionId },
+                cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -5801,6 +5845,9 @@ public sealed class SidecarRuntime : IAsyncDisposable
             case MessageType.CampaignCapabilityAck:
                 _ = BinaryPayloadCodec.DecodeCampaignCapabilityAck(envelope.Payload.Span);
                 break;
+            case MessageType.PickupCollected:
+                _ = BinaryPayloadCodec.DecodePickupCollected(envelope.Payload.Span);
+                break;
             case MessageType.PlayerAppearanceState:
                 _ = BinaryPayloadCodec.DecodePlayerAppearanceState(
                     envelope.Payload.Span);
@@ -5910,6 +5957,10 @@ public sealed class SidecarRuntime : IAsyncDisposable
             return localRole == SessionRole.Guest;
         }
         if (messageType == MessageType.CampaignCapabilityAck)
+        {
+            return localRole == SessionRole.Host;
+        }
+        if (messageType == MessageType.PickupCollected)
         {
             return localRole == SessionRole.Host;
         }

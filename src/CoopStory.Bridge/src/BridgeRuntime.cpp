@@ -73,6 +73,8 @@ constexpr std::uint64_t kGuestPostCinematicSkipGraceMilliseconds = 6'000U;
 constexpr std::uint64_t kMissionCinematicTerminalClearMilliseconds = 1'500U;
 constexpr std::uint64_t kMissionRecoveryWindowMilliseconds = 2'500U;
 constexpr std::uint64_t kMissionLoadingDetectionMilliseconds = 350U;
+constexpr std::uint64_t kMissionSpectatorControlLockDebounceMilliseconds =
+    150U;
 constexpr std::uint64_t kMissionIsolationDiagnosticsMilliseconds = 5'000U;
 constexpr std::uint64_t kRuntimeDiagnosticsIntervalMilliseconds = 1'000U;
 constexpr std::uint64_t kProblemDiagnosticBurstMilliseconds = 15'000U;
@@ -1993,6 +1995,59 @@ void BridgeRuntime::Tick() {
         (!sample.has_value() ||
          !sample->cutsceneActive),
         synchronizedPaused_);
+    if (remoteStreaming && localSlot_.has_value() && localEntityId_.IsValid()) {
+        for (const auto& collection : facade_.DrainVanillaPickupCollections()) {
+            try {
+                Frame frame;
+                frame.header.type = MessageType::PickupCollected;
+                frame.header.sequence = sequencer_.Next();
+                frame.header.tick = now;
+                frame.payload = EncodePickupCollected(PickupCollectedPayload{
+                    localEntityId_, collection.collectionId, collection.pickupHash});
+                SendBestEffort(std::move(frame));
+            } catch (...) {
+                facade_.Log("[PICKUP_OBSERVED] discarded malformed collection event");
+            }
+        }
+        if (*localSlot_ == PlayerSlot::Host) {
+            for (const auto& observation :
+                 facade_.DrainCampaignCapabilityObservations()) {
+                if (observation.recordHash == 0U) {
+                    continue;
+                }
+                const auto grantedAtUnixMilliseconds =
+                    static_cast<std::int64_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count());
+                const auto sequence = static_cast<std::uint16_t>(
+                    static_cast<std::uint16_t>(localCapabilityEventId_) + 1U);
+                localCapabilityEventId_ =
+                    (static_cast<std::uint64_t>(grantedAtUnixMilliseconds)
+                     << 16U) |
+                    static_cast<std::uint64_t>(
+                        sequence == 0U ? 1U : sequence);
+                Frame frame;
+                frame.header.type = MessageType::CampaignCapability;
+                frame.header.sequence = sequencer_.Next();
+                frame.header.tick = now;
+                frame.payload = EncodeCampaignCapability(
+                    CampaignCapabilityPayload{
+                        observation.kind,
+                        observation.recordHash,
+                        localCapabilityEventId_,
+                        grantedAtUnixMilliseconds});
+                SendBestEffort(std::move(frame));
+                facade_.Log(
+                    "[CAPABILITY] host acquisition observation forwarded");
+            }
+        } else {
+            (void)facade_.DrainCampaignCapabilityObservations();
+        }
+    } else {
+        (void)facade_.DrainVanillaPickupCollections();
+        (void)facade_.DrainCampaignCapabilityObservations();
+    }
     VerifyPendingTeleport(now);
     if (sessionMenu_.IsHudVisible()) {
         facade_.DrawBridgeHud(
@@ -3299,14 +3354,36 @@ void BridgeRuntime::TickMissionAuthority(
         localMissionCinematicState_.has_value() &&
         IsCinematicPresentationPhase(
             localMissionCinematicState_->phase);
-    const bool rawCutsceneActive =
+    const bool immediatePresentation =
         cinematicPresentationLatched ||
-        (sample.cutsceneActive &&
-         !localCinematicTerminalLatchActive_);
-    if (rawCutsceneActive) {
+        (sample.cutsceneActive && !localCinematicTerminalLatchActive_) ||
+        sample.minigameActive;
+    // A mission-owned loss of control covers forced AnimScenes, QTE/button
+    // prompts, and scripted vehicle/horse entry.  Do not trigger on those
+    // raw observations in free roam: ordinary mounting and scenarios remain
+    // co-op gameplay.  A brief debounce also filters frontend hand-offs.
+    const bool debouncedMissionPresentation =
+        sample.missionActive &&
+        (sample.controlLocked ||
+         (sample.scenarioActive && sample.controlLocked) ||
+         (sample.vehicleEntryTransition && sample.controlLocked));
+    bool classifiedPresentation = immediatePresentation;
+    if (immediatePresentation) {
+        spectatorClassifierCandidateSinceMs_.reset();
+    } else if (debouncedMissionPresentation) {
+        if (!spectatorClassifierCandidateSinceMs_.has_value()) {
+            spectatorClassifierCandidateSinceMs_ = nowMs;
+        }
+        classifiedPresentation =
+            nowMs - *spectatorClassifierCandidateSinceMs_ >=
+            kMissionSpectatorControlLockDebounceMilliseconds;
+    } else {
+        spectatorClassifierCandidateSinceMs_.reset();
+    }
+    if (classifiedPresentation) {
         spectatorClassifierReleaseUntilMs_ = nowMs + 650U;
     }
-    const bool effectiveCutsceneActive = rawCutsceneActive ||
+    const bool effectiveCutsceneActive = classifiedPresentation ||
         (spectatorClassifierReleaseUntilMs_ != 0U &&
          nowMs < spectatorClassifierReleaseUntilMs_);
     const auto phase =
@@ -3343,6 +3420,14 @@ void BridgeRuntime::TickMissionAuthority(
     if (effectiveCutsceneActive && sample.scenarioActive) {
         flags |= static_cast<std::uint8_t>(
             MissionStateFlag::ScenarioActivity);
+    }
+    if (effectiveCutsceneActive && sample.vehicleEntryTransition) {
+        flags |= static_cast<std::uint8_t>(
+            MissionStateFlag::ScriptedVehicleTransition);
+    }
+    if (effectiveCutsceneActive && sample.minigameActive) {
+        flags |= static_cast<std::uint8_t>(
+            MissionStateFlag::MinigameActivity);
     }
 
     MissionStatePayload next{
@@ -8526,11 +8611,18 @@ void BridgeRuntime::VerifyPendingTeleport(
         return;
     }
 
+    const bool unsafeLanding =
+        sample->inWater || sample->swimming ||
+        sample->swimmingUnderwater || sample->falling ||
+        sample->ragdoll;
     const auto error = Distance(sample->position, expected);
-    if (std::isfinite(error) &&
+    if (!unsafeLanding && std::isfinite(error) &&
         error <= kTeleportVerificationToleranceMeters) {
         facade_.Log(
             "teleport confirmed after native apply");
+    } else if (unsafeLanding) {
+        facade_.Log(
+            "[MISSION_ANCHOR][UNSAFE_LANDING] teleport reached an unsafe local state; keep recovery diagnostics active");
     } else {
         facade_.Log(
             "teleport was overridden by the game; position error " +

@@ -54,6 +54,7 @@ struct LocalPlayerSample final {
     bool screenTransition{};
     bool scenarioActive{};
     bool vehicleEntryTransition{};
+    bool minigameActive{};
     bool downed{};
     bool mounted{};
     bool aiming{};
@@ -269,6 +270,22 @@ struct RuntimeDivergenceDiagnostics final {
     EntityDivergenceDiagnostic entities{};
 };
 
+// Native-only evidence. A pickup becomes reportable solely after the game
+// reports HAS_PICKUP_BEEN_COLLECTED for a handle observed in this session.
+// This intentionally carries no item, money, or inventory data.
+struct VanillaPickupCollection final {
+    std::uint64_t collectionId{};
+    std::uint32_t pickupHash{};
+};
+
+// A host-local transition to a known campaign capability. It carries no
+// private inventory, save, currency, or weapon-ammo state; BridgeRuntime
+// assigns the durable journal event identity when it forwards the observation.
+struct CampaignCapabilityObservation final {
+    CampaignCapabilityKind kind{CampaignCapabilityKind::WeaponShopEligibility};
+    std::uint32_t recordHash{};
+};
+
 class IScriptHookFacade {
 public:
     virtual ~IScriptHookFacade() = default;
@@ -331,6 +348,14 @@ public:
         std::size_t maximumEntities) noexcept = 0;
     [[nodiscard]] virtual std::optional<DamageIntentPayload>
     SampleWorldDamageIntent(NetEntityId attackerId) noexcept = 0;
+    [[nodiscard]] virtual std::vector<VanillaPickupCollection>
+    DrainVanillaPickupCollections() noexcept {
+        return {};
+    }
+    [[nodiscard]] virtual std::vector<CampaignCapabilityObservation>
+    DrainCampaignCapabilityObservations() noexcept {
+        return {};
+    }
     [[nodiscard]] virtual std::optional<float> HostGuestDistanceMeters() noexcept = 0;
     [[nodiscard]] virtual MenuInputState ReadMenuInput() noexcept = 0;
 

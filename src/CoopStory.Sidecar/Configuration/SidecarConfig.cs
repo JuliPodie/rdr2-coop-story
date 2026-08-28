@@ -44,6 +44,11 @@ public sealed record SidecarConfig
     public string CapabilityJournalPath { get; init; } =
         "%LOCALAPPDATA%\\RDR2CoopStory\\campaign-capabilities.json";
 
+    // Host-only co-op claim cursors. This is not an RDR2 save and never
+    // contains a game wallet or item inventory.
+    public string PickupClaimStatePath { get; init; } =
+        "%LOCALAPPDATA%\\RDR2CoopStory\\pickup-claims.json";
+
     public string LogPath { get; init; } =
         "%LOCALAPPDATA%\\RDR2CoopStory\\logs\\sidecar.jsonl";
 
@@ -135,6 +140,7 @@ public sealed record SidecarConfig
 
         if (string.IsNullOrWhiteSpace(ProfilePath) ||
             string.IsNullOrWhiteSpace(CapabilityJournalPath) ||
+            string.IsNullOrWhiteSpace(PickupClaimStatePath) ||
             string.IsNullOrWhiteSpace(LogPath))
         {
             throw new ConfigurationException("profilePath and logPath cannot be empty.");
@@ -158,6 +164,7 @@ public sealed record SidecarConfig
     public string ExpandedProfilePath => ExpandPath(ProfilePath);
 
     public string ExpandedCapabilityJournalPath => ExpandPath(CapabilityJournalPath);
+    public string ExpandedPickupClaimStatePath => ExpandPath(PickupClaimStatePath);
 
     public string ExpandedLogPath => ExpandPath(LogPath);
 

@@ -393,13 +393,20 @@ template <typename T>
         static_cast<std::uint8_t>(MissionStateFlag::ScreenTransition);
     constexpr auto kScenarioActivity =
         static_cast<std::uint8_t>(MissionStateFlag::ScenarioActivity);
+    constexpr auto kScriptedVehicleTransition =
+        static_cast<std::uint8_t>(
+            MissionStateFlag::ScriptedVehicleTransition);
+    constexpr auto kMinigameActivity =
+        static_cast<std::uint8_t>(MissionStateFlag::MinigameActivity);
     constexpr auto kKnownFlags =
         kAnchorValid |
         kMissionActive |
         kCheckpointRecovery |
         kScriptedControlLock |
         kScreenTransition |
-        kScenarioActivity;
+        kScenarioActivity |
+        kScriptedVehicleTransition |
+        kMinigameActivity;
     const auto phase =
         static_cast<std::uint8_t>(payload.phase);
     const bool anchorValid =
@@ -1314,7 +1321,7 @@ bool IsKnownMessageType(const std::uint16_t value) noexcept {
     return value >= static_cast<std::uint16_t>(MessageType::Hello) &&
            value <=
                static_cast<std::uint16_t>(
-                   MessageType::CampaignCapabilityAck);
+               MessageType::PickupCollected);
 }
 
 std::vector<std::uint8_t> EncodeCampaignCapability(
@@ -1367,6 +1374,17 @@ std::optional<CampaignCapabilityAckPayload> DecodeCampaignCapabilityAck(const st
     std::size_t offset{}; const auto kind = ReadLittleEndian<std::uint8_t>(bytes, offset); const auto b = ReadLittleEndian<std::uint8_t>(bytes, offset); const auto r = ReadLittleEndian<std::uint16_t>(bytes, offset);
     CampaignCapabilityAckPayload payload{static_cast<CampaignCapabilityKind>(kind), ReadLittleEndian<std::uint32_t>(bytes, offset), ReadLittleEndian<std::uint64_t>(bytes, offset)};
     if (kind < static_cast<std::uint8_t>(CampaignCapabilityKind::WeaponShopEligibility) || kind > static_cast<std::uint8_t>(CampaignCapabilityKind::ActivityGate) || b != 0U || r != 0U || payload.recordHash == 0U || payload.hostEventId == 0U) return std::nullopt; return payload;
+}
+
+std::vector<std::uint8_t> EncodePickupCollected(const PickupCollectedPayload& payload) {
+    if (!payload.actorEntityId.IsValid() || payload.collectionId == 0U || payload.pickupHash == 0U) throw std::invalid_argument("invalid pickup collection");
+    std::vector<std::uint8_t> bytes; bytes.reserve(kPickupCollectedPayloadSize);
+    AppendLittleEndian(bytes, payload.actorEntityId.Value()); AppendLittleEndian(bytes, payload.collectionId); AppendLittleEndian(bytes, payload.pickupHash); AppendLittleEndian(bytes, std::uint32_t{0U}); return bytes;
+}
+std::optional<PickupCollectedPayload> DecodePickupCollected(const std::span<const std::uint8_t> bytes) {
+    if (bytes.size() != kPickupCollectedPayloadSize) return std::nullopt;
+    std::size_t offset{}; PickupCollectedPayload payload{NetEntityId{ReadLittleEndian<std::uint64_t>(bytes, offset)}, ReadLittleEndian<std::uint64_t>(bytes, offset), ReadLittleEndian<std::uint32_t>(bytes, offset)}; const auto reserved = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    return payload.actorEntityId.IsValid() && payload.collectionId != 0U && payload.pickupHash != 0U && reserved == 0U ? std::optional<PickupCollectedPayload>{payload} : std::nullopt;
 }
 
 std::vector<std::uint8_t> FrameCodec::Encode(const Frame& frame) {
