@@ -23,6 +23,13 @@ and incomplete on both PCs. The mod does not copy or merge save files. A guest
 whose save is ahead, behind, or otherwise cannot start the host's exact mission
 can still join as a companion, but those matching-mission features stay off.
 
+Each player controls their own character from their own local save file. Save
+normally in each game to keep that character's progress; one player's save is
+never used as, copied over, or automatically saved for the other player. Where
+an eligible matching mission applies a verified guest progression update, it is
+written only to that guest's local game and still needs that player to save
+their own game normally.
+
 1. Download the current tester ZIP, extract it to a normal folder, and run
    `START_COOP.bat`. Do not run it inside the ZIP.
 2. In the launcher, select your `RDR2.exe` with **BROWSE**.
