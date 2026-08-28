@@ -410,7 +410,7 @@ internal static class Program
 
     private static Task MissionCinematicProtocolAsync()
     {
-        Check.Equal((ushort)30, ProtocolConstants.Version);
+        Check.Equal((ushort)32, ProtocolConstants.Version);
         Check.Equal((ushort)35, (ushort)MessageType.MissionCinematicState);
         Check.Equal((ushort)36, (ushort)MessageType.MissionCinematicAction);
 
@@ -569,7 +569,7 @@ internal static class Program
 
     private static Task AppearanceAndAnimSceneProtocolAsync()
     {
-        Check.Equal((ushort)30, ProtocolConstants.Version);
+        Check.Equal((ushort)32, ProtocolConstants.Version);
         Check.Equal((ushort)37, (ushort)MessageType.PlayerAppearanceState);
         Check.Equal((ushort)38, (ushort)MessageType.AnimSceneReplicaState);
         Check.Equal((ushort)39, (ushort)MessageType.AnimSceneDefinition);
@@ -1861,7 +1861,7 @@ internal static class Program
 
     private static Task PlayerActionProtocolAsync()
     {
-        Check.Equal((ushort)30, ProtocolConstants.Version);
+        Check.Equal((ushort)32, ProtocolConstants.Version);
         Check.Equal((ushort)30, (ushort)MessageType.PlayerAction);
 
         var guestId = NetEntityId.Create(0x11223344, 2);
@@ -2127,7 +2127,7 @@ internal static class Program
 
     private static Task InteractionAuthorityProtocolAsync()
     {
-        Check.Equal((ushort)30, ProtocolConstants.Version);
+        Check.Equal((ushort)32, ProtocolConstants.Version);
         Check.Equal((ushort)32, (ushort)MessageType.InteractionIntent);
         Check.Equal((ushort)33, (ushort)MessageType.InteractionResult);
         Check.Equal((ushort)34, (ushort)MessageType.RestraintState);
@@ -3150,7 +3150,7 @@ internal static class Program
 
     private static Task AnimationReplicationPayloadsAsync()
     {
-        Check.Equal((ushort)30, ProtocolConstants.Version);
+        Check.Equal((ushort)32, ProtocolConstants.Version);
         Check.Equal((ushort)28, (ushort)MessageType.PlayerAnimationState);
         Check.Equal((ushort)29, (ushort)MessageType.MotionReplicationConfig);
 
@@ -3370,7 +3370,7 @@ internal static class Program
 
     private static Task WorldAndEquipmentAsync()
     {
-        Check.Equal((ushort)30, ProtocolConstants.Version);
+        Check.Equal((ushort)32, ProtocolConstants.Version);
         Check.Equal((ushort)23, (ushort)MessageType.WorldState);
         Check.Equal((ushort)24, (ushort)MessageType.EquipmentState);
         Check.Equal((ushort)25, (ushort)MessageType.PauseVote);
@@ -3829,6 +3829,48 @@ internal static class Program
             SessionRole.Host, dialogueReadyEnvelope));
         Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
             SessionRole.Host, dialogueReadyEnvelope));
+        var encounterProposal = new AmbientEncounterProposalPayload(
+            new NetEntityId(0x0000000700000002UL), 42, AmbientEncounterProfile.RoadsideAmbush,
+            new Vector3(101, 202, 30), 32, 0x12345678, 0x87654321);
+        var encounterProposalEnvelope = new ProtocolEnvelope(
+            MessageType.AmbientEncounterProposal, 7, 8,
+            BinaryPayloadCodec.EncodeAmbientEncounterProposal(encounterProposal));
+        SidecarRuntime.ValidateBinaryControlPayload(encounterProposalEnvelope);
+        Check.Equal(encounterProposal, BinaryPayloadCodec.DecodeAmbientEncounterProposal(
+            encounterProposalEnvelope.Payload.Span));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, encounterProposalEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Host, encounterProposalEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, encounterProposalEnvelope));
+        var encounterState = new AmbientEncounterStatePayload(
+            new NetEntityId(0x0000000700000001UL), 88, AmbientEncounterProfile.RoadsideAmbush,
+            AmbientEncounterPhase.Preparing, AmbientEncounterRejection.None,
+            encounterProposal.Anchor, encounterProposal.RadiusMeters, encounterProposal.SuggestedRosterSeed,
+            4, 9000, 0, AmbientEncounterPeerDisposition.Unknown);
+        var encounterStateEnvelope = new ProtocolEnvelope(
+            MessageType.AmbientEncounterState, 8, 9,
+            BinaryPayloadCodec.EncodeAmbientEncounterState(encounterState));
+        SidecarRuntime.ValidateBinaryControlPayload(encounterStateEnvelope);
+        Check.Equal(encounterState, BinaryPayloadCodec.DecodeAmbientEncounterState(
+            encounterStateEnvelope.Payload.Span));
+        var extortionParticipantState = new AmbientEncounterStatePayload(
+            new NetEntityId(0x0000000700000001UL), 89, AmbientEncounterProfile.HostageRescue,
+            AmbientEncounterPhase.Active, AmbientEncounterRejection.None,
+            encounterProposal.Anchor, 25, 0x76543210, 3, 9001,
+            0x108FF84F, AmbientEncounterPeerDisposition.Participant);
+        Check.Equal(extortionParticipantState, BinaryPayloadCodec.DecodeAmbientEncounterState(
+            BinaryPayloadCodec.EncodeAmbientEncounterState(extortionParticipantState)));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodeAmbientEncounterState(
+            extortionParticipantState with
+            { GuestDisposition = AmbientEncounterPeerDisposition.Unknown }));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, encounterStateEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest, encounterStateEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, encounterStateEnvelope));
         var completionProgression = new MissionProgressionPayload(
             0x2C3469ED,
             7,

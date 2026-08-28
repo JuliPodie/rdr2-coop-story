@@ -106,6 +106,24 @@ struct LocalPlayerSample final {
     LocalEntityHandle localHandle{};
 };
 
+// This describes a bridge profile observed near the local player. It is not a
+// handle for a Rockstar random-event script. Facades must only surface a
+// profile when their own local evidence is safe to replace with a bridge-owned
+// presentation.
+struct AmbientEncounterObservation final {
+    AmbientEncounterProfile profile{AmbientEncounterProfile::RoadsideAmbush};
+    Vec3 anchor{};
+    float radiusMeters{};
+    std::uint32_t localEvidenceHash{};
+    std::uint32_t suggestedRosterSeed{};
+};
+
+struct ExactEncounterObservation final {
+    std::uint32_t scriptId{};
+    Vec3 anchor{};
+    bool locallyEligible{};
+};
+
 struct BridgeHudState final {
     bool bridgeActive{};
     bool sidecarConnected{};
@@ -357,6 +375,25 @@ public:
         (void)missionId;
         return {};
     }
+    [[nodiscard]] virtual std::optional<AmbientEncounterObservation>
+    SampleAmbientEncounterObservation() noexcept { return std::nullopt; }
+    [[nodiscard]] virtual std::optional<ExactEncounterObservation>
+    SampleExactEncounterObservation() noexcept { return std::nullopt; }
+
+    // The facade may only create and later delete entities it created for this
+    // event. Native ambient scripts and their rewards remain private.
+    [[nodiscard]] virtual bool BeginAmbientEncounterPresentation(
+        const AmbientEncounterInstance& instance) noexcept {
+        (void)instance;
+        return false;
+    }
+    [[nodiscard]] virtual std::optional<AmbientEncounterPhase>
+    SampleAmbientEncounterOutcome(std::uint64_t instanceId) noexcept {
+        (void)instanceId;
+        return std::nullopt;
+    }
+    virtual void ClearAmbientEncounterPresentation(
+        std::uint64_t instanceId) noexcept { (void)instanceId; }
 
     // Starts a bridge-owned, audio-only local conversation for a guest who is
     // deliberately not running the host's mission VM. Implementations must

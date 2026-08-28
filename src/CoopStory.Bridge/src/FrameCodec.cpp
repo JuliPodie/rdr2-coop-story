@@ -1340,7 +1340,7 @@ bool IsKnownMessageType(const std::uint16_t value) noexcept {
     return value >= static_cast<std::uint16_t>(MessageType::Hello) &&
            value <=
                static_cast<std::uint16_t>(
-               MessageType::MissionDialogueReady);
+               MessageType::AmbientEncounterState);
 }
 
 namespace {
@@ -1539,6 +1539,94 @@ std::optional<MissionDialogueReadyPayload> DecodeMissionDialogueReady(
     if (reserved != 0U) return std::nullopt;
     try { (void)EncodeMissionDialogueReady(payload); } catch (...) { return std::nullopt; }
     return payload;
+}
+
+std::vector<std::uint8_t> EncodeAmbientEncounterProposal(const AmbientEncounterProposalPayload& p) {
+    if (!p.guestEntityId.IsValid() || p.proposalId == 0U ||
+        !IsSupportedAmbientEncounterProfile(p.profile) ||
+        !std::isfinite(p.anchor.x) || !std::isfinite(p.anchor.y) || !std::isfinite(p.anchor.z) ||
+        !std::isfinite(p.radiusMeters) || p.radiusMeters < 8.0F || p.radiusMeters > 80.0F ||
+        p.localEvidenceHash == 0U || p.suggestedRosterSeed == 0U) throw std::invalid_argument("invalid ambient encounter proposal");
+    std::vector<std::uint8_t> b; b.reserve(kAmbientEncounterProposalPayloadSize);
+    AppendLittleEndian(b,p.guestEntityId.Value()); AppendLittleEndian(b,p.proposalId);
+    AppendLittleEndian(b,static_cast<std::uint8_t>(p.profile));
+    AppendLittleEndian(b,std::uint8_t{0}); AppendLittleEndian(b,std::uint16_t{0});
+    AppendFloat(b,p.anchor.x); AppendFloat(b,p.anchor.y); AppendFloat(b,p.anchor.z); AppendFloat(b,p.radiusMeters);
+    AppendLittleEndian(b,p.localEvidenceHash); AppendLittleEndian(b,p.suggestedRosterSeed); AppendLittleEndian(b,std::uint32_t{0});
+    return b;
+}
+
+std::optional<AmbientEncounterProposalPayload> DecodeAmbientEncounterProposal(const std::span<const std::uint8_t> b) {
+    if (b.size()!=kAmbientEncounterProposalPayloadSize) return std::nullopt; std::size_t o{}; AmbientEncounterProposalPayload p;
+    p.guestEntityId=NetEntityId{ReadLittleEndian<std::uint64_t>(b,o)}; p.proposalId=ReadLittleEndian<std::uint64_t>(b,o);
+    p.profile=static_cast<AmbientEncounterProfile>(ReadLittleEndian<std::uint8_t>(b,o)); const auto r1=ReadLittleEndian<std::uint8_t>(b,o); const auto r2=ReadLittleEndian<std::uint16_t>(b,o);
+    p.anchor={ReadFloat(b,o),ReadFloat(b,o),ReadFloat(b,o)}; p.radiusMeters=ReadFloat(b,o); p.localEvidenceHash=ReadLittleEndian<std::uint32_t>(b,o); p.suggestedRosterSeed=ReadLittleEndian<std::uint32_t>(b,o); const auto r3=ReadLittleEndian<std::uint32_t>(b,o);
+    if(r1||r2||r3) return std::nullopt; try{(void)EncodeAmbientEncounterProposal(p);}catch(...){return std::nullopt;} return p;
+}
+
+std::vector<std::uint8_t> EncodeAmbientEncounterState(const AmbientEncounterStatePayload& p) {
+    const auto phase = static_cast<std::uint8_t>(p.phase);
+    const auto rejection = static_cast<std::uint8_t>(p.rejection);
+    const auto disposition = static_cast<std::uint8_t>(p.guestDisposition);
+    const bool rejectedProposal = p.phase == AmbientEncounterPhase::Proposed &&
+        p.rejection != AmbientEncounterRejection::None;
+    const bool validPhase = phase >= static_cast<std::uint8_t>(AmbientEncounterPhase::Proposed) &&
+        phase <= static_cast<std::uint8_t>(AmbientEncounterPhase::Abandoned);
+    const bool validRejection = rejection <= static_cast<std::uint8_t>(AmbientEncounterRejection::InvalidAnchor);
+    if (!p.hostEntityId.IsValid() || p.instanceId == 0U ||
+        disposition > static_cast<std::uint8_t>(AmbientEncounterPeerDisposition::Companion) ||
+        !IsSupportedAmbientEncounterProfile(p.profile) || !validPhase || !validRejection) {
+        throw std::invalid_argument("invalid ambient encounter state");
+    }
+    if (rejectedProposal) {
+        if (p.rosterCount != 0U || p.hostStartTick != 0U ||
+            p.exactEventId != 0U ||
+            p.guestDisposition != AmbientEncounterPeerDisposition::Unknown) {
+            throw std::invalid_argument("invalid rejected ambient encounter state");
+        }
+    } else if (p.rejection != AmbientEncounterRejection::None ||
+        p.phase == AmbientEncounterPhase::Proposed ||
+        !std::isfinite(p.anchor.x) || !std::isfinite(p.anchor.y) || !std::isfinite(p.anchor.z) ||
+        !std::isfinite(p.radiusMeters) || p.radiusMeters < 8.0F || p.radiusMeters > 80.0F ||
+        p.rosterSeed == 0U || p.rosterCount == 0U || p.rosterCount > 12U || p.hostStartTick == 0U) {
+        throw std::invalid_argument("invalid accepted ambient encounter state");
+    }
+    if ((p.exactEventId == 0U &&
+         p.guestDisposition != AmbientEncounterPeerDisposition::Unknown) ||
+        (p.exactEventId != 0U &&
+         p.profile != AmbientEncounterProfile::HostageRescue) ||
+        (!rejectedProposal && p.exactEventId != 0U &&
+         p.phase != AmbientEncounterPhase::Preparing &&
+         p.guestDisposition == AmbientEncounterPeerDisposition::Unknown)) {
+        throw std::invalid_argument("invalid exact ambient encounter state");
+    }
+    std::vector<std::uint8_t> b; b.reserve(kAmbientEncounterStatePayloadSize);
+    AppendLittleEndian(b, p.hostEntityId.Value()); AppendLittleEndian(b, p.instanceId);
+    AppendLittleEndian(b, static_cast<std::uint8_t>(p.profile)); AppendLittleEndian(b, phase);
+    AppendLittleEndian(b, rejection); AppendLittleEndian(b, disposition);
+    AppendFloat(b, p.anchor.x); AppendFloat(b, p.anchor.y); AppendFloat(b, p.anchor.z); AppendFloat(b, p.radiusMeters);
+    AppendLittleEndian(b, p.rosterSeed); AppendLittleEndian(b, p.rosterCount); AppendLittleEndian(b, std::uint16_t{0});
+    AppendLittleEndian(b, p.hostStartTick); AppendLittleEndian(b, p.exactEventId);
+    return b;
+}
+
+std::optional<AmbientEncounterStatePayload> DecodeAmbientEncounterState(const std::span<const std::uint8_t> b) {
+    if (b.size() != kAmbientEncounterStatePayloadSize) return std::nullopt;
+    std::size_t o{}; AmbientEncounterStatePayload p;
+    p.hostEntityId = NetEntityId{ReadLittleEndian<std::uint64_t>(b, o)}; p.instanceId = ReadLittleEndian<std::uint64_t>(b, o);
+    p.profile = static_cast<AmbientEncounterProfile>(ReadLittleEndian<std::uint8_t>(b, o));
+    p.phase = static_cast<AmbientEncounterPhase>(ReadLittleEndian<std::uint8_t>(b, o));
+    p.rejection = static_cast<AmbientEncounterRejection>(ReadLittleEndian<std::uint8_t>(b, o));
+    const auto disposition = ReadLittleEndian<std::uint8_t>(b, o);
+    p.anchor = {ReadFloat(b, o), ReadFloat(b, o), ReadFloat(b, o)}; p.radiusMeters = ReadFloat(b, o);
+    p.rosterSeed = ReadLittleEndian<std::uint32_t>(b, o); p.rosterCount = ReadLittleEndian<std::uint16_t>(b, o);
+    const auto reserved2 = ReadLittleEndian<std::uint16_t>(b, o); p.hostStartTick = ReadLittleEndian<std::uint64_t>(b, o);
+    p.exactEventId = ReadLittleEndian<std::uint32_t>(b, o);
+    if (reserved2 != 0U ||
+        disposition > static_cast<std::uint8_t>(AmbientEncounterPeerDisposition::Companion)) return std::nullopt;
+    p.guestDisposition = static_cast<AmbientEncounterPeerDisposition>(disposition);
+    try { (void)EncodeAmbientEncounterState(p); } catch (...) { return std::nullopt; }
+    return p;
 }
 
 std::vector<std::uint8_t> EncodeCampaignCapability(

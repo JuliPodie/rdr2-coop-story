@@ -51,6 +51,8 @@ public static class BinaryPayloadCodec
     public const int MaximumMissionObjectiveUtf8Bytes = 192;
     public const int MissionDialogueCueSize = 40;
     public const int MissionDialogueReadySize = 32;
+    public const int AmbientEncounterProposalSize = 48;
+    public const int AmbientEncounterStateSize = 56;
 
     public static byte[] EncodeMissionObjective(MissionObjectivePayload payload)
     {
@@ -151,6 +153,69 @@ public static class BinaryPayloadCodec
             BinaryPrimitives.ReadUInt16LittleEndian(payload[28..]),
             (MissionDialogueReadyState)payload[30]);
         ValidateMissionDialogueReady(result);
+        return result;
+    }
+
+    public static byte[] EncodeAmbientEncounterProposal(AmbientEncounterProposalPayload payload)
+    {
+        ValidateAmbientEncounterProposal(payload);
+        var bytes = new byte[AmbientEncounterProposalSize];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, payload.GuestEntityId.Value);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), payload.ProposalId);
+        bytes[16] = (byte)payload.Profile;
+        WriteVector3(bytes.AsSpan(20), payload.Anchor);
+        BinaryPrimitives.WriteSingleLittleEndian(bytes.AsSpan(32), payload.RadiusMeters);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(36), payload.LocalEvidenceHash);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(40), payload.SuggestedRosterSeed);
+        return bytes;
+    }
+
+    public static AmbientEncounterProposalPayload DecodeAmbientEncounterProposal(ReadOnlySpan<byte> payload)
+    {
+        RequireLength(payload, AmbientEncounterProposalSize, nameof(AmbientEncounterProposalPayload));
+        if (payload[17] != 0 || BinaryPrimitives.ReadUInt16LittleEndian(payload[18..]) != 0 ||
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[44..]) != 0)
+            throw new ProtocolException("Ambient encounter proposal reserved bytes must be zero.");
+        var result = new AmbientEncounterProposalPayload(
+            new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)),
+            BinaryPrimitives.ReadUInt64LittleEndian(payload[8..]), (AmbientEncounterProfile)payload[16],
+            ReadVector3(payload[20..]), BinaryPrimitives.ReadSingleLittleEndian(payload[32..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[36..]), BinaryPrimitives.ReadUInt32LittleEndian(payload[40..]));
+        ValidateAmbientEncounterProposal(result);
+        return result;
+    }
+
+    public static byte[] EncodeAmbientEncounterState(AmbientEncounterStatePayload payload)
+    {
+        ValidateAmbientEncounterState(payload);
+        var bytes = new byte[AmbientEncounterStateSize];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, payload.HostEntityId.Value);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), payload.InstanceId);
+        bytes[16] = (byte)payload.Profile; bytes[17] = (byte)payload.Phase; bytes[18] = (byte)payload.Rejection;
+        bytes[19] = (byte)payload.GuestDisposition;
+        WriteVector3(bytes.AsSpan(20), payload.Anchor);
+        BinaryPrimitives.WriteSingleLittleEndian(bytes.AsSpan(32), payload.RadiusMeters);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(36), payload.RosterSeed);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(40), payload.RosterCount);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(44), payload.HostStartTick);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(52), payload.ExactEventId);
+        return bytes;
+    }
+
+    public static AmbientEncounterStatePayload DecodeAmbientEncounterState(ReadOnlySpan<byte> payload)
+    {
+        RequireLength(payload, AmbientEncounterStateSize, nameof(AmbientEncounterStatePayload));
+        if (BinaryPrimitives.ReadUInt16LittleEndian(payload[42..]) != 0 ||
+            payload[19] > (byte)AmbientEncounterPeerDisposition.Companion)
+            throw new ProtocolException("Ambient encounter state reserved bytes must be zero.");
+        var result = new AmbientEncounterStatePayload(
+            new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)), BinaryPrimitives.ReadUInt64LittleEndian(payload[8..]),
+            (AmbientEncounterProfile)payload[16], (AmbientEncounterPhase)payload[17], (AmbientEncounterRejection)payload[18],
+            ReadVector3(payload[20..]), BinaryPrimitives.ReadSingleLittleEndian(payload[32..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[36..]), BinaryPrimitives.ReadUInt16LittleEndian(payload[40..]),
+            BinaryPrimitives.ReadUInt64LittleEndian(payload[44..]), BinaryPrimitives.ReadUInt32LittleEndian(payload[52..]),
+            (AmbientEncounterPeerDisposition)payload[19]);
+        ValidateAmbientEncounterState(result);
         return result;
     }
 
@@ -2945,6 +3010,46 @@ public static class BinaryPayloadCodec
             payload.ProfileId == 0 || payload.RootId == 0 ||
             !Enum.IsDefined(payload.State))
             throw new ProtocolException("Mission dialogue readiness payload is invalid.");
+    }
+
+    private static void ValidateAmbientEncounterProposal(AmbientEncounterProposalPayload payload)
+    {
+        if (!payload.GuestEntityId.IsValid || payload.ProposalId == 0 ||
+            !Enum.IsDefined(payload.Profile) || !IsFinite(payload.Anchor) ||
+            !float.IsFinite(payload.RadiusMeters) || payload.RadiusMeters is < 8 or > 80 ||
+            payload.LocalEvidenceHash == 0 || payload.SuggestedRosterSeed == 0)
+            throw new ProtocolException("Ambient encounter proposal is invalid.");
+    }
+
+    private static void ValidateAmbientEncounterState(AmbientEncounterStatePayload payload)
+    {
+        var rejectedProposal = payload.Phase == AmbientEncounterPhase.Proposed &&
+            payload.Rejection != AmbientEncounterRejection.None;
+        if (!payload.HostEntityId.IsValid || payload.InstanceId == 0 ||
+            !Enum.IsDefined(payload.Profile) || !Enum.IsDefined(payload.Phase) ||
+            !Enum.IsDefined(payload.Rejection) || !Enum.IsDefined(payload.GuestDisposition))
+            throw new ProtocolException("Ambient encounter state is invalid.");
+        if (rejectedProposal)
+        {
+            if (payload.RosterCount != 0 || payload.HostStartTick != 0 ||
+                payload.ExactEventId != 0 ||
+                payload.GuestDisposition != AmbientEncounterPeerDisposition.Unknown)
+                throw new ProtocolException("Rejected ambient encounter state is invalid.");
+            return;
+        }
+        if (payload.Rejection != AmbientEncounterRejection.None ||
+            payload.Phase == AmbientEncounterPhase.Proposed || !IsFinite(payload.Anchor) ||
+            !float.IsFinite(payload.RadiusMeters) || payload.RadiusMeters is < 8 or > 80 ||
+            payload.RosterSeed == 0 || payload.RosterCount is 0 or > 12 || payload.HostStartTick == 0)
+            throw new ProtocolException("Accepted ambient encounter state is invalid.");
+        if ((payload.ExactEventId == 0 &&
+             payload.GuestDisposition != AmbientEncounterPeerDisposition.Unknown) ||
+            (payload.ExactEventId != 0 &&
+             payload.Profile != AmbientEncounterProfile.HostageRescue) ||
+            (payload.ExactEventId != 0 &&
+             payload.Phase != AmbientEncounterPhase.Preparing &&
+             payload.GuestDisposition == AmbientEncounterPeerDisposition.Unknown))
+            throw new ProtocolException("Exact ambient encounter state is invalid.");
     }
 
     private static void ValidateCampaignCapabilityAck(CampaignCapabilityAckPayload payload)

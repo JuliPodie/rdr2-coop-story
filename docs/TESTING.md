@@ -93,6 +93,30 @@ Test one feature group at a time:
    execution;
 7. AnimScene/MetaPed experiments only after the earlier layers are stable.
 
+## Ambient encounter pass
+
+The tester build contains 50 reviewed free-roam script detections: 35 roadside
+ambushes, five rescues, three wagon defenses, three animal attacks, and four
+camp clear-outs. These are host-owned bridge scenes, not synchronized runs of
+Rockstar's ambient scripts.
+
+For each profile, use disposable free-roam saves and confirm:
+
+1. host detection creates one shared scene rather than a duplicate fight;
+2. guest replicas appear and guest damage contributes to the host outcome;
+3. host success, failure, distance abandonment, disconnect, and 30-second
+   cleanup all remove bridge-created actors cleanly;
+4. neither player receives copied money, Honor, weapon, unlock, collectible,
+   campaign, map-pickup, or capability state;
+5. any ordinary corpse loot remains private to the player whose local game
+   offers it.
+
+Wagon-defense profiles do not share a native wagon or carriage simulation, and
+the original Rockstar event script, law response, and dialogue remain local.
+Animal scenes deliberately decline if the host cannot observe a local animal
+source model. Include the event name and both diagnostic exports in every
+report.
+
 The tester package defaults to `animgraph_replica` and enables the Story-VM
 diagnostic capture. Keep those settings for normal coverage. If either causes
 a repeatable failure, disable only that switch, repeat the case, and include

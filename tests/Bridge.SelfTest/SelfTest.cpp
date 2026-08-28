@@ -1,6 +1,9 @@
 #include "coopstory/bridge/BridgeRuntime.hpp"
+#include "coopstory/bridge/AmbientEncounterCoordinator.hpp"
+#include "coopstory/bridge/BridgeOwnedEncounterCatalog.hpp"
 #include "coopstory/bridge/AnimationReplicationCodec.hpp"
 #include "coopstory/bridge/CampaignMissionCatalog.hpp"
+#include "coopstory/bridge/ExactEncounterCatalog.hpp"
 #include "coopstory/bridge/EntityRegistry.hpp"
 #include "coopstory/bridge/FrameCodec.hpp"
 #include "coopstory/bridge/MenuController.hpp"
@@ -47,6 +50,67 @@ void Check(
 #define CHECK(expression) \
     Check(static_cast<bool>(expression), #expression, __FILE__, __LINE__)
 
+void AmbientEncounterCoordinatorPolicy() {
+    CHECK(kBridgeOwnedEncounterCatalog.size() == 50U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::RoadsideAmbush) == 35U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::HostageRescue) == 5U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::WagonDefense) == 3U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::AnimalAttack) == 3U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::CampClearout) == 4U);
+    for (const auto& definition : kBridgeOwnedEncounterCatalog) {
+        CHECK(definition.scriptId != 0U);
+        CHECK(definition.scriptName != nullptr);
+        CHECK(FindBridgeOwnedEncounter(definition.scriptId) == &definition);
+        CHECK(ClassifyAmbientProfile(definition.profile) ==
+            EncounterCoopLane::BridgeOwned);
+    }
+    CHECK(FindBridgeOwnedEncounter(kExtortionEncounter.scriptId) == nullptr);
+    const auto eligibleExtortion = ResolveExactEncounterPeerPolicy(
+        kExtortionEncounter, ExactEncounterPreflight{kExtortionEncounter.scriptId, true});
+    CHECK(eligibleExtortion.role == EncounterPeerRole::Participant);
+    CHECK(eligibleExtortion.mayFight);
+    CHECK(eligibleExtortion.mayLootGeneric);
+    CHECK(!eligibleExtortion.mayReceiveUniqueLoot);
+    CHECK(!eligibleExtortion.mayReceiveHonor);
+    const auto companionExtortion = ResolveExactEncounterPeerPolicy(
+        kExtortionEncounter, ExactEncounterPreflight{kExtortionEncounter.scriptId, false});
+    CHECK(companionExtortion.role == EncounterPeerRole::Companion);
+    CHECK(companionExtortion.mayFight);
+    CHECK(companionExtortion.mayLootGeneric);
+    CHECK(!companionExtortion.mayReceiveUniqueLoot);
+    CHECK(!companionExtortion.mayReceiveHonor);
+    CHECK(ClassifyAmbientProfile(AmbientEncounterProfile::WagonDefense) ==
+        EncounterCoopLane::BridgeOwned);
+    CHECK(ClassifyExactIdEncounter(ExactIdEncounterContract{
+        1U, true, true, true}) == EncounterCoopLane::ExactIdBarrier);
+    CHECK(ClassifyExactIdEncounter(ExactIdEncounterContract{
+        1U, true, true, false}) == EncounterCoopLane::LocalOnly);
+    const AmbientEncounterProposal proposal{
+        1U, AmbientEncounterProfile::RoadsideAmbush,
+        Vec3{10.0F, 20.0F, 30.0F}, 35.0F, 0x1234U, 0x5678U};
+    const AmbientEncounterHostContext ready{
+        true, false, true, 30.0F};
+    CHECK(CanHostAdoptAmbientEncounter(
+        proposal, ready, false) == AmbientEncounterRejection::None);
+    CHECK(CanHostAdoptAmbientEncounter(
+        proposal, AmbientEncounterHostContext{true, true, true, 30.0F}, false) ==
+        AmbientEncounterRejection::ParticipantUnsafe);
+    CHECK(CanHostAdoptAmbientEncounter(
+        proposal, AmbientEncounterHostContext{true, false, true, 121.0F}, false) ==
+        AmbientEncounterRejection::TooFarAway);
+
+    AmbientEncounterCoordinator coordinator;
+    CHECK(coordinator.ProposeFromGuest(proposal, ready, 99U, 1'000U) ==
+        AmbientEncounterRejection::None);
+    CHECK(coordinator.Active().has_value());
+    CHECK(coordinator.Active()->rosterCount == 4U);
+    CHECK(coordinator.Active()->localAuthority);
+    CHECK(coordinator.Advance(AmbientEncounterPhase::Active));
+    CHECK(coordinator.Advance(AmbientEncounterPhase::Succeeded));
+    coordinator.ClearTerminal();
+    CHECK(!coordinator.Active().has_value());
+}
+
 void FrameCodecRoundTrip() {
     Frame source;
     source.header.type = MessageType::PlayerState;
@@ -60,7 +124,7 @@ void FrameCodecRoundTrip() {
     CHECK(bytes[1] == static_cast<std::uint8_t>('2'));
     CHECK(bytes[2] == static_cast<std::uint8_t>('C'));
     CHECK(bytes[3] == static_cast<std::uint8_t>('P'));
-    CHECK(bytes[4] == 30U);
+    CHECK(bytes[4] == kProtocolVersion);
     CHECK(bytes[5] == 0U);
     CHECK(bytes[6] == 4U);
     CHECK(bytes[7] == 0U);
@@ -997,6 +1061,49 @@ void PayloadContracts() {
     auto invalidDialogueReady = dialogueReadyBytes;
     invalidDialogueReady[30U] = 0U;
     CHECK(!DecodeMissionDialogueReady(invalidDialogueReady).has_value());
+    const AmbientEncounterProposalPayload encounterProposal{
+        NetEntityId::Compose(7U, 2U), 42U, AmbientEncounterProfile::RoadsideAmbush,
+        Vec3{101.0F, 202.0F, 30.0F}, 32.0F, 0x12345678U, 0x87654321U};
+    const auto encounterProposalBytes = EncodeAmbientEncounterProposal(encounterProposal);
+    CHECK(encounterProposalBytes.size() == kAmbientEncounterProposalPayloadSize);
+    const auto decodedEncounterProposal = DecodeAmbientEncounterProposal(encounterProposalBytes);
+    CHECK(decodedEncounterProposal.has_value());
+    CHECK(*decodedEncounterProposal == encounterProposal);
+    const AmbientEncounterStatePayload encounterState{
+        NetEntityId::Compose(7U, 1U), 88U, AmbientEncounterProfile::RoadsideAmbush,
+        AmbientEncounterPhase::Preparing, AmbientEncounterRejection::None,
+        encounterProposal.anchor, encounterProposal.radiusMeters, encounterProposal.suggestedRosterSeed,
+        4U, 9000U};
+    const auto encounterStateBytes = EncodeAmbientEncounterState(encounterState);
+    CHECK(encounterStateBytes.size() == kAmbientEncounterStatePayloadSize);
+    const auto decodedEncounterState = DecodeAmbientEncounterState(encounterStateBytes);
+    CHECK(decodedEncounterState.has_value());
+    CHECK(*decodedEncounterState == encounterState);
+    const AmbientEncounterStatePayload extortionParticipant{
+        NetEntityId::Compose(7U, 1U), 89U,
+        AmbientEncounterProfile::HostageRescue,
+        AmbientEncounterPhase::Active, AmbientEncounterRejection::None,
+        encounterProposal.anchor, 25.0F, 0x76543210U, 3U, 9001U,
+        kExtortionEncounter.scriptId,
+        AmbientEncounterPeerDisposition::Participant};
+    CHECK(DecodeAmbientEncounterState(
+        EncodeAmbientEncounterState(extortionParticipant)) ==
+        std::optional<AmbientEncounterStatePayload>{extortionParticipant});
+    auto invalidExtortionDisposition = extortionParticipant;
+    invalidExtortionDisposition.guestDisposition =
+        AmbientEncounterPeerDisposition::Unknown;
+    bool invalidExtortionDispositionRejected{};
+    try {
+        (void)EncodeAmbientEncounterState(invalidExtortionDisposition);
+    } catch (const std::invalid_argument&) {
+        invalidExtortionDispositionRejected = true;
+    }
+    CHECK(invalidExtortionDispositionRejected);
+    const AmbientEncounterStatePayload rejectedEncounter{
+        NetEntityId::Compose(7U, 1U), 42U, AmbientEncounterProfile::RoadsideAmbush,
+        AmbientEncounterPhase::Proposed, AmbientEncounterRejection::TooFarAway,
+        {}, 0.0F, 0U, 0U, 0U};
+    CHECK(DecodeAmbientEncounterState(EncodeAmbientEncounterState(rejectedEncounter)).has_value());
     auto invalidCompletionProgression = completionProgression;
     invalidCompletionProgression.completionRating = 1U;
     bool invalidCompletionRejected{};
@@ -1585,7 +1692,7 @@ void PayloadContracts() {
 }
 
 void AnimationReplicationPayloadContracts() {
-    CHECK(kProtocolVersion == 30U);
+    CHECK(kProtocolVersion == 32U);
     CHECK(
         static_cast<std::uint16_t>(MessageType::PlayerAnimationState) ==
         28U);
@@ -3353,6 +3460,10 @@ public:
         (void)missionId;
         return sampledMissionDialogue;
     }
+    std::optional<AmbientEncounterObservation>
+    SampleAmbientEncounterObservation() noexcept override {
+        return sampledAmbientEncounter;
+    }
     bool PresentHostMissionDialogue(
         const std::uint32_t missionId,
         const std::uint32_t rootId) noexcept override {
@@ -3420,6 +3531,33 @@ public:
     std::optional<WorldStatePayload> SampleWorldState() noexcept override {
         return sampledWorld;
     }
+    std::optional<ExactEncounterObservation>
+    SampleExactEncounterObservation() noexcept override {
+        return sampledExactEncounter;
+    }
+    bool BeginAmbientEncounterPresentation(
+        const AmbientEncounterInstance& instance) noexcept override {
+        if (!beginAmbientEncounterPresentationResult) {
+            return false;
+        }
+        try {
+            begunAmbientEncounterPresentations.push_back(instance);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+    std::optional<AmbientEncounterPhase>
+    SampleAmbientEncounterOutcome(const std::uint64_t) noexcept override {
+        return sampledAmbientEncounterOutcome;
+    }
+    void ClearAmbientEncounterPresentation(
+        const std::uint64_t instanceId) noexcept override {
+        try {
+            clearedAmbientEncounterPresentations.push_back(instanceId);
+        } catch (...) {
+        }
+    }
     std::vector<HostWorldEntitySample> SampleWorldEntities(
         float,
         const std::size_t maximumEntities) noexcept override {
@@ -3436,6 +3574,12 @@ public:
         if (result.has_value()) {
             result->attackerId = attackerId;
         }
+        return result;
+    }
+    std::vector<VanillaPickupCollection>
+    DrainVanillaPickupCollections() noexcept override {
+        auto result = std::move(pendingVanillaPickupCollections);
+        pendingVanillaPickupCollections.clear();
         return result;
     }
     std::vector<CampaignCapabilityObservation>
@@ -3844,6 +3988,12 @@ public:
             0U,
             0U,
             0.0F}};
+    std::optional<ExactEncounterObservation> sampledExactEncounter{};
+    std::optional<AmbientEncounterObservation> sampledAmbientEncounter{};
+    bool beginAmbientEncounterPresentationResult{};
+    std::vector<AmbientEncounterInstance> begunAmbientEncounterPresentations{};
+    std::optional<AmbientEncounterPhase> sampledAmbientEncounterOutcome{};
+    std::vector<std::uint64_t> clearedAmbientEncounterPresentations{};
     std::optional<CampaignMissionProbe> sampledCampaignMission{};
     bool applyCampaignMissionCompletionResult{};
     std::size_t campaignMissionCompletionApplyCount{};
@@ -3879,6 +4029,7 @@ public:
         remoteMountLocalStates{};
     std::vector<HostWorldEntitySample> sampledWorldEntities{};
     std::optional<DamageIntentPayload> pendingWorldDamageIntent{};
+    std::vector<VanillaPickupCollection> pendingVanillaPickupCollections{};
     std::vector<CampaignCapabilityObservation>
         pendingCampaignCapabilityObservations{};
     std::vector<WorldEntityStatePayload> worldEntitySpawns{};
@@ -4357,6 +4508,321 @@ void InvokeSaveProblemMarkerMenu(
             [type](const Frame& frame) {
                 return frame.header.type == type;
             }));
+}
+
+[[nodiscard]] std::optional<AmbientEncounterStatePayload>
+LastSentAmbientEncounterState(const TestTransport& transport) {
+    for (auto iterator = transport.sent.rbegin();
+         iterator != transport.sent.rend(); ++iterator) {
+        if (iterator->header.type != MessageType::AmbientEncounterState) {
+            continue;
+        }
+        return DecodeAmbientEncounterState(iterator->payload);
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<AmbientEncounterProposalPayload>
+LastSentAmbientEncounterProposal(const TestTransport& transport) {
+    for (auto iterator = transport.sent.rbegin();
+         iterator != transport.sent.rend(); ++iterator) {
+        if (iterator->header.type != MessageType::AmbientEncounterProposal) {
+            continue;
+        }
+        return DecodeAmbientEncounterProposal(iterator->payload);
+    }
+    return std::nullopt;
+}
+
+void RuntimeExactExtortionPreflightControlsGuestDisposition() {
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+
+    for (const bool guestEligible : {true, false}) {
+        std::string error;
+        constexpr auto kSessionEpoch = 1'000U;
+        const auto hostId = NetEntityId::Compose(kSessionEpoch, 1U);
+        const auto guestId = NetEntityId::Compose(kSessionEpoch, 2U);
+
+        TestFacade hostFacade;
+        hostFacade.sampledExactEncounter = ExactEncounterObservation{
+            kExtortionEncounter.scriptId, {50.0F, 60.0F, 20.0F}, true};
+        hostFacade.beginAmbientEncounterPresentationResult = true;
+        TestTransport hostTransport;
+        hostTransport.acknowledgementPayload = {
+            static_cast<std::uint8_t>(PlayerSlot::Host)};
+        hostTransport.remoteSlot = PlayerSlot::Guest;
+        hostTransport.remoteEntityId = guestId;
+        BridgeRuntime host{hostFacade, hostTransport};
+        CHECK(host.Start(supported, error));
+        host.Tick();
+
+        const auto preparing = LastSentAmbientEncounterState(hostTransport);
+        CHECK(preparing.has_value());
+        CHECK(preparing->phase == AmbientEncounterPhase::Preparing);
+        CHECK(preparing->exactEventId == kExtortionEncounter.scriptId);
+        CHECK(preparing->guestDisposition ==
+            AmbientEncounterPeerDisposition::Unknown);
+        CHECK(hostFacade.begunAmbientEncounterPresentations.empty());
+
+        TestFacade guestFacade;
+        if (guestEligible) {
+            guestFacade.sampledExactEncounter = ExactEncounterObservation{
+                kExtortionEncounter.scriptId, {50.0F, 60.0F, 20.0F}, true};
+        }
+        guestFacade.beginAmbientEncounterPresentationResult = true;
+        TestTransport guestTransport;
+        guestTransport.acknowledgementPayload = {
+            static_cast<std::uint8_t>(PlayerSlot::Guest)};
+        guestTransport.remoteSlot = PlayerSlot::Host;
+        guestTransport.remoteEntityId = hostId;
+        BridgeRuntime guest{guestFacade, guestTransport};
+        CHECK(guest.Start(supported, error));
+
+        Frame hostPreparing;
+        hostPreparing.header.type = MessageType::AmbientEncounterState;
+        hostPreparing.header.sequence = ++guestTransport.inboundSequence;
+        hostPreparing.header.tick = hostFacade.tick;
+        hostPreparing.payload = EncodeAmbientEncounterState(*preparing);
+        guestTransport.inbound.push_back(std::move(hostPreparing));
+        guest.Tick();
+
+        const auto preflight = LastSentAmbientEncounterProposal(guestTransport);
+        CHECK(preflight.has_value());
+        CHECK(preflight->proposalId == preparing->instanceId);
+        CHECK(preflight->guestEntityId == guestId);
+        CHECK(preflight->localEvidenceHash ==
+            (guestEligible
+                ? kExtortionEncounter.scriptId
+                : kExtortionCompanionPreflightEvidence));
+        CHECK(guestFacade.begunAmbientEncounterPresentations.empty());
+        CHECK(HasLog(
+            guestFacade,
+            guestEligible
+                ? "[EXACT_ENCOUNTER] guest preflight=participant"
+                : "[EXACT_ENCOUNTER] guest preflight=companion"));
+
+        Frame guestPreflight;
+        guestPreflight.header.type = MessageType::AmbientEncounterProposal;
+        guestPreflight.header.sequence = ++hostTransport.inboundSequence;
+        guestPreflight.header.tick = guestFacade.tick;
+        guestPreflight.payload = EncodeAmbientEncounterProposal(*preflight);
+        hostTransport.inbound.push_back(std::move(guestPreflight));
+        host.Tick();
+
+        const auto active = LastSentAmbientEncounterState(hostTransport);
+        CHECK(active.has_value());
+        CHECK(active->phase == AmbientEncounterPhase::Active);
+        CHECK(active->exactEventId == kExtortionEncounter.scriptId);
+        CHECK(active->guestDisposition ==
+            (guestEligible
+                ? AmbientEncounterPeerDisposition::Participant
+                : AmbientEncounterPeerDisposition::Companion));
+        CHECK(hostFacade.begunAmbientEncounterPresentations.size() == 1U);
+        CHECK(hostFacade.begunAmbientEncounterPresentations.front().localAuthority);
+
+        Frame hostActive;
+        hostActive.header.type = MessageType::AmbientEncounterState;
+        hostActive.header.sequence = ++guestTransport.inboundSequence;
+        hostActive.header.tick = hostFacade.tick;
+        hostActive.payload = EncodeAmbientEncounterState(*active);
+        guestTransport.inbound.push_back(std::move(hostActive));
+        guest.Tick();
+
+        CHECK(guestFacade.begunAmbientEncounterPresentations.size() == 1U);
+        CHECK(!guestFacade.begunAmbientEncounterPresentations.front().localAuthority);
+        CHECK(guestFacade.begunAmbientEncounterPresentations.front().guestDisposition ==
+            active->guestDisposition);
+        CHECK(HasLog(
+            guestFacade,
+            guestEligible
+                ? "[EXACT_ENCOUNTER] guest active=participant"
+                : "[EXACT_ENCOUNTER] guest active=companion"));
+        // No capability, cash, equipment or inventory API participates in an
+        // exact encounter. Vanilla local corpse rolls remain the only loot.
+        CHECK(hostFacade.weaponEntitlements.empty());
+        CHECK(guestFacade.weaponEntitlements.empty());
+        CHECK(hostFacade.campaignMissionCompletionApplyCount == 0U);
+        CHECK(guestFacade.campaignMissionCompletionApplyCount == 0U);
+        CHECK(hostFacade.campaignMissionCashApplyCount == 0U);
+        CHECK(guestFacade.campaignMissionCashApplyCount == 0U);
+
+        // Exact-event corpses never enter the general pickup/capability
+        // lanes. The game may grant local generic loot, but no collection or
+        // reward evidence is emitted to the peer.
+        const auto guestPickupsBefore = CountSentFrames(
+            guestTransport, MessageType::PickupCollected);
+        guestFacade.pendingVanillaPickupCollections.push_back(
+            VanillaPickupCollection{0xABCDEF0123456789ULL, 0x11223344U});
+        guestFacade.tick += 1U;
+        guest.Tick();
+        CHECK(CountSentFrames(
+            guestTransport, MessageType::PickupCollected) ==
+            guestPickupsBefore);
+        CHECK(HasLog(guestFacade, "discarded pickup telemetry"));
+
+        const auto hostCapabilitiesBefore = CountSentFrames(
+            hostTransport, MessageType::CampaignCapability);
+        hostFacade.pendingCampaignCapabilityObservations.push_back(
+            CampaignCapabilityObservation{
+                CampaignCapabilityKind::WeaponShopEligibility,
+                0x55667788U});
+        hostFacade.tick += 1U;
+        host.Tick();
+        CHECK(CountSentFrames(
+            hostTransport, MessageType::CampaignCapability) ==
+            hostCapabilitiesBefore);
+        CHECK(HasLog(hostFacade, "discarded capability telemetry"));
+
+        // A guest cannot resolve the activity by sampling a local outcome.
+        // Only the host outcome sample can publish a terminal phase and
+        // trigger the eventual bridge-owned cleanup.
+        const auto guestStatesBefore = CountSentFrames(
+            guestTransport, MessageType::AmbientEncounterState);
+        guestFacade.sampledAmbientEncounterOutcome =
+            AmbientEncounterPhase::Succeeded;
+        guestFacade.tick += 50U;
+        guest.Tick();
+        CHECK(CountSentFrames(
+            guestTransport, MessageType::AmbientEncounterState) ==
+            guestStatesBefore);
+
+        hostFacade.sampledAmbientEncounterOutcome =
+            AmbientEncounterPhase::Succeeded;
+        hostFacade.tick += 50U;
+        host.Tick();
+        const auto terminal = LastSentAmbientEncounterState(hostTransport);
+        CHECK(terminal.has_value());
+        CHECK(terminal->phase == AmbientEncounterPhase::Succeeded);
+        CHECK(terminal->guestDisposition == active->guestDisposition);
+        CHECK(hostFacade.clearedAmbientEncounterPresentations.empty());
+
+        // Cleanup must not leak a bridge-owned scene into a subsequent Story
+        // transition after the retained local corpse window has elapsed.
+        hostFacade.sample.missionActive = true;
+        hostFacade.tick += 30'001U;
+        host.Tick();
+        CHECK(hostFacade.clearedAmbientEncounterPresentations.size() == 1U);
+        CHECK(hostFacade.clearedAmbientEncounterPresentations.front() ==
+            preparing->instanceId);
+    }
+}
+
+void RuntimeCatalogEncountersUseOneHostOwnedScene() {
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    constexpr auto kSessionEpoch = 1'100U;
+    const auto guestId = NetEntityId::Compose(kSessionEpoch, 2U);
+
+    for (const auto& definition : kBridgeOwnedEncounterCatalog) {
+        std::string error;
+        TestFacade hostFacade;
+        hostFacade.sampledAmbientEncounter = AmbientEncounterObservation{
+            definition.profile, {25.0F, 30.0F, 5.0F}, 32.0F,
+            definition.scriptId, definition.scriptId ^ 0xA5A55A5AU};
+        hostFacade.beginAmbientEncounterPresentationResult = true;
+        TestTransport hostTransport;
+        hostTransport.acknowledgementPayload = {
+            static_cast<std::uint8_t>(PlayerSlot::Host)};
+        hostTransport.remoteSlot = PlayerSlot::Guest;
+        hostTransport.remoteEntityId = guestId;
+        BridgeRuntime host{hostFacade, hostTransport};
+        CHECK(host.Start(supported, error));
+        host.Tick();
+
+        const auto active = LastSentAmbientEncounterState(hostTransport);
+        CHECK(active.has_value());
+        CHECK(active->phase == AmbientEncounterPhase::Active);
+        CHECK(active->profile == definition.profile);
+        CHECK(active->exactEventId == 0U);
+        CHECK(hostFacade.begunAmbientEncounterPresentations.size() == 1U);
+        const auto& hostScene =
+            hostFacade.begunAmbientEncounterPresentations.front();
+        CHECK(hostScene.localAuthority);
+        CHECK(hostScene.sourceEvidenceHash == definition.scriptId);
+        CHECK(hostScene.rosterCount > 0U);
+
+        // Generic encounters never enter progression, cash, entitlement or
+        // pickup/capability replication; corpses remain each save's local
+        // vanilla interaction.
+        hostFacade.pendingCampaignCapabilityObservations.push_back(
+            CampaignCapabilityObservation{
+                CampaignCapabilityKind::WeaponShopEligibility, 0xCAFEU});
+        hostFacade.pendingVanillaPickupCollections.push_back(
+            VanillaPickupCollection{0x1234000000000000ULL |
+                definition.scriptId, 0xAA55U});
+        const auto capabilitiesBefore = CountSentFrames(
+            hostTransport, MessageType::CampaignCapability);
+        const auto pickupsBefore = CountSentFrames(
+            hostTransport, MessageType::PickupCollected);
+        hostFacade.tick += 1U;
+        host.Tick();
+        CHECK(CountSentFrames(hostTransport, MessageType::CampaignCapability) ==
+            capabilitiesBefore);
+        CHECK(CountSentFrames(hostTransport, MessageType::PickupCollected) ==
+            pickupsBefore);
+        CHECK(hostFacade.campaignMissionCompletionApplyCount == 0U);
+        CHECK(hostFacade.campaignMissionCashApplyCount == 0U);
+        CHECK(hostFacade.weaponEntitlements.empty());
+
+        TestFacade guestFacade;
+        guestFacade.beginAmbientEncounterPresentationResult = true;
+        TestTransport guestTransport;
+        guestTransport.acknowledgementPayload = {
+            static_cast<std::uint8_t>(PlayerSlot::Guest)};
+        guestTransport.remoteSlot = PlayerSlot::Host;
+        guestTransport.remoteEntityId = active->hostEntityId;
+        BridgeRuntime guest{guestFacade, guestTransport};
+        CHECK(guest.Start(supported, error));
+
+        Frame hostActive;
+        hostActive.header.type = MessageType::AmbientEncounterState;
+        hostActive.header.sequence = ++guestTransport.inboundSequence;
+        hostActive.header.tick = hostFacade.tick;
+        hostActive.payload = EncodeAmbientEncounterState(*active);
+        guestTransport.inbound.push_back(std::move(hostActive));
+        guest.Tick();
+        if (guestFacade.begunAmbientEncounterPresentations.size() != 1U) {
+            std::string detail{"catalog guest scene missing for "};
+            detail += definition.scriptName;
+            for (const auto& log : guestFacade.logs) {
+                detail += " | ";
+                detail += log;
+            }
+            throw std::runtime_error(detail);
+        }
+        CHECK(!guestFacade.begunAmbientEncounterPresentations.front().localAuthority);
+        CHECK(guestFacade.campaignMissionCompletionApplyCount == 0U);
+        CHECK(guestFacade.campaignMissionCashApplyCount == 0U);
+        CHECK(guestFacade.weaponEntitlements.empty());
+
+        // The guest cannot resolve a host-owned encounter; only the host
+        // outcome produces a terminal state and delayed cleanup.
+        guestFacade.sampledAmbientEncounterOutcome =
+            AmbientEncounterPhase::Succeeded;
+        guestFacade.tick += 50U;
+        guest.Tick();
+        CHECK(CountSentFrames(
+            guestTransport, MessageType::AmbientEncounterState) == 0U);
+
+        hostFacade.sampledAmbientEncounterOutcome =
+            AmbientEncounterPhase::Succeeded;
+        hostFacade.tick += 50U;
+        host.Tick();
+        const auto terminal = LastSentAmbientEncounterState(hostTransport);
+        CHECK(terminal.has_value());
+        CHECK(terminal->phase == AmbientEncounterPhase::Succeeded);
+        hostFacade.sample.missionActive = true;
+        hostFacade.tick += 30'001U;
+        host.Tick();
+        CHECK(hostFacade.clearedAmbientEncounterPresentations.size() == 1U);
+        CHECK(hostFacade.clearedAmbientEncounterPresentations.front() ==
+            active->instanceId);
+    }
 }
 
 void RuntimeUsesGameDesiredMoveBlendForScriptedSpeed() {
@@ -11025,6 +11491,7 @@ void RuntimeCheckpointRespawnRestoresLifecycle() {
 
 int main() {
     const std::vector<std::pair<std::string_view, std::function<void()>>> tests{
+        {"AmbientEncounterCoordinatorPolicy", AmbientEncounterCoordinatorPolicy},
         {"FrameCodecRoundTrip", FrameCodecRoundTrip},
         {"CampaignMissionCatalogIsExplicitAndBound",
          CampaignMissionCatalogIsExplicitAndBound},
@@ -11048,6 +11515,10 @@ int main() {
         {"RemoteSnapshotInterpolation",
          RemoteSnapshotInterpolation},
         {"GateAndTelemetry", GateAndTelemetry},
+        {"RuntimeExactExtortionPreflightControlsGuestDisposition",
+         RuntimeExactExtortionPreflightControlsGuestDisposition},
+        {"RuntimeCatalogEncountersUseOneHostOwnedScene",
+         RuntimeCatalogEncountersUseOneHostOwnedScene},
         {"RuntimeUsesGameDesiredMoveBlendForScriptedSpeed",
          RuntimeUsesGameDesiredMoveBlendForScriptedSpeed},
         {"RuntimeLoopback", RuntimeLoopback},

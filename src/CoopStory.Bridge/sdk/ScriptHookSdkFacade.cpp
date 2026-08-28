@@ -1,5 +1,7 @@
 #include "ScriptHookSdkFacade.hpp"
+#include "coopstory/bridge/BridgeOwnedEncounterCatalog.hpp"
 #include "coopstory/bridge/CampaignMissionCatalog.hpp"
+#include "coopstory/bridge/ExactEncounterCatalog.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -37,8 +39,58 @@
 namespace coopstory::bridge::sdk {
 namespace {
 
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+// Present in the build-1491.50 command dump but absent from the older SDK
+// header. This is still an ordinary ScriptHook typed native invocation: no
+// pattern scanning or process-memory access. The native declares an opaque
+// output structure, so give it bounded local storage rather than a null
+// pointer.
+[[nodiscard]] Hash QueryEntityScriptHash(const Entity entity) noexcept {
+    std::array<Any, 16U> argumentStorage{};
+    return invoke<Hash>(0x2A08A32B6D49906FULL, entity,
+        argumentStorage.data());
+}
+#endif
+
 constexpr std::uintmax_t kBridgeLogMaxBytes = 8U * 1024U * 1024U;
 constexpr unsigned int kBridgeLogArchiveCount = 3U;
+constexpr std::uint64_t kAmbientEncounterRediscoveryCooldownMs = 90'000U;
+
+[[nodiscard]] constexpr std::size_t AmbientHostileCount(
+    const AmbientEncounterProfile profile) noexcept {
+    switch (profile) {
+        case AmbientEncounterProfile::RoadsideAmbush: return 4U;
+        case AmbientEncounterProfile::HostageRescue: return 2U;
+        case AmbientEncounterProfile::WagonDefense: return 3U;
+        case AmbientEncounterProfile::AnimalAttack: return 1U;
+        case AmbientEncounterProfile::CampClearout: return 6U;
+    }
+    return 0U;
+}
+
+[[nodiscard]] constexpr std::size_t AmbientProtectedCivilianCount(
+    const AmbientEncounterProfile profile) noexcept {
+    switch (profile) {
+        case AmbientEncounterProfile::HostageRescue: return 1U;
+        case AmbientEncounterProfile::WagonDefense: return 2U;
+        case AmbientEncounterProfile::AnimalAttack: return 1U;
+        case AmbientEncounterProfile::RoadsideAmbush:
+        case AmbientEncounterProfile::CampClearout: return 0U;
+    }
+    return 0U;
+}
+
+[[nodiscard]] constexpr const char* AmbientProfileName(
+    const AmbientEncounterProfile profile) noexcept {
+    switch (profile) {
+        case AmbientEncounterProfile::RoadsideAmbush: return "roadside-ambush";
+        case AmbientEncounterProfile::HostageRescue: return "hostage-rescue";
+        case AmbientEncounterProfile::WagonDefense: return "wagon-defense";
+        case AmbientEncounterProfile::AnimalAttack: return "animal-attack";
+        case AmbientEncounterProfile::CampClearout: return "camp-clearout";
+    }
+    return "unknown";
+}
 
 // Shared capabilities are intentionally opt-in.  A valid wire record is not
 // enough authority to alter a Story save: each native mapping has to be
@@ -3466,6 +3518,10 @@ ScriptHookSdkFacade::~ScriptHookSdkFacade() {
         missionFlagOverrideActive_ = false;
         missionFlagOriginalCaptured_ = false;
     }
+    if (ambientEncounterPresentation_.has_value()) {
+        ClearAmbientEncounterPresentation(
+            ambientEncounterPresentation_->instanceId);
+    }
     CleanupWorldEntityProxies();
     RestoreHiddenAmbientPeds();
     ClearRemoteMount();
@@ -5132,6 +5188,430 @@ ScriptHookSdkFacade::SampleWorldState() noexcept {
 #endif
 }
 
+std::optional<AmbientEncounterObservation>
+ScriptHookSdkFacade::SampleAmbientEncounterObservation() noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        if (ambientEncounterPresentation_.has_value()) return std::nullopt;
+        const auto local = PLAYER::PLAYER_PED_ID();
+        if (local == 0 || ENTITY::DOES_ENTITY_EXIST(local) == FALSE) {
+            return std::nullopt;
+        }
+        const auto nowMs = TickMilliseconds();
+        const auto localPosition = ToBridgeVector(
+            ENTITY::GET_ENTITY_COORDS(local, TRUE, FALSE));
+        if (!IsFinite(localPosition)) return std::nullopt;
+
+        std::array<int, kWorldPedPoolCapacity> peds{};
+        const auto count = std::clamp(worldGetAllPeds(peds.data(),
+            static_cast<int>(peds.size())), 0, static_cast<int>(peds.size()));
+        const BridgeOwnedEncounterDefinition* nearest{};
+        Vec3 nearestPosition{};
+        float nearestDistance{std::numeric_limits<float>::infinity()};
+        for (int index{}; index < count; ++index) {
+            const auto ped = static_cast<Ped>(peds[index]);
+            if (ped == 0 || ped == local ||
+                ENTITY::DOES_ENTITY_EXIST(ped) == FALSE) {
+                continue;
+            }
+            const auto position = ToBridgeVector(
+                ENTITY::GET_ENTITY_COORDS(ped, TRUE, FALSE));
+            const auto distance = Distance(localPosition, position);
+            if (!IsFinite(position) || !std::isfinite(distance) ||
+                distance > 55.0F) {
+                continue;
+            }
+            const auto scriptId = static_cast<std::uint32_t>(
+                QueryEntityScriptHash(ped));
+            const auto* definition = FindBridgeOwnedEncounter(scriptId);
+            if (definition == nullptr || distance >= nearestDistance) {
+                continue;
+            }
+            if (scriptId == ambientEncounterCooldownScriptId_ &&
+                nowMs < ambientEncounterCooldownUntilMs_) {
+                continue;
+            }
+            nearest = definition;
+            nearestPosition = position;
+            nearestDistance = distance;
+        }
+        if (nearest == nullptr) return std::nullopt;
+
+        // The anchor and seed are bounded local evidence. The host still
+        // checks peer distance, Story/cinematic state and the one-active-event
+        // rule before this can become a shared activity.
+        const auto seed = nearest->scriptId ^
+            static_cast<std::uint32_t>(std::lround(nearestPosition.x * 10.0F)) ^
+            (static_cast<std::uint32_t>(std::lround(nearestPosition.y * 10.0F)) << 1U);
+        return AmbientEncounterObservation{
+            nearest->profile, nearestPosition, 32.0F, nearest->scriptId, seed};
+#endif
+    } catch (...) {
+        Log("[AMBIENT_ENCOUNTER] catalog detector failed closed");
+    }
+    return std::nullopt;
+}
+
+std::optional<ExactEncounterObservation>
+ScriptHookSdkFacade::SampleExactEncounterObservation() noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        const auto local = PLAYER::PLAYER_PED_ID();
+        if (local == 0 || ENTITY::DOES_ENTITY_EXIST(local) == FALSE) {
+            return std::nullopt;
+        }
+        const auto localPosition = ToBridgeVector(
+            ENTITY::GET_ENTITY_COORDS(local, TRUE, FALSE));
+        if (!IsFinite(localPosition)) return std::nullopt;
+        std::array<int, kWorldPedPoolCapacity> peds{};
+        const auto count = std::clamp(worldGetAllPeds(peds.data(),
+            static_cast<int>(peds.size())), 0, static_cast<int>(peds.size()));
+        for (int index{}; index < count; ++index) {
+            const auto ped = static_cast<Ped>(peds[index]);
+            if (ped == 0 || ped == local || ENTITY::DOES_ENTITY_EXIST(ped) == FALSE) continue;
+            const auto position = ToBridgeVector(ENTITY::GET_ENTITY_COORDS(ped, TRUE, FALSE));
+            if (!IsFinite(position) || Distance(localPosition, position) > 45.0F) continue;
+            const auto script = static_cast<std::uint32_t>(QueryEntityScriptHash(ped));
+            if (script == kExtortionEncounter.scriptId) {
+                return ExactEncounterObservation{script, position, true};
+            }
+        }
+#endif
+    } catch (...) {
+        Log("[EXACT_ENCOUNTER] entity-script query failed closed");
+    }
+    return std::nullopt;
+}
+
+bool ScriptHookSdkFacade::BeginAmbientEncounterPresentation(
+    const AmbientEncounterInstance& instance) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        if (instance.instanceId == 0U ||
+            !IsFinite(instance.anchor) ||
+            !std::isfinite(instance.radiusMeters) ||
+            instance.radiusMeters < 8.0F ||
+            instance.radiusMeters > 80.0F) {
+            return false;
+        }
+        if (ambientEncounterPresentation_.has_value()) {
+            if (ambientEncounterPresentation_->instanceId == instance.instanceId) {
+                return true;
+            }
+            ClearAmbientEncounterPresentation(
+                ambientEncounterPresentation_->instanceId);
+        }
+
+        // A shared encounter has one physical authority.  The host creates
+        // the actors once; the guest receives them through WorldMirror, where
+        // its normal DamageIntent path can still affect the host actors.  A
+        // second guest-local roster would create two fights and two outcomes.
+        if (!instance.localAuthority) {
+            return true;
+        }
+        const auto sourceScriptId = instance.exactEventId != 0U
+            ? instance.exactEventId
+            : instance.sourceEvidenceHash;
+        const auto exactExtortion = sourceScriptId ==
+            kExtortionEncounter.scriptId;
+        const auto* catalogDefinition = FindBridgeOwnedEncounter(sourceScriptId);
+        if ((!exactExtortion && catalogDefinition == nullptr) ||
+            (catalogDefinition != nullptr &&
+             catalogDefinition->profile != instance.profile) ||
+            instance.rosterCount !=
+                AmbientHostileCount(instance.profile) +
+                    AmbientProtectedCivilianCount(instance.profile)) {
+            return false;
+        }
+
+        const auto local = PLAYER::PLAYER_PED_ID();
+        if (local == 0 || ENTITY::DOES_ENTITY_EXIST(local) == FALSE) {
+            return false;
+        }
+        const auto fallbackModel = ENTITY::GET_ENTITY_MODEL(local);
+        if (fallbackModel == 0U ||
+            STREAMING::IS_MODEL_VALID(fallbackModel) == FALSE) {
+            return false;
+        }
+
+        std::vector<Hash> sourceModels;
+        std::vector<Hash> sourceAnimalModels;
+        std::vector<Ped> sourcePeds;
+        std::array<int, kWorldPedPoolCapacity> peds{};
+        const auto count = std::clamp(
+            worldGetAllPeds(peds.data(), static_cast<int>(peds.size())),
+            0,
+            static_cast<int>(peds.size()));
+        for (int index{}; index < count; ++index) {
+            const auto ped = static_cast<Ped>(peds[index]);
+            if (ped == 0 || ped == local ||
+                ENTITY::DOES_ENTITY_EXIST(ped) == FALSE) {
+                continue;
+            }
+            const auto position = ToBridgeVector(
+                ENTITY::GET_ENTITY_COORDS(ped, TRUE, FALSE));
+            if (!IsFinite(position) ||
+                Distance(position, instance.anchor) > 45.0F ||
+                static_cast<std::uint32_t>(QueryEntityScriptHash(ped)) !=
+                    sourceScriptId) {
+                continue;
+            }
+            sourcePeds.push_back(ped);
+            const auto model = ENTITY::GET_ENTITY_MODEL(ped);
+            if (model != 0U && STREAMING::IS_MODEL_VALID(model) != FALSE) {
+                sourceModels.push_back(model);
+                if (PED::IS_PED_HUMAN(ped) == FALSE) {
+                    sourceAnimalModels.push_back(model);
+                }
+            }
+        }
+        // Host-originated scenes use their observed source cast for the
+        // visual replacement. A guest-originated generic proposal can still
+        // be adopted when the host has no matching local beat: use the host
+        // player's loaded Story model and create no source mask. Exact
+        // adaptations and animal scenes stay fail-closed without their local
+        // source species evidence.
+        if ((exactExtortion && sourcePeds.empty()) ||
+            (instance.profile == AmbientEncounterProfile::AnimalAttack &&
+             sourceAnimalModels.empty())) {
+            return false;
+        }
+
+        ambientEncounterPresentation_.emplace();
+        auto& presentation = *ambientEncounterPresentation_;
+        presentation.instanceId = instance.instanceId;
+        presentation.profile = instance.profile;
+        presentation.sourceScriptId = sourceScriptId;
+        presentation.hostileCount = AmbientHostileCount(instance.profile);
+        presentation.protectedCivilianCount =
+            AmbientProtectedCivilianCount(instance.profile);
+        presentation.peds.reserve(instance.rosterCount);
+
+        const std::array<Vec3, 6U> offsets{{
+            {-3.0F, -1.5F, 0.0F},
+            { 3.0F, -1.0F, 0.0F},
+            { 0.0F,  2.5F, 0.0F},
+            {-5.0F,  2.0F, 0.0F},
+            { 5.0F,  2.5F, 0.0F},
+            { 0.0F, -4.0F, 0.0F}}};
+        char cattlemanName[] = "WEAPON_REVOLVER_CATTLEMAN";
+        const auto cattleman = GAMEPLAY::GET_HASH_KEY(cattlemanName);
+        for (std::size_t index{}; index < instance.rosterCount; ++index) {
+            const auto& preferredModels =
+                instance.profile == AmbientEncounterProfile::AnimalAttack &&
+                    index < presentation.hostileCount
+                ? sourceAnimalModels
+                : sourceModels;
+            const auto requestedModel = preferredModels.empty()
+                ? fallbackModel
+                : preferredModels[index % preferredModels.size()];
+            if (STREAMING::IS_MODEL_VALID(requestedModel) == FALSE ||
+                STREAMING::HAS_MODEL_LOADED(requestedModel) == FALSE) {
+                ClearAmbientEncounterPresentation(instance.instanceId);
+                return false;
+            }
+            const Vec3 requestedPosition{
+                instance.anchor.x + offsets[index].x,
+                instance.anchor.y + offsets[index].y,
+                instance.anchor.z};
+            const auto spawn = GroundSafePosition(requestedPosition);
+            const auto ped = PED::CREATE_PED(
+                requestedModel,
+                spawn.x,
+                spawn.y,
+                spawn.z,
+                std::fmod(
+                    static_cast<float>(instance.rosterSeed % 360U) +
+                        static_cast<float>(index) * 120.0F,
+                    360.0F),
+                FALSE,
+                TRUE,
+                FALSE,
+                FALSE);
+            if (ped == 0 || ENTITY::DOES_ENTITY_EXIST(ped) == FALSE) {
+                ClearAmbientEncounterPresentation(instance.instanceId);
+                return false;
+            }
+            presentation.peds.push_back(ped);
+            ENTITY::SET_ENTITY_AS_MISSION_ENTITY(ped, TRUE, TRUE);
+            ENTITY::SET_ENTITY_LOAD_COLLISION_FLAG(ped, TRUE);
+            ENTITY::SET_ENTITY_HAS_GRAVITY(ped, TRUE);
+            ENTITY::SET_ENTITY_COLLISION(ped, TRUE, TRUE);
+            ENTITY::SET_ENTITY_CAN_BE_DAMAGED(ped, TRUE);
+            ENTITY::SET_ENTITY_VISIBLE(ped, TRUE);
+            ENTITY::RESET_ENTITY_ALPHA(ped);
+            SetRandomOutfitVariation(ped);
+            PED::SET_BLOCKING_OF_NON_TEMPORARY_EVENTS(ped, TRUE);
+            PED::SET_PED_KEEP_TASK(ped, TRUE);
+
+            if (index < presentation.hostileCount) {
+                if (instance.profile != AmbientEncounterProfile::AnimalAttack &&
+                    cattleman != 0U &&
+                    WEAPON::IS_WEAPON_VALID(cattleman) != FALSE) {
+                    WEAPON::GIVE_DELAYED_WEAPON_TO_PED(
+                        ped, cattleman, 24, TRUE, 0);
+                    WEAPON::SET_PED_AMMO(ped, cattleman, 24);
+                    WEAPON::SET_CURRENT_PED_WEAPON(
+                        ped, cattleman, TRUE, 0, FALSE, FALSE);
+                }
+                // The host is the only physical authority. Its combat task
+                // is mirrored to the guest as ordinary bridge-owned proxies;
+                // guest damage returns through the authenticated DamageIntent
+                // lane, so a second local combat simulation is never created.
+                AI::TASK_COMBAT_PED(ped, local, 0, 0);
+            } else {
+                AI::TASK_STAND_STILL(ped, 60'000);
+            }
+        }
+
+        // The detected Rockstar actors remain owned by their local script.
+        // During the bridge scene only, mask them reversibly so the player
+        // does not see two copies. Never delete, damage, reward or otherwise
+        // advance those source actors.
+        for (const auto source : sourcePeds) {
+            if (source == 0 || ENTITY::DOES_ENTITY_EXIST(source) == FALSE) {
+                continue;
+            }
+            presentation.suppressedSourcePeds.push_back({
+                source,
+                static_cast<std::uint32_t>(ENTITY::GET_ENTITY_MODEL(source)),
+                ENTITY::IS_ENTITY_VISIBLE(source) != FALSE ||
+                    ENTITY::GET_ENTITY_ALPHA(source) > 0});
+            ENTITY::SET_ENTITY_VISIBLE(source, FALSE);
+            ENTITY::SET_ENTITY_ALPHA(source, 0, FALSE);
+            ENTITY::SET_ENTITY_COLLISION(source, FALSE, TRUE);
+        }
+        Log("[AMBIENT_ENCOUNTER] bridge scene materialized profile=" +
+            std::string{AmbientProfileName(instance.profile)} +
+            ", script=" + std::to_string(sourceScriptId) +
+            ", host-peds=" +
+            std::to_string(presentation.peds.size()) +
+            ", masked-source-peds=" +
+            std::to_string(presentation.suppressedSourcePeds.size()) +
+            ", reward-policy=local-vanilla-only");
+        return true;
+#else
+        (void)instance;
+#endif
+    } catch (...) {
+        if (ambientEncounterPresentation_.has_value() &&
+            ambientEncounterPresentation_->instanceId == instance.instanceId) {
+            ClearAmbientEncounterPresentation(instance.instanceId);
+        }
+        Log("[AMBIENT_ENCOUNTER] failed to materialize bridge scene");
+    }
+    return false;
+}
+
+std::optional<AmbientEncounterPhase>
+ScriptHookSdkFacade::SampleAmbientEncounterOutcome(
+    const std::uint64_t instanceId) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        if (!ambientEncounterPresentation_.has_value() ||
+            ambientEncounterPresentation_->instanceId != instanceId) {
+            return std::nullopt;
+        }
+        auto& presentation = *ambientEncounterPresentation_;
+        for (const auto& source : presentation.suppressedSourcePeds) {
+            if (source.handle != 0 &&
+                ENTITY::DOES_ENTITY_EXIST(source.handle) != FALSE &&
+                static_cast<std::uint32_t>(
+                    ENTITY::GET_ENTITY_MODEL(source.handle)) == source.modelHash &&
+                static_cast<std::uint32_t>(
+                    QueryEntityScriptHash(source.handle)) ==
+                    presentation.sourceScriptId) {
+                ENTITY::SET_ENTITY_VISIBLE(source.handle, FALSE);
+                ENTITY::SET_ENTITY_ALPHA(source.handle, 0, FALSE);
+                ENTITY::SET_ENTITY_COLLISION(source.handle, FALSE, TRUE);
+            }
+        }
+        const auto local = PLAYER::PLAYER_PED_ID();
+        if (local == 0 || ENTITY::DOES_ENTITY_EXIST(local) == FALSE ||
+            PLAYER::IS_PLAYER_DEAD(PLAYER::PLAYER_ID()) != FALSE) {
+            return AmbientEncounterPhase::Failed;
+        }
+        bool allHostilesDefeated = presentation.hostileCount != 0U;
+        for (std::size_t index{};
+             index < presentation.hostileCount && index < presentation.peds.size();
+             ++index) {
+            const auto hostile = presentation.peds[index];
+            if (hostile != 0 &&
+                ENTITY::DOES_ENTITY_EXIST(hostile) != FALSE &&
+                PED::IS_PED_DEAD_OR_DYING(hostile, TRUE) == FALSE) {
+                allHostilesDefeated = false;
+                break;
+            }
+        }
+        if (allHostilesDefeated) {
+            return AmbientEncounterPhase::Succeeded;
+        }
+        for (std::size_t index{};
+             index < presentation.protectedCivilianCount &&
+             presentation.hostileCount + index < presentation.peds.size();
+             ++index) {
+            const auto civilian =
+                presentation.peds[presentation.hostileCount + index];
+            if (civilian == 0 || ENTITY::DOES_ENTITY_EXIST(civilian) == FALSE ||
+                PED::IS_PED_DEAD_OR_DYING(civilian, TRUE) != FALSE) {
+                return AmbientEncounterPhase::Failed;
+            }
+        }
+#else
+        (void)instanceId;
+#endif
+    } catch (...) {
+        Log("[EXACT_ENCOUNTER] outcome sample failed closed");
+        return AmbientEncounterPhase::Abandoned;
+    }
+    return std::nullopt;
+}
+
+void ScriptHookSdkFacade::ClearAmbientEncounterPresentation(
+    const std::uint64_t instanceId) noexcept {
+    try {
+        if (!ambientEncounterPresentation_.has_value() ||
+            ambientEncounterPresentation_->instanceId != instanceId) {
+            return;
+        }
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        for (const auto& source :
+             ambientEncounterPresentation_->suppressedSourcePeds) {
+            if (source.handle == 0 ||
+                ENTITY::DOES_ENTITY_EXIST(source.handle) == FALSE ||
+                static_cast<std::uint32_t>(
+                    ENTITY::GET_ENTITY_MODEL(source.handle)) != source.modelHash ||
+                static_cast<std::uint32_t>(
+                    QueryEntityScriptHash(source.handle)) !=
+                    ambientEncounterPresentation_->sourceScriptId) {
+                continue;
+            }
+            ENTITY::SET_ENTITY_VISIBLE(
+                source.handle, source.wasVisible ? TRUE : FALSE);
+            if (source.wasVisible) {
+                ENTITY::RESET_ENTITY_ALPHA(source.handle);
+            }
+            ENTITY::SET_ENTITY_COLLISION(source.handle, TRUE, TRUE);
+        }
+        if (!abandonNativeCleanupAfterFatal_) {
+            for (const auto source : ambientEncounterPresentation_->peds) {
+                auto ped = source;
+                if (ped != 0 && ENTITY::DOES_ENTITY_EXIST(ped) != FALSE) {
+                    PED::DELETE_PED(&ped);
+                }
+            }
+        }
+#endif
+        ambientEncounterCooldownScriptId_ =
+            ambientEncounterPresentation_->sourceScriptId;
+        ambientEncounterCooldownUntilMs_ = TickMilliseconds() +
+            kAmbientEncounterRediscoveryCooldownMs;
+        ambientEncounterPresentation_.reset();
+    } catch (...) {
+        ambientEncounterPresentation_.reset();
+    }
+}
+
 std::vector<HostWorldEntitySample>
 ScriptHookSdkFacade::SampleWorldEntities(
     const float radiusMeters,
@@ -5250,8 +5730,19 @@ ScriptHookSdkFacade::SampleWorldEntities(
             // Script-owned shopkeepers, side interactions and mission actors
             // may exist while the coarse global mission flag is false. Treat
             // entity ownership itself as authoritative admission metadata.
+            // Bridge-owned encounter actors are deliberately not advertised
+            // as Story script actors even though we retain them as mission
+            // entities for safe cleanup.  That keeps guest damage on the
+            // ordinary ambient DamageIntent path rather than the much more
+            // restrictive mission-actor path.
+            const bool bridgeOwnedEncounterEntity =
+                ambientEncounterPresentation_.has_value() &&
+                std::ranges::find(
+                    ambientEncounterPresentation_->peds,
+                    ped) != ambientEncounterPresentation_->peds.end();
             const bool scriptOwnedEntity =
-                ENTITY::IS_ENTITY_A_MISSION_ENTITY(ped) != FALSE;
+                ENTITY::IS_ENTITY_A_MISSION_ENTITY(ped) != FALSE &&
+                !bridgeOwnedEncounterEntity;
             const bool visibleEntity =
                 ENTITY::IS_ENTITY_VISIBLE(ped) != FALSE &&
                 ENTITY::GET_ENTITY_ALPHA(ped) > 0;
@@ -5285,11 +5776,13 @@ ScriptHookSdkFacade::SampleWorldEntities(
             // while their mission outfit/graph is being assembled. They are
             // still mission actors and must not vanish from the host graph.
             const bool human =
-                reliableHuman || (scriptOwnedEntity && !horse);
+                reliableHuman ||
+                ((scriptOwnedEntity || bridgeOwnedEncounterEntity) && !horse);
             const bool globalMissionEntity =
                 missionActive && scriptOwnedEntity;
             if (!IsMirrorablePopulationType(populationType) &&
-                !scriptOwnedEntity) {
+                !scriptOwnedEntity &&
+                !bridgeOwnedEncounterEntity) {
                 ++rejectedPopulation;
                 continue;
             }
@@ -14034,6 +14527,14 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 (entry.state.flags &
                  static_cast<std::uint8_t>(
                      WorldEntityStateFlag::Dead)) != 0U;
+            // Live world replicas are deliberately invulnerable: a local
+            // projectile becomes an authenticated DamageIntent and the host
+            // alone applies the actual damage. Once the host has declared a
+            // ped dead, restore ordinary corpse physics before setting zero
+            // health. That leaves the local vanilla loot prompt/roll in
+            // charge for the bounded corpse-retention window; no loot state
+            // is sampled, transmitted, or applied by the bridge.
+            ENTITY::SET_ENTITY_CAN_BE_DAMAGED(ped, dead ? TRUE : FALSE);
             const auto maximumHealth =
                 std::max(
                     ENTITY::GET_ENTITY_MAX_HEALTH(

@@ -127,6 +127,68 @@ public readonly record struct MissionDialogueReadyPayload(
     ushort LineIndex,
     MissionDialogueReadyState State);
 
+// Bridge-owned ambient activities. These deliberately do not name or start
+// Rockstar random-event scripts, which are not deterministic across saves.
+public enum AmbientEncounterProfile : byte
+{
+    RoadsideAmbush = 1,
+    HostageRescue = 2,
+    WagonDefense = 3,
+    AnimalAttack = 4,
+    CampClearout = 5
+}
+
+public enum AmbientEncounterPhase : byte
+{
+    Proposed = 1,
+    Preparing = 2,
+    Active = 3,
+    Succeeded = 4,
+    Failed = 5,
+    Abandoned = 6
+}
+
+public enum AmbientEncounterRejection : byte
+{
+    None = 0,
+    UnsupportedProfile = 1,
+    HostUnavailable = 2,
+    ParticipantUnsafe = 3,
+    TooFarAway = 4,
+    Busy = 5,
+    InvalidAnchor = 6
+}
+
+public enum AmbientEncounterPeerDisposition : byte
+{
+    Unknown = 0,
+    Participant = 1,
+    Companion = 2
+}
+
+public readonly record struct AmbientEncounterProposalPayload(
+    NetEntityId GuestEntityId,
+    ulong ProposalId,
+    AmbientEncounterProfile Profile,
+    Vector3 Anchor,
+    float RadiusMeters,
+    uint LocalEvidenceHash,
+    uint SuggestedRosterSeed);
+
+public readonly record struct AmbientEncounterStatePayload(
+    NetEntityId HostEntityId,
+    ulong InstanceId,
+    AmbientEncounterProfile Profile,
+    AmbientEncounterPhase Phase,
+    AmbientEncounterRejection Rejection,
+    Vector3 Anchor,
+    float RadiusMeters,
+    uint RosterSeed,
+    ushort RosterCount,
+    ulong HostStartTick,
+    uint ExactEventId,
+    AmbientEncounterPeerDisposition GuestDisposition);
+
 // Positive native collection evidence only. No money, items, or private
 // inventory is allowed on this channel.
 public readonly record struct PickupCollectedPayload(

@@ -167,6 +167,20 @@ private:
     void SendMissionDialogueReady(
         const MissionDialogueCuePayload& cue,
         MissionDialogueReadyState state);
+    void TickAmbientEncounter(
+        const LocalPlayerSample& sample,
+        PlayerSlot localSlot,
+        std::uint64_t nowMs);
+    void HandleRemoteAmbientEncounterProposal(
+        const Frame& frame,
+        const AmbientEncounterProposalPayload& proposal);
+    void HandleRemoteAmbientEncounterState(
+        const Frame& frame,
+        const AmbientEncounterStatePayload& state);
+    void StartPreparedAmbientEncounter(std::uint64_t nowMs);
+    void PublishAmbientEncounterState(
+        const AmbientEncounterInstance& instance,
+        std::uint64_t nowMs);
     void HandleRemoteMissionProgression(
         const MissionProgressionPayload& payload);
     void TickMissionCinematic(
@@ -315,6 +329,8 @@ private:
     SequenceWindow remoteMissionSequences_{};
     SequenceWindow remoteMissionDialogueCueSequences_{};
     SequenceWindow remoteMissionDialogueReadySequences_{};
+    SequenceWindow remoteAmbientEncounterProposalSequences_{};
+    SequenceWindow remoteAmbientEncounterStateSequences_{};
     SequenceWindow remoteMissionCameraSequences_{};
     SequenceWindow remoteMissionCinematicSequences_{};
     SequenceWindow remoteMissionCinematicActionSequences_{};
@@ -345,6 +361,16 @@ private:
     std::optional<MissionDialogueCuePayload> remoteMissionDialogueCue_{};
     std::optional<MissionDialogueCuePayload> pendingHostMissionDialogueCue_{};
     std::optional<MissionDialogueReadyPayload> remoteMissionDialogueReady_{};
+    AmbientEncounterCoordinator ambientEncounterCoordinator_{};
+    std::optional<AmbientEncounterStatePayload> remoteAmbientEncounter_{};
+    std::uint64_t localAmbientEncounterProposalId_{};
+    std::uint64_t localAmbientEncounterProposalExpiresMs_{};
+    std::uint64_t localAmbientEncounterInstanceId_{};
+    std::uint64_t localAmbientEncounterTerminalAtMs_{};
+    std::uint64_t remoteAmbientEncounterTerminalAtMs_{};
+    std::uint64_t localExactEncounterPreflightDeadlineMs_{};
+    std::uint64_t nextExactEncounterPreflightPublishMs_{};
+    std::uint64_t remoteExactEncounterPreflightInstanceId_{};
     std::uint32_t localMissionDialogueSequence_{};
     std::uint64_t lastMissionDialogueCueSentMs_{};
     std::uint64_t pendingHostMissionDialogueDueMs_{};

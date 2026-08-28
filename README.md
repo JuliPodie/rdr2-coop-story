@@ -37,9 +37,12 @@ so test one feature group at a time and keep backup saves.
   ownership, lobby, password flow, and redacted diagnostics;
 - a C++20 Story Mode bridge and Script Hook facade;
 - a separate .NET sidecar for authenticated TCP/UDP networking;
-- binary protocol 26, interpolation, entity and animation replication contracts;
+- binary protocol 32, interpolation, entity and animation replication contracts;
 - reconnect, world mirror, mission presentation, player action, mount, and
   diagnostics experiments;
+- 50 reviewed ambient-event detections mapped to five bridge-owned co-op
+  profiles: 35 roadside ambushes, five rescues, three wagon defenses, three
+  animal attacks, and four camp clear-outs;
 - C# and C++ self-tests;
 - architecture, protocol, test, and development-history documentation.
 
@@ -70,7 +73,7 @@ author. Never upload those files to this repository or attach them to a release.
 | Script Hook RDR2 SDK        | `1.0.1207.73`                |
 | .NET SDK                    | `10.0.203`                   |
 | Native build                | C++20, CMake 3.25+, MSVC x64 |
-| Private tester build        | protocol `23`                |
+| Private tester build        | protocol `32`                |
 
 The Script Hook runtime and SDK are not vendored. The original author’s page is
 [dev-c.com/rdr2/scripthookrdr2](http://www.dev-c.com/rdr2/scripthookrdr2/).

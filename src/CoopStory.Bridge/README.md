@@ -56,7 +56,7 @@ passed only through the current-user IPC pipe and the Windows clipboard. `F10`
 hides or restores the top status bar, while `F9` opens the diagnostic command
 menu. The invite secret is never written to bridge logs.
 The host is the sole Story-mission authority. The guest receives the host's
-mission epoch, phase, safe anchor and companion objective marker. Protocol 30
+mission epoch, phase, safe anchor and companion objective marker. Protocol 32
 can briefly permit the guest's own vanilla prompt only when the host is already
 in the exact catalog MissionData entry and the guest independently proved that
 same entry startable: guest activation and host release are both explicit. A
@@ -72,7 +72,68 @@ diagnostic menu. The actual RDR2 checkpoint-retry native remains unverified and
 therefore fail-closed. The simulator exercises these bridge-side authority and
 isolation paths without launching the game.
 
-Protocol 30 adds a deny-by-default per-mission progression handshake and
+## Co-op ambient encounters
+
+Protocol 32 also defines a host-authoritative coordinator for bridge-owned
+ambient profiles: roadside ambush, hostage rescue, wagon defense, animal attack
+and camp clear-out. A host can start a profile; a guest can initiate a profile
+proposal or answer an exact-event preflight, but only the host publishes an
+accepted instance and outcome.
+The host checks session readiness, mission/cinematic safety, a bounded anchor,
+participant distance and whether another encounter is active. It then sends a
+stable instance ID, deterministic roster seed, phase and outcome. An exact
+event may additionally use a short guest preflight before activation. Terminal
+states are retained briefly, then all bridge-created presentation is cleaned up;
+separation beyond 160 m abandons the activity. Loot, collectibles, random-event
+scripts, law state and campaign rewards remain local/private.
+
+With the explicit unverified-native-binding switch enabled, the native facade
+detects the 50 reviewed 1491.50 free-roam script IDs in
+`BridgeOwnedEncounterCatalog.hpp`: 35 roadside ambushes, five hostage rescues,
+three wagon defenses, three animal attacks, and four camp clear-outs. Each one
+maps only to one of the five bounded bridge profiles, never to a remote run of
+Rockstar's source script. The host creates the sole physical actor roster and
+the guest receives it through the host-authoritative world-entity lane; guest
+shots use the existing validated damage-intent path. Native source actors are
+masked only for the replacement scene and restored at cleanup. The bridge
+does not pause, delete, reward, or progress those native scripts. A generic
+guest-originated proposal can use the host's fallback Story model when no
+matching host script is loaded; an animal scene fails closed until the host can
+observe an actual local animal source model.
+
+The experimental exact-ID **Valentine Extortion** adaptation
+(`beat_odriscoll_town_encounter`) adds a two-second guest preflight. A matching
+guest is recorded as a **participant**; a save where the beat is unavailable
+(or a missed reply) is explicitly recorded as a **companion**. It uses the
+same host-owned three-ped rescue profile, but still has no special reward or
+Honor mapping.
+
+Extortion has no bridge reward mapping or corpse-loot tracking. The bridge
+leaves ordinary interaction with the bridge-created/mirrored generic bandit
+corpses to each local vanilla game for a 30-second cleanup window. A companion
+may therefore receive only whatever generic money, ammunition, or provisions
+their own local corpse roll offers; this needs live two-PC validation. The
+bridge never grants a weapon variant, document, recipe, collectible, mission
+item, cash packet, Honor, or campaign progress. During every bridge-owned
+encounter window it also discards the otherwise itemless map-pickup and
+capability telemetry, so corpse interaction cannot become a side-channel for
+either player. Unknown ambient scripts remain local.
+
+### Extortion two-PC validation
+
+Use two disposable Story saves in calm free roam, keep the pair within 120 m,
+and let the host approach the Valentine Extortion beat. The host log must show
+`host detected Extortion; awaiting guest preflight`; the guest then logs either
+`guest preflight=participant` when that save also exposes the exact beat, or
+`guest preflight=companion` otherwise. Both cases receive the same
+host-authoritative generic three-ped scene and may shoot its bandits. After the
+host reports success, each player checks their own local bandit corpse during
+the 30-second retention window. Any offered money, ammunition, or provisions
+must stay local; no special revolver, document, recipe, collectible, mission
+item, Honor change, cash packet, or progression update is expected. The host
+then despawns the scene after the retention window.
+
+Protocol 32 adds a deny-by-default per-mission progression handshake and
 matching-instance start barrier. When an
 allow-listed Story mission becomes active, the host sends its exact MissionData
 hash. The guest accepts only an exact valid, required, incomplete and unrated

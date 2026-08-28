@@ -1,6 +1,7 @@
 #pragma once
 
 #include "coopstory/bridge/Domain.hpp"
+#include "coopstory/bridge/AmbientEncounterCoordinator.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +13,7 @@
 namespace coopstory::bridge {
 
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
-inline constexpr std::uint16_t kProtocolVersion = 30U;
+inline constexpr std::uint16_t kProtocolVersion = 32U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
@@ -70,6 +71,8 @@ enum class MessageType : std::uint16_t {
     MissionDialogueCue = 46,
     // Guest -> host: readiness/diagnostic for the exact cue identity.
     MissionDialogueReady = 47,
+    AmbientEncounterProposal = 48,
+    AmbientEncounterState = 49,
 };
 
 [[nodiscard]] bool IsKnownMessageType(std::uint16_t value) noexcept;
@@ -1207,6 +1210,55 @@ inline constexpr std::size_t kMissionDialogueReadyPayloadSize = 32U;
     const MissionDialogueReadyPayload& payload);
 [[nodiscard]] std::optional<MissionDialogueReadyPayload> DecodeMissionDialogueReady(
     std::span<const std::uint8_t> bytes);
+
+struct AmbientEncounterProposalPayload final {
+    NetEntityId guestEntityId{};
+    std::uint64_t proposalId{};
+    AmbientEncounterProfile profile{AmbientEncounterProfile::RoadsideAmbush};
+    Vec3 anchor{};
+    float radiusMeters{};
+    std::uint32_t localEvidenceHash{};
+    std::uint32_t suggestedRosterSeed{};
+    friend bool operator==(const AmbientEncounterProposalPayload& a,
+        const AmbientEncounterProposalPayload& b) noexcept {
+        return a.guestEntityId == b.guestEntityId && a.proposalId == b.proposalId &&
+            a.profile == b.profile && a.anchor.x == b.anchor.x && a.anchor.y == b.anchor.y &&
+            a.anchor.z == b.anchor.z && a.radiusMeters == b.radiusMeters &&
+            a.localEvidenceHash == b.localEvidenceHash && a.suggestedRosterSeed == b.suggestedRosterSeed;
+    }
+};
+inline constexpr std::size_t kAmbientEncounterProposalPayloadSize = 48U;
+[[nodiscard]] std::vector<std::uint8_t> EncodeAmbientEncounterProposal(const AmbientEncounterProposalPayload& payload);
+[[nodiscard]] std::optional<AmbientEncounterProposalPayload> DecodeAmbientEncounterProposal(std::span<const std::uint8_t> bytes);
+
+struct AmbientEncounterStatePayload final {
+    NetEntityId hostEntityId{};
+    std::uint64_t instanceId{};
+    AmbientEncounterProfile profile{AmbientEncounterProfile::RoadsideAmbush};
+    AmbientEncounterPhase phase{AmbientEncounterPhase::Proposed};
+    AmbientEncounterRejection rejection{AmbientEncounterRejection::None};
+    Vec3 anchor{};
+    float radiusMeters{};
+    std::uint32_t rosterSeed{};
+    std::uint16_t rosterCount{};
+    std::uint64_t hostStartTick{};
+    std::uint32_t exactEventId{};
+    AmbientEncounterPeerDisposition guestDisposition{
+        AmbientEncounterPeerDisposition::Unknown};
+    friend bool operator==(const AmbientEncounterStatePayload& a,
+        const AmbientEncounterStatePayload& b) noexcept {
+        return a.hostEntityId == b.hostEntityId && a.instanceId == b.instanceId &&
+            a.profile == b.profile && a.phase == b.phase && a.rejection == b.rejection &&
+            a.anchor.x == b.anchor.x && a.anchor.y == b.anchor.y && a.anchor.z == b.anchor.z &&
+            a.radiusMeters == b.radiusMeters && a.rosterSeed == b.rosterSeed &&
+            a.rosterCount == b.rosterCount && a.hostStartTick == b.hostStartTick &&
+            a.exactEventId == b.exactEventId &&
+            a.guestDisposition == b.guestDisposition;
+    }
+};
+inline constexpr std::size_t kAmbientEncounterStatePayloadSize = 56U;
+[[nodiscard]] std::vector<std::uint8_t> EncodeAmbientEncounterState(const AmbientEncounterStatePayload& payload);
+[[nodiscard]] std::optional<AmbientEncounterStatePayload> DecodeAmbientEncounterState(std::span<const std::uint8_t> bytes);
 inline constexpr std::size_t kPickupCollectedPayloadSize = 24U;
 [[nodiscard]] std::vector<std::uint8_t> EncodePickupCollected(const PickupCollectedPayload& payload);
 [[nodiscard]] std::optional<PickupCollectedPayload> DecodePickupCollected(std::span<const std::uint8_t> bytes);

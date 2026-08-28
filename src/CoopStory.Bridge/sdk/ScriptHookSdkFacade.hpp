@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -38,6 +39,15 @@ public:
     SampleMissionObjective() noexcept override;
     [[nodiscard]] std::vector<MissionDialogueSample>
     SampleMissionDialogue(std::uint32_t missionId) noexcept override;
+    [[nodiscard]] std::optional<AmbientEncounterObservation>
+    SampleAmbientEncounterObservation() noexcept override;
+    [[nodiscard]] std::optional<ExactEncounterObservation>
+    SampleExactEncounterObservation() noexcept override;
+    [[nodiscard]] bool BeginAmbientEncounterPresentation(
+        const AmbientEncounterInstance& instance) noexcept override;
+    [[nodiscard]] std::optional<AmbientEncounterPhase>
+    SampleAmbientEncounterOutcome(std::uint64_t instanceId) noexcept override;
+    void ClearAmbientEncounterPresentation(std::uint64_t instanceId) noexcept override;
     [[nodiscard]] bool PresentHostMissionDialogue(
         std::uint32_t missionId,
         std::uint32_t rootId) noexcept override;
@@ -201,7 +211,28 @@ public:
     void WaitForNextTick() noexcept override;
 
 private:
+    struct AmbientEncounterPresentation final {
+        std::uint64_t instanceId{};
+        AmbientEncounterProfile profile{AmbientEncounterProfile::RoadsideAmbush};
+        std::uint32_t sourceScriptId{};
+        // The first hostileCount entries are host-authoritative combatants.
+        // The remaining entries are non-combatant scene roles.
+        std::vector<LocalEntityHandle> peds{};
+        std::size_t hostileCount{};
+        std::size_t protectedCivilianCount{};
+        struct SuppressedSourcePed final {
+            LocalEntityHandle handle{};
+            std::uint32_t modelHash{};
+            bool wasVisible{};
+        };
+        // Only tracks source actors hidden while a bridge-owned exact event
+        // is active.  They are restored, never deleted or rewarded by us.
+        std::vector<SuppressedSourcePed> suppressedSourcePeds{};
+    };
     bool abandonNativeCleanupAfterFatal_{};
+    std::optional<AmbientEncounterPresentation> ambientEncounterPresentation_{};
+    std::uint32_t ambientEncounterCooldownScriptId_{};
+    std::uint64_t ambientEncounterCooldownUntilMs_{};
     bool remoteTransformNativeFaultLogged_{};
     void InspectAnimSceneHybridHandlers(int sceneHandle) noexcept;
     void ResetRemoteMotionTracking() noexcept;

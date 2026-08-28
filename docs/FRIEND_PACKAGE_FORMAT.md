@@ -70,7 +70,7 @@ RDR2-CoopStory-Friend-Test/
 ```
 
 `BUILD_INFO.json` is part of the signed allowlist. For the private tester build
-it must report `protocol: 30`, `engineVersion: tester-protocol30`,
+it must report `protocol: 32`, `engineVersion: tester-protocol32`,
 `animSceneRuntimeCaptureEnabled: true` and
 `animSceneNativeCreateEnabled: true`. These fields describe an opt-in capability,
 the tester-profile default. The launcher setting `STORY VM CAPTURE` remains

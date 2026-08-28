@@ -2,6 +2,7 @@
 #include "coopstory/bridge/BuildInfo.hpp"
 
 #include "coopstory/bridge/CampaignMissionCatalog.hpp"
+#include "coopstory/bridge/ExactEncounterCatalog.hpp"
 
 #include <chrono>
 #include "coopstory/bridge/RemoteMotion.hpp"
@@ -24,6 +25,14 @@ constexpr std::uint64_t kWorldStateIntervalMilliseconds = 500U;
 constexpr std::uint64_t kEquipmentRefreshMilliseconds = 1'000U;
 constexpr std::uint64_t kMissionProgressionCompletionRetryMilliseconds = 1'000U;
 constexpr std::uint64_t kMissionObjectiveSampleMilliseconds = 250U;
+constexpr std::uint64_t kAmbientEncounterProposalTimeoutMilliseconds = 10'000U;
+constexpr std::uint64_t kExactEncounterPreflightTimeoutMilliseconds = 2'000U;
+constexpr std::uint64_t kExactEncounterPreflightRepublishMilliseconds = 250U;
+// A defeated bridge-owned bandit remains locally lootable long enough for a
+// normal RDR2 search animation.  The host remains the only outcome authority;
+// after this window its world entities are despawned on both peers.
+constexpr std::uint64_t kAmbientEncounterTerminalRetentionMilliseconds = 30'000U;
+constexpr float kAmbientEncounterAbandonDistanceMeters = 160.0F;
 // A guest must use their own verified vanilla prompt in this window. The
 // barrier is deliberately short enough that a stale packet cannot leave their
 // Story VM unguarded, but long enough to cover one normal conversation start.
@@ -626,6 +635,8 @@ bool BridgeRuntime::Start(
     remoteMissionSequences_.Reset();
     remoteMissionDialogueCueSequences_.Reset();
     remoteMissionDialogueReadySequences_.Reset();
+    remoteAmbientEncounterProposalSequences_.Reset();
+    remoteAmbientEncounterStateSequences_.Reset();
     remoteMissionCameraSequences_.Reset();
     remoteMissionCinematicSequences_.Reset();
     remoteMissionCinematicActionSequences_.Reset();
@@ -648,6 +659,24 @@ bool BridgeRuntime::Start(
     remoteMissionDialogueCue_.reset();
     pendingHostMissionDialogueCue_.reset();
     remoteMissionDialogueReady_.reset();
+    if (ambientEncounterCoordinator_.Active().has_value()) {
+        facade_.ClearAmbientEncounterPresentation(
+            ambientEncounterCoordinator_.Active()->instanceId);
+    }
+    if (remoteAmbientEncounter_.has_value()) {
+        facade_.ClearAmbientEncounterPresentation(
+            remoteAmbientEncounter_->instanceId);
+    }
+    ambientEncounterCoordinator_ = AmbientEncounterCoordinator{};
+    remoteAmbientEncounter_.reset();
+    localAmbientEncounterProposalId_ = 0U;
+    localAmbientEncounterProposalExpiresMs_ = 0U;
+    localAmbientEncounterInstanceId_ = 0U;
+    localAmbientEncounterTerminalAtMs_ = 0U;
+    remoteAmbientEncounterTerminalAtMs_ = 0U;
+    localExactEncounterPreflightDeadlineMs_ = 0U;
+    nextExactEncounterPreflightPublishMs_ = 0U;
+    remoteExactEncounterPreflightInstanceId_ = 0U;
     localMissionDialogueSequence_ = 0U;
     lastMissionDialogueCueSentMs_ = 0U;
     pendingHostMissionDialogueDueMs_ = 0U;
@@ -1012,6 +1041,8 @@ void BridgeRuntime::SendHello(const bool reconnect) {
     remoteMissionSequences_.Reset();
     remoteMissionDialogueCueSequences_.Reset();
     remoteMissionDialogueReadySequences_.Reset();
+    remoteAmbientEncounterProposalSequences_.Reset();
+    remoteAmbientEncounterStateSequences_.Reset();
     remoteMissionCameraSequences_.Reset();
     remoteMissionCinematicSequences_.Reset();
     remoteMissionCinematicActionSequences_.Reset();
@@ -1027,6 +1058,24 @@ void BridgeRuntime::SendHello(const bool reconnect) {
     remoteMissionDialogueCue_.reset();
     pendingHostMissionDialogueCue_.reset();
     remoteMissionDialogueReady_.reset();
+    if (ambientEncounterCoordinator_.Active().has_value()) {
+        facade_.ClearAmbientEncounterPresentation(
+            ambientEncounterCoordinator_.Active()->instanceId);
+    }
+    if (remoteAmbientEncounter_.has_value()) {
+        facade_.ClearAmbientEncounterPresentation(
+            remoteAmbientEncounter_->instanceId);
+    }
+    ambientEncounterCoordinator_ = AmbientEncounterCoordinator{};
+    remoteAmbientEncounter_.reset();
+    localAmbientEncounterProposalId_ = 0U;
+    localAmbientEncounterProposalExpiresMs_ = 0U;
+    localAmbientEncounterInstanceId_ = 0U;
+    localAmbientEncounterTerminalAtMs_ = 0U;
+    remoteAmbientEncounterTerminalAtMs_ = 0U;
+    localExactEncounterPreflightDeadlineMs_ = 0U;
+    nextExactEncounterPreflightPublishMs_ = 0U;
+    remoteExactEncounterPreflightInstanceId_ = 0U;
     localMissionDialogueSequence_ = 0U;
     lastMissionDialogueCueSentMs_ = 0U;
     pendingHostMissionDialogueDueMs_ = 0U;
@@ -2088,50 +2137,74 @@ void BridgeRuntime::Tick() {
          !sample->cutsceneActive),
         synchronizedPaused_);
     if (remoteStreaming && localSlot_.has_value() && localEntityId_.IsValid()) {
-        for (const auto& collection : facade_.DrainVanillaPickupCollections()) {
-            try {
-                Frame frame;
-                frame.header.type = MessageType::PickupCollected;
-                frame.header.sequence = sequencer_.Next();
-                frame.header.tick = now;
-                frame.payload = EncodePickupCollected(PickupCollectedPayload{
-                    localEntityId_, collection.collectionId, collection.pickupHash});
-                SendBestEffort(std::move(frame));
-            } catch (...) {
-                facade_.Log("[PICKUP_OBSERVED] discarded malformed collection event");
+        // Every bridge-owned encounter is outside the map-pickup/capability
+        // lanes. Corpse interaction is local vanilla behavior, so even the
+        // itemless positive collection telemetry is discarded while a scene
+        // is preparing, active, or retained for corpse cleanup. This applies
+        // equally to the catalog profiles and the exact Extortion adaptation.
+        const auto bridgeEncounterLootWindowActive = [&]() noexcept {
+            return ambientEncounterCoordinator_.Active().has_value() ||
+                remoteAmbientEncounter_.has_value();
+        }();
+        const auto collections = facade_.DrainVanillaPickupCollections();
+        if (bridgeEncounterLootWindowActive) {
+            if (!collections.empty()) {
+                facade_.Log(
+                    "[AMBIENT_ENCOUNTER] discarded pickup telemetry; local vanilla loot is never synchronized");
+            }
+        } else {
+            for (const auto& collection : collections) {
+                try {
+                    Frame frame;
+                    frame.header.type = MessageType::PickupCollected;
+                    frame.header.sequence = sequencer_.Next();
+                    frame.header.tick = now;
+                    frame.payload = EncodePickupCollected(PickupCollectedPayload{
+                        localEntityId_, collection.collectionId, collection.pickupHash});
+                    SendBestEffort(std::move(frame));
+                } catch (...) {
+                    facade_.Log("[PICKUP_OBSERVED] discarded malformed collection event");
+                }
             }
         }
         if (*localSlot_ == PlayerSlot::Host) {
-            for (const auto& observation :
-                 facade_.DrainCampaignCapabilityObservations()) {
-                if (observation.recordHash == 0U) {
-                    continue;
-                }
-                const auto grantedAtUnixMilliseconds =
-                    static_cast<std::int64_t>(
-                        std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::system_clock::now().time_since_epoch())
-                            .count());
-                const auto sequence = static_cast<std::uint16_t>(
-                    static_cast<std::uint16_t>(localCapabilityEventId_) + 1U);
-                localCapabilityEventId_ =
-                    (static_cast<std::uint64_t>(grantedAtUnixMilliseconds)
-                     << 16U) |
-                    static_cast<std::uint64_t>(
-                        sequence == 0U ? 1U : sequence);
-                Frame frame;
-                frame.header.type = MessageType::CampaignCapability;
-                frame.header.sequence = sequencer_.Next();
-                frame.header.tick = now;
-                frame.payload = EncodeCampaignCapability(
-                    CampaignCapabilityPayload{
-                        observation.kind,
-                        observation.recordHash,
-                        localCapabilityEventId_,
-                        grantedAtUnixMilliseconds});
-                SendBestEffort(std::move(frame));
+            const auto capabilities =
+                facade_.DrainCampaignCapabilityObservations();
+            if (bridgeEncounterLootWindowActive && !capabilities.empty()) {
                 facade_.Log(
-                    "[CAPABILITY] host acquisition observation forwarded");
+                    "[AMBIENT_ENCOUNTER] discarded capability telemetry; encounter rewards are disabled");
+            }
+            if (!bridgeEncounterLootWindowActive) {
+                for (const auto& observation : capabilities) {
+                    if (observation.recordHash == 0U) {
+                        continue;
+                    }
+                    const auto grantedAtUnixMilliseconds =
+                        static_cast<std::int64_t>(
+                            std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count());
+                    const auto sequence = static_cast<std::uint16_t>(
+                        static_cast<std::uint16_t>(localCapabilityEventId_) + 1U);
+                    localCapabilityEventId_ =
+                        (static_cast<std::uint64_t>(grantedAtUnixMilliseconds)
+                         << 16U) |
+                        static_cast<std::uint64_t>(
+                            sequence == 0U ? 1U : sequence);
+                    Frame frame;
+                    frame.header.type = MessageType::CampaignCapability;
+                    frame.header.sequence = sequencer_.Next();
+                    frame.header.tick = now;
+                    frame.payload = EncodeCampaignCapability(
+                        CampaignCapabilityPayload{
+                            observation.kind,
+                            observation.recordHash,
+                            localCapabilityEventId_,
+                            grantedAtUnixMilliseconds});
+                    SendBestEffort(std::move(frame));
+                    facade_.Log(
+                        "[CAPABILITY] host acquisition observation forwarded");
+                }
             }
         } else {
             (void)facade_.DrainCampaignCapabilityObservations();
@@ -2428,6 +2501,7 @@ void BridgeRuntime::Tick() {
         TickMissionProgression(*sample, now);
         TickMissionObjective(*sample, now);
         TickMissionDialogue(localSlot, now);
+        TickAmbientEncounter(*sample, localSlot, now);
         TickMissionCinematic(sample, localSlot, now);
         // TickMissionAuthority may have entered or left a host cutscene in
         // this same frame. Re-evaluate after publishing the new phase so the
@@ -4157,6 +4231,429 @@ void BridgeRuntime::HandleRemoteMissionObjective(
     remoteMissionObjective_ = objective;
     facade_.Log("[MISSION_OBJECTIVE] accepted host objective, sender-tick=" +
         std::to_string(frame.header.tick));
+}
+
+void BridgeRuntime::PublishAmbientEncounterState(
+    const AmbientEncounterInstance& instance,
+    const std::uint64_t nowMs) {
+    if (!localEntityId_.IsValid()) return;
+    try {
+        Frame frame;
+        frame.header.type = MessageType::AmbientEncounterState;
+        frame.header.sequence = sequencer_.Next();
+        frame.header.tick = nowMs;
+        frame.payload = EncodeAmbientEncounterState(AmbientEncounterStatePayload{
+            localEntityId_, instance.instanceId, instance.profile, instance.phase,
+            AmbientEncounterRejection::None, instance.anchor, instance.radiusMeters,
+            instance.rosterSeed, instance.rosterCount, instance.hostStartTick,
+            instance.exactEventId, instance.guestDisposition});
+        SendBestEffort(std::move(frame));
+    } catch (...) {
+        facade_.Log("[AMBIENT_ENCOUNTER] failed to serialize host state");
+    }
+}
+
+void BridgeRuntime::StartPreparedAmbientEncounter(const std::uint64_t nowMs) {
+    if (localSlot_ != PlayerSlot::Host ||
+        !ambientEncounterCoordinator_.Active().has_value()) {
+        return;
+    }
+    auto& instance = *ambientEncounterCoordinator_.Active();
+    if (instance.phase != AmbientEncounterPhase::Preparing) {
+        return;
+    }
+    localExactEncounterPreflightDeadlineMs_ = 0U;
+    nextExactEncounterPreflightPublishMs_ = 0U;
+    if (facade_.BeginAmbientEncounterPresentation(instance)) {
+        (void)ambientEncounterCoordinator_.Advance(
+            AmbientEncounterPhase::Active);
+        PublishAmbientEncounterState(
+            *ambientEncounterCoordinator_.Active(), nowMs);
+        return;
+    }
+    (void)ambientEncounterCoordinator_.Advance(
+        AmbientEncounterPhase::Abandoned);
+    PublishAmbientEncounterState(
+        *ambientEncounterCoordinator_.Active(), nowMs);
+    localAmbientEncounterTerminalAtMs_ = nowMs;
+    facade_.Log("[AMBIENT_ENCOUNTER] host could not materialize prepared scene");
+}
+
+void BridgeRuntime::HandleRemoteAmbientEncounterProposal(
+    const Frame& frame, const AmbientEncounterProposalPayload& payload) {
+    if (localSlot_ != PlayerSlot::Host || !remoteReplicaId_.IsValid() ||
+        payload.guestEntityId != remoteReplicaId_) {
+        facade_.Log("[AMBIENT_ENCOUNTER] rejected unauthoritative guest proposal");
+        return;
+    }
+    const auto host = facade_.SampleLocalPlayer();
+    const auto distance = facade_.HostGuestDistanceMeters();
+    AmbientEncounterProposal proposal{payload.proposalId, payload.profile, payload.anchor,
+        payload.radiusMeters, payload.localEvidenceHash, payload.suggestedRosterSeed};
+    // A host-originated exact event starts in Preparing.  The guest answers
+    // this authenticated preflight with the same instance ID, either the
+    // exact script ID (participant) or the companion sentinel.  It is not a
+    // second event proposal and cannot replace the host's anchor or outcome.
+    if (ambientEncounterCoordinator_.Active().has_value()) {
+        auto& active = *ambientEncounterCoordinator_.Active();
+        if (active.phase == AmbientEncounterPhase::Preparing &&
+            active.exactEventId == kExtortionEncounter.scriptId &&
+            payload.proposalId == active.instanceId) {
+            const bool validPreflight =
+                payload.profile == kExtortionEncounter.profile &&
+                payload.suggestedRosterSeed == active.rosterSeed &&
+                (payload.localEvidenceHash == kExtortionEncounter.scriptId ||
+                 payload.localEvidenceHash ==
+                    kExtortionCompanionPreflightEvidence);
+            if (!validPreflight) {
+                facade_.Log("[EXACT_ENCOUNTER] rejected malformed Extortion guest preflight");
+                return;
+            }
+            active.guestDisposition =
+                payload.localEvidenceHash == kExtortionEncounter.scriptId
+                    ? AmbientEncounterPeerDisposition::Participant
+                    : AmbientEncounterPeerDisposition::Companion;
+            facade_.Log("[EXACT_ENCOUNTER] guest preflight=" +
+                std::string{active.guestDisposition ==
+                    AmbientEncounterPeerDisposition::Participant
+                        ? "participant"
+                        : "companion"});
+            StartPreparedAmbientEncounter(facade_.TickMilliseconds());
+            return;
+        }
+    }
+    // Extortion is an exact-ID adaptation, not a generic hostage heuristic.
+    // A guest becomes a participant only when both save processes currently
+    // observe the same script-owned beat. Otherwise the host-owned bridge
+    // scene still starts as companion-only; it cannot change the guest save.
+    if (payload.profile == AmbientEncounterProfile::HostageRescue &&
+        payload.localEvidenceHash == kExtortionEncounter.scriptId) {
+        const auto hostExact = facade_.SampleExactEncounterObservation();
+        if (!hostExact.has_value() || !hostExact->locallyEligible ||
+            hostExact->scriptId != kExtortionEncounter.scriptId) {
+            try {
+                Frame reply;
+                reply.header.type = MessageType::AmbientEncounterState;
+                reply.header.sequence = sequencer_.Next();
+                reply.header.tick = facade_.TickMilliseconds();
+                reply.payload = EncodeAmbientEncounterState(AmbientEncounterStatePayload{
+                    localEntityId_, payload.proposalId, payload.profile,
+                    AmbientEncounterPhase::Proposed,
+                    AmbientEncounterRejection::HostUnavailable,
+                    {}, 0.0F, 0U, 0U, 0U});
+                SendBestEffort(std::move(reply));
+            } catch (...) {}
+            facade_.Log("[EXACT_ENCOUNTER] Extortion proposal retained as guest-local; host exact ID is absent");
+            return;
+        }
+    }
+    const AmbientEncounterHostContext context{
+        transport_.IsConnected() && host.has_value(),
+        !host.has_value() || host->missionActive || host->cutsceneActive || host->screenTransition,
+        host.has_value() && !host->downed && !host->ragdoll && !host->inWater,
+        distance.value_or(std::numeric_limits<float>::infinity())};
+    const auto instanceId = ++localAmbientEncounterInstanceId_ == 0U
+        ? ++localAmbientEncounterInstanceId_ : localAmbientEncounterInstanceId_;
+    const auto result = ambientEncounterCoordinator_.ProposeFromGuest(
+        proposal, context, instanceId, frame.header.tick == 0U ? previousTickMs_ : frame.header.tick);
+    if (result != AmbientEncounterRejection::None) {
+        try {
+            Frame reply;
+            reply.header.type = MessageType::AmbientEncounterState;
+            reply.header.sequence = sequencer_.Next();
+            reply.header.tick = facade_.TickMilliseconds();
+            reply.payload = EncodeAmbientEncounterState(AmbientEncounterStatePayload{
+                localEntityId_, payload.proposalId, payload.profile, AmbientEncounterPhase::Proposed,
+                result, {}, 0.0F, 0U, 0U, 0U});
+            SendBestEffort(std::move(reply));
+        } catch (...) {}
+        facade_.Log("[AMBIENT_ENCOUNTER] host declined guest proposal");
+        return;
+    }
+    auto& instance = *ambientEncounterCoordinator_.Active();
+    if (payload.profile == kExtortionEncounter.profile &&
+        payload.localEvidenceHash == kExtortionEncounter.scriptId) {
+        // The guest found Extortion first. The host's exact-ID check above
+        // already proved both local saves are eligible.
+        instance.exactEventId = kExtortionEncounter.scriptId;
+        instance.guestDisposition =
+            AmbientEncounterPeerDisposition::Participant;
+    }
+    PublishAmbientEncounterState(instance, facade_.TickMilliseconds());
+    StartPreparedAmbientEncounter(facade_.TickMilliseconds());
+    facade_.Log("[AMBIENT_ENCOUNTER] guest proposal adopted by host");
+}
+
+void BridgeRuntime::HandleRemoteAmbientEncounterState(
+    const Frame& frame, const AmbientEncounterStatePayload& state) {
+    if (localSlot_ != PlayerSlot::Guest || !remoteReplicaId_.IsValid() ||
+        state.hostEntityId != remoteReplicaId_) {
+        facade_.Log("[AMBIENT_ENCOUNTER] rejected non-host state");
+        return;
+    }
+    if (state.phase == AmbientEncounterPhase::Proposed) {
+        if (state.rejection != AmbientEncounterRejection::None &&
+            state.instanceId == localAmbientEncounterProposalId_) {
+            localAmbientEncounterProposalExpiresMs_ = 0U;
+            notificationText_ = "Host unavailable — encounter remains local";
+            notificationUntilMs_ = facade_.TickMilliseconds() + 3'000U;
+            facade_.Log("[AMBIENT_ENCOUNTER] host rejected guest proposal");
+        }
+        return;
+    }
+    if (remoteAmbientEncounter_.has_value() &&
+        state.instanceId < remoteAmbientEncounter_->instanceId) return;
+    remoteAmbientEncounter_ = state;
+    AmbientEncounterInstance presentation{state.instanceId, state.profile, state.phase,
+        state.anchor, state.radiusMeters, state.rosterSeed, state.rosterCount,
+        state.hostStartTick, true, false, state.exactEventId,
+        state.guestDisposition};
+    if (state.phase == AmbientEncounterPhase::Preparing) {
+        remoteAmbientEncounterTerminalAtMs_ = 0U;
+        if (state.exactEventId == kExtortionEncounter.scriptId) {
+            if (remoteExactEncounterPreflightInstanceId_ != state.instanceId) {
+                const auto observed = facade_.SampleExactEncounterObservation();
+                const bool locallyEligible = observed.has_value() &&
+                    observed->locallyEligible &&
+                    observed->scriptId == kExtortionEncounter.scriptId;
+                try {
+                    Frame preflight;
+                    preflight.header.type = MessageType::AmbientEncounterProposal;
+                    preflight.header.sequence = sequencer_.Next();
+                    preflight.header.tick = facade_.TickMilliseconds();
+                    preflight.payload = EncodeAmbientEncounterProposal(
+                        AmbientEncounterProposalPayload{
+                            localEntityId_, state.instanceId,
+                            kExtortionEncounter.profile, state.anchor,
+                            state.radiusMeters,
+                            locallyEligible
+                                ? kExtortionEncounter.scriptId
+                                : kExtortionCompanionPreflightEvidence,
+                            state.rosterSeed});
+                    SendBestEffort(std::move(preflight));
+                    remoteExactEncounterPreflightInstanceId_ = state.instanceId;
+                    notificationText_ = locallyEligible
+                        ? "Extortion matched — joining as participant"
+                        : "Extortion unavailable — joining as companion";
+                    notificationUntilMs_ = facade_.TickMilliseconds() + 3'000U;
+                    facade_.Log(
+                        std::string{"[EXACT_ENCOUNTER] guest preflight="} +
+                        (locallyEligible ? "participant" : "companion") +
+                        ", loot-policy=local-vanilla-generic-only");
+                } catch (...) {
+                    facade_.Log("[EXACT_ENCOUNTER] guest preflight could not be sent");
+                }
+            }
+            // The host starts only after it has recorded this reply (or a
+            // bounded timeout). A guest does not create a speculative roster.
+            return;
+        }
+        if (!facade_.BeginAmbientEncounterPresentation(presentation)) {
+            facade_.Log("[AMBIENT_ENCOUNTER] guest presentation unavailable; host state remains authoritative");
+        } else {
+            notificationText_ = "Shared encounter started";
+            notificationUntilMs_ = facade_.TickMilliseconds() + 3'000U;
+        }
+    } else if (state.phase == AmbientEncounterPhase::Active) {
+        remoteAmbientEncounterTerminalAtMs_ = 0U;
+        remoteExactEncounterPreflightInstanceId_ = 0U;
+        if (state.exactEventId == kExtortionEncounter.scriptId &&
+            state.guestDisposition == AmbientEncounterPeerDisposition::Unknown) {
+            facade_.Log("[EXACT_ENCOUNTER] rejected active state without guest disposition");
+            return;
+        }
+        if (!facade_.BeginAmbientEncounterPresentation(presentation)) {
+            facade_.Log("[AMBIENT_ENCOUNTER] guest presentation unavailable; host state remains authoritative");
+        } else {
+            notificationText_ = state.exactEventId ==
+                    kExtortionEncounter.scriptId &&
+                    state.guestDisposition ==
+                        AmbientEncounterPeerDisposition::Companion
+                ? "Shared Extortion started — companion loot is generic only"
+                : "Shared encounter started";
+            notificationUntilMs_ = facade_.TickMilliseconds() + 3'000U;
+            if (state.exactEventId == kExtortionEncounter.scriptId) {
+                facade_.Log(
+                    std::string{"[EXACT_ENCOUNTER] guest active="} +
+                    (state.guestDisposition ==
+                        AmbientEncounterPeerDisposition::Participant
+                        ? "participant"
+                        : "companion") +
+                    ", scene=world-mirror, loot-policy=local-vanilla-generic-only");
+            }
+        }
+    } else if (IsTerminalAmbientEncounterPhase(state.phase)) {
+        // The host retains defeated bridge peds for the bounded loot window.
+        // Their normal world-entity despawns are the guest's cleanup signal;
+        // deleting presentation here would remove a corpse before the guest
+        // can use the ordinary local loot prompt.
+        notificationText_ = "Shared encounter resolved";
+        notificationUntilMs_ = facade_.TickMilliseconds() + 3'000U;
+        remoteAmbientEncounterTerminalAtMs_ = facade_.TickMilliseconds();
+    }
+    (void)frame;
+}
+
+void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
+    const PlayerSlot localSlot, const std::uint64_t nowMs) {
+    if (!transport_.IsConnected() || !localEntityId_.IsValid()) return;
+    const bool unsafeForAmbientActivity = sample.missionActive ||
+        sample.cutsceneActive || sample.screenTransition || sample.downed ||
+        sample.ragdoll;
+    if (unsafeForAmbientActivity) {
+        // A terminal encounter has no further player interaction or outcome
+        // work to do. Do not let a subsequent mission/loading transition pin
+        // its bridge-owned actors forever; the normal retention window still
+        // applies before host cleanup/despawn.
+        if (localSlot == PlayerSlot::Host &&
+            ambientEncounterCoordinator_.Active().has_value()) {
+            const auto& instance = *ambientEncounterCoordinator_.Active();
+            if (IsTerminalAmbientEncounterPhase(instance.phase) &&
+                nowMs >= localAmbientEncounterTerminalAtMs_ +
+                    kAmbientEncounterTerminalRetentionMilliseconds) {
+                facade_.ClearAmbientEncounterPresentation(instance.instanceId);
+                ambientEncounterCoordinator_.ClearTerminal();
+            }
+        }
+        return;
+    }
+    // A guest's own Story state may be quarantined by mission isolation, so
+    // also inspect the authoritative remote mission state before permitting a
+    // free-roam activity. This prevents a stale local observation from
+    // opening an encounter during the host's Story sequence.
+    if (remoteMissionState_.has_value() &&
+        (remoteMissionState_->flags & static_cast<std::uint8_t>(
+            MissionStateFlag::MissionActive)) != 0U) return;
+    if (remoteMissionCinematicState_.has_value() &&
+        IsCinematicPresentationPhase(remoteMissionCinematicState_->phase)) return;
+    if (localSlot == PlayerSlot::Host) {
+        if (ambientEncounterCoordinator_.Active().has_value()) {
+            auto& instance = *ambientEncounterCoordinator_.Active();
+            if (instance.phase == AmbientEncounterPhase::Active) {
+                const auto outcome = facade_.SampleAmbientEncounterOutcome(instance.instanceId);
+                const auto distance = facade_.HostGuestDistanceMeters();
+                if (outcome.has_value() && IsTerminalAmbientEncounterPhase(*outcome)) {
+                    (void)ambientEncounterCoordinator_.Advance(*outcome);
+                } else if (distance.has_value() && *distance > kAmbientEncounterAbandonDistanceMeters) {
+                    (void)ambientEncounterCoordinator_.Advance(AmbientEncounterPhase::Abandoned);
+                }
+                if (IsTerminalAmbientEncounterPhase(instance.phase)) {
+                    PublishAmbientEncounterState(instance, nowMs);
+                    localAmbientEncounterTerminalAtMs_ = nowMs;
+                }
+            } else if (instance.phase == AmbientEncounterPhase::Preparing &&
+                instance.exactEventId == kExtortionEncounter.scriptId &&
+                localExactEncounterPreflightDeadlineMs_ != 0U &&
+                nowMs >= localExactEncounterPreflightDeadlineMs_) {
+                // A missing guest reply is not an error. Start the same
+                // bridge scene as companion-only so the pair can still fight
+                // together without exposing a save reward.
+                instance.guestDisposition =
+                    AmbientEncounterPeerDisposition::Companion;
+                facade_.Log("[EXACT_ENCOUNTER] guest preflight timed out; companion scene selected");
+                StartPreparedAmbientEncounter(nowMs);
+            } else if (instance.phase == AmbientEncounterPhase::Preparing &&
+                instance.exactEventId == kExtortionEncounter.scriptId &&
+                nowMs >= nextExactEncounterPreflightPublishMs_) {
+                PublishAmbientEncounterState(instance, nowMs);
+                nextExactEncounterPreflightPublishMs_ =
+                    nowMs + kExactEncounterPreflightRepublishMilliseconds;
+            } else if (IsTerminalAmbientEncounterPhase(instance.phase) &&
+                nowMs >= localAmbientEncounterTerminalAtMs_ + kAmbientEncounterTerminalRetentionMilliseconds) {
+                facade_.ClearAmbientEncounterPresentation(instance.instanceId);
+                ambientEncounterCoordinator_.ClearTerminal();
+            }
+            return;
+        }
+        // Host detection starts an Extortion scene even when the guest does
+        // not have the encounter available. The eventual guest presentation
+        // is companion-only in that case: it can fight and loot only generic
+        // bridge-bandit supplies, never an exact-event reward.
+        if (const auto exact = facade_.SampleExactEncounterObservation();
+            exact.has_value() && exact->locallyEligible &&
+            exact->scriptId == kExtortionEncounter.scriptId) {
+            const AmbientEncounterProposal proposal{++localAmbientEncounterInstanceId_,
+                kExtortionEncounter.profile, exact->anchor, 25.0F,
+                exact->scriptId, exact->scriptId ^ static_cast<std::uint32_t>(nowMs)};
+            const AmbientEncounterHostContext context{true, false, !sample.inWater,
+                facade_.HostGuestDistanceMeters().value_or(std::numeric_limits<float>::infinity())};
+            if (ambientEncounterCoordinator_.StartFromHost(proposal, context,
+                proposal.proposalId, nowMs) == AmbientEncounterRejection::None) {
+                auto& instance = *ambientEncounterCoordinator_.Active();
+                instance.exactEventId = kExtortionEncounter.scriptId;
+                instance.guestDisposition =
+                    AmbientEncounterPeerDisposition::Unknown;
+                localExactEncounterPreflightDeadlineMs_ =
+                    nowMs + kExactEncounterPreflightTimeoutMilliseconds;
+                nextExactEncounterPreflightPublishMs_ =
+                    nowMs + kExactEncounterPreflightRepublishMilliseconds;
+                PublishAmbientEncounterState(instance, nowMs);
+                facade_.Log("[EXACT_ENCOUNTER] host detected Extortion; awaiting guest preflight");
+                return;
+            }
+        }
+        const auto observed = facade_.SampleAmbientEncounterObservation();
+        if (!observed.has_value()) return;
+        const AmbientEncounterProposal proposal{++localAmbientEncounterInstanceId_, observed->profile,
+            observed->anchor, observed->radiusMeters, observed->localEvidenceHash, observed->suggestedRosterSeed};
+        const AmbientEncounterHostContext context{true, false, !sample.inWater,
+            facade_.HostGuestDistanceMeters().value_or(std::numeric_limits<float>::infinity())};
+        if (ambientEncounterCoordinator_.StartFromHost(proposal, context, proposal.proposalId, nowMs) != AmbientEncounterRejection::None) return;
+        auto& instance = *ambientEncounterCoordinator_.Active();
+        PublishAmbientEncounterState(instance, nowMs);
+        StartPreparedAmbientEncounter(nowMs);
+        return;
+    }
+    if (remoteAmbientEncounter_.has_value()) {
+        if (!IsTerminalAmbientEncounterPhase(remoteAmbientEncounter_->phase) ||
+            remoteAmbientEncounterTerminalAtMs_ == 0U ||
+            nowMs < remoteAmbientEncounterTerminalAtMs_ +
+                kAmbientEncounterTerminalRetentionMilliseconds) {
+            return;
+        }
+        // Host WorldMirror despawns arrive while the terminal window is held.
+        // Clear the local state afterwards so one completed encounter cannot
+        // permanently block a later guest proposal.
+        facade_.ClearAmbientEncounterPresentation(
+            remoteAmbientEncounter_->instanceId);
+        remoteAmbientEncounter_.reset();
+        remoteAmbientEncounterTerminalAtMs_ = 0U;
+    }
+    if (localAmbientEncounterProposalExpiresMs_ > nowMs) return;
+    if (const auto exact = facade_.SampleExactEncounterObservation();
+        exact.has_value() && exact->locallyEligible &&
+        exact->scriptId == kExtortionEncounter.scriptId) {
+        localAmbientEncounterProposalId_ = ++localAmbientEncounterInstanceId_;
+        localAmbientEncounterProposalExpiresMs_ = nowMs + kAmbientEncounterProposalTimeoutMilliseconds;
+        try {
+            Frame proposal;
+            proposal.header.type = MessageType::AmbientEncounterProposal;
+            proposal.header.sequence = sequencer_.Next(); proposal.header.tick = nowMs;
+            proposal.payload = EncodeAmbientEncounterProposal(AmbientEncounterProposalPayload{
+                localEntityId_, localAmbientEncounterProposalId_, kExtortionEncounter.profile,
+                exact->anchor, 25.0F, exact->scriptId,
+                exact->scriptId ^ static_cast<std::uint32_t>(nowMs)});
+            SendBestEffort(std::move(proposal));
+            notificationText_ = "Extortion spotted — checking host";
+            notificationUntilMs_ = nowMs + 3'000U;
+        } catch (...) { localAmbientEncounterProposalExpiresMs_ = 0U; }
+        return;
+    }
+    const auto observed = facade_.SampleAmbientEncounterObservation();
+    if (!observed.has_value()) return;
+    localAmbientEncounterProposalId_ = ++localAmbientEncounterInstanceId_;
+    localAmbientEncounterProposalExpiresMs_ = nowMs + kAmbientEncounterProposalTimeoutMilliseconds;
+    try {
+        Frame proposal;
+        proposal.header.type = MessageType::AmbientEncounterProposal;
+        proposal.header.sequence = sequencer_.Next(); proposal.header.tick = nowMs;
+        proposal.payload = EncodeAmbientEncounterProposal(AmbientEncounterProposalPayload{
+            localEntityId_, localAmbientEncounterProposalId_, observed->profile, observed->anchor,
+            observed->radiusMeters, observed->localEvidenceHash, observed->suggestedRosterSeed});
+        SendBestEffort(std::move(proposal));
+        notificationText_ = "Ambush spotted — waiting for host";
+        notificationUntilMs_ = nowMs + 3'000U;
+    } catch (...) { localAmbientEncounterProposalExpiresMs_ = 0U; }
 }
 
 void BridgeRuntime::TickMissionDialogue(
@@ -8551,6 +9048,28 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
                 break;
             }
             HandleRemoteMissionDialogueReady(frame, *ready);
+            break;
+        }
+        case MessageType::AmbientEncounterProposal: {
+            const auto proposal = DecodeAmbientEncounterProposal(frame.payload);
+            if (!proposal.has_value()) {
+                facade_.Log("[AMBIENT_ENCOUNTER] rejected malformed proposal");
+                break;
+            }
+            const auto disposition = remoteAmbientEncounterProposalSequences_.Observe(frame.header.sequence);
+            if (disposition == SequenceDisposition::Duplicate || disposition == SequenceDisposition::Stale) break;
+            HandleRemoteAmbientEncounterProposal(frame, *proposal);
+            break;
+        }
+        case MessageType::AmbientEncounterState: {
+            const auto state = DecodeAmbientEncounterState(frame.payload);
+            if (!state.has_value()) {
+                facade_.Log("[AMBIENT_ENCOUNTER] rejected malformed host state");
+                break;
+            }
+            const auto disposition = remoteAmbientEncounterStateSequences_.Observe(frame.header.sequence);
+            if (disposition == SequenceDisposition::Duplicate || disposition == SequenceDisposition::Stale) break;
+            HandleRemoteAmbientEncounterState(frame, *state);
             break;
         }
         case MessageType::PlayerMountState: {

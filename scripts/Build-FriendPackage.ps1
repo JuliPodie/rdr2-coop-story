@@ -264,7 +264,7 @@ if (($releaseRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
 }
 
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
-$packageName = 'RDR2-CoopStory-Tester-Protocol30-' + $stamp
+$packageName = 'RDR2-CoopStory-Tester-Protocol32-' + $stamp
 $packageRoot = Join-Path $releaseRoot $packageName
 $zipPath = Join-Path $releaseRoot ($packageName + '.zip')
 if ((Test-Path -LiteralPath $packageRoot) -or
@@ -445,8 +445,9 @@ if ($forbidden.Count -gt 0) {
 $buildInfo = [ordered]@{
     package = $packageName
     createdUtc = [DateTime]::UtcNow.ToString('o')
-    protocol = 30
-    engineVersion = 'tester-protocol30'
+    protocol = 32
+    engineVersion = 'tester-protocol32'
+    ambientEncounterCatalog = '32.0-50-reviewed-script-ids-five-host-owned-profiles-local-vanilla-loot-only'
     entityGraph = '31.9-priority-hysteresis-plus-retained-cinematic-cast-and-optional-released-animscene-object-lane'
     missionSync = '31.10-host-owned-mission-plus-live-resume-anchor-unowned-weather-guard-and-handle-pinned-private-scene-quarantine'
     missionSpectator = '31.0-versioned-animscene-definition-prepare-commit-or-smoothed-proxy-camera-safe-fallback'

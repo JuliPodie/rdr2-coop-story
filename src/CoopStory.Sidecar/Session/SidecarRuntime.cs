@@ -5909,6 +5909,12 @@ public sealed class SidecarRuntime : IAsyncDisposable
             case MessageType.MissionDialogueReady:
                 _ = BinaryPayloadCodec.DecodeMissionDialogueReady(envelope.Payload.Span);
                 break;
+            case MessageType.AmbientEncounterProposal:
+                _ = BinaryPayloadCodec.DecodeAmbientEncounterProposal(envelope.Payload.Span);
+                break;
+            case MessageType.AmbientEncounterState:
+                _ = BinaryPayloadCodec.DecodeAmbientEncounterState(envelope.Payload.Span);
+                break;
             case MessageType.PlayerAppearanceState:
                 _ = BinaryPayloadCodec.DecodePlayerAppearanceState(
                     envelope.Payload.Span);
@@ -6175,6 +6181,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
         if (envelope.Type == MessageType.MissionDialogueReady)
             return localRole == SessionRole.Host;
 
+        // A guest may only propose an encounter; the host alone can publish
+        // the adopted instance or a rejection.
+        if (envelope.Type == MessageType.AmbientEncounterProposal)
+            return localRole == SessionRole.Host;
+
+        if (envelope.Type == MessageType.AmbientEncounterState)
+            return localRole == SessionRole.Guest;
+
         if (envelope.Type == MessageType.PlayerAppearanceState)
         {
             var appearance =
@@ -6378,6 +6392,12 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
         if (envelope.Type == MessageType.MissionDialogueReady)
             return localRole == SessionRole.Guest;
+
+        if (envelope.Type == MessageType.AmbientEncounterProposal)
+            return localRole == SessionRole.Guest;
+
+        if (envelope.Type == MessageType.AmbientEncounterState)
+            return localRole == SessionRole.Host;
 
         if (envelope.Type == MessageType.PlayerAppearanceState)
         {
