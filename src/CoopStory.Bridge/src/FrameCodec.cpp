@@ -113,7 +113,7 @@ template <typename T>
     return value >=
                static_cast<std::uint8_t>(PlayerActionKind::Aim) &&
            value <=
-               static_cast<std::uint8_t>(PlayerActionKind::Knockdown);
+               static_cast<std::uint8_t>(PlayerActionKind::Crafting);
 }
 
 [[nodiscard]] bool IsKnownPlayerActionPhase(
@@ -1021,7 +1021,13 @@ TryComputeAnimSceneDefinitionFingerprint(
         static_cast<std::uint8_t>(
             PlayerMountStateFlag::Dead) |
         static_cast<std::uint8_t>(
-            PlayerMountStateFlag::BorrowedPeerMount);
+            PlayerMountStateFlag::BorrowedPeerMount) |
+        static_cast<std::uint8_t>(
+            PlayerMountStateFlag::Vehicle) |
+        static_cast<std::uint8_t>(
+            PlayerMountStateFlag::VehicleDriver) |
+        static_cast<std::uint8_t>(
+            PlayerMountStateFlag::VehiclePassenger);
     const bool present =
         (payload.flags & kPresent) != 0U;
     const bool mounted =
@@ -1031,7 +1037,16 @@ TryComputeAnimSceneDefinitionFingerprint(
     const bool borrowed =
         (payload.flags &
          static_cast<std::uint8_t>(
-             PlayerMountStateFlag::BorrowedPeerMount)) != 0U;
+            PlayerMountStateFlag::BorrowedPeerMount)) != 0U;
+    const bool vehicle =
+        (payload.flags & static_cast<std::uint8_t>(
+                             PlayerMountStateFlag::Vehicle)) != 0U;
+    const bool driver =
+        (payload.flags & static_cast<std::uint8_t>(
+                             PlayerMountStateFlag::VehicleDriver)) != 0U;
+    const bool passenger =
+        (payload.flags & static_cast<std::uint8_t>(
+                             PlayerMountStateFlag::VehiclePassenger)) != 0U;
     return payload.playerEntityId.IsValid() &&
            payload.mountEntityId.IsValid() &&
            payload.playerEntityId != payload.mountEntityId &&
@@ -1039,6 +1054,8 @@ TryComputeAnimSceneDefinitionFingerprint(
                static_cast<std::uint8_t>(payload.slot)) &&
            (payload.flags & ~kKnownFlags) == 0U &&
            (!borrowed || (present && mounted)) &&
+           (!vehicle || (present && mounted && (driver != passenger))) &&
+           (vehicle || (!driver && !passenger)) &&
            (present ||
             (payload.flags == 0U &&
              payload.modelHash == 0U &&
@@ -1321,7 +1338,58 @@ bool IsKnownMessageType(const std::uint16_t value) noexcept {
     return value >= static_cast<std::uint16_t>(MessageType::Hello) &&
            value <=
                static_cast<std::uint16_t>(
-               MessageType::PickupCollected);
+               MessageType::MissionProgression);
+}
+
+std::vector<std::uint8_t> EncodeMissionProgression(
+    const MissionProgressionPayload& payload) {
+    const auto phase = static_cast<std::uint8_t>(payload.phase);
+    constexpr auto allowed = static_cast<std::uint8_t>(
+        MissionProgressionFlag::GuestCanStart) |
+        static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping);
+    const bool completion =
+        payload.phase == MissionProgressionPhase::Completion;
+    const bool appliesMapping = (payload.flags & static_cast<std::uint8_t>(
+        MissionProgressionFlag::VerifiedCompletionMapping)) != 0U;
+    if (payload.missionId == 0U || payload.missionEpoch == 0U ||
+        payload.eventId == 0U || phase < static_cast<std::uint8_t>(MissionProgressionPhase::Offer) ||
+        phase > static_cast<std::uint8_t>(MissionProgressionPhase::Completion) ||
+        (payload.flags & ~allowed) != 0U ||
+        (!completion && payload.completionRating != 0U) ||
+        (!completion && payload.completionCashAward != 0) ||
+        payload.completionCashAward < 0 ||
+        (appliesMapping && (!completion || payload.completionRating < 2U ||
+                            payload.completionRating > 5U))) {
+        throw std::invalid_argument("invalid mission progression payload");
+    }
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(kMissionProgressionPayloadSize);
+    AppendLittleEndian(bytes, payload.missionId);
+    AppendLittleEndian(bytes, payload.missionEpoch);
+    AppendLittleEndian(bytes, payload.eventId);
+    AppendLittleEndian(bytes, payload.phase);
+    AppendLittleEndian(bytes, payload.flags);
+    AppendLittleEndian(bytes, payload.completionRating);
+    AppendLittleEndian(bytes, std::uint8_t{0U});
+    AppendLittleEndian(bytes, payload.completionCashAward);
+    return bytes;
+}
+
+std::optional<MissionProgressionPayload> DecodeMissionProgression(
+    const std::span<const std::uint8_t> bytes) {
+    if (bytes.size() != kMissionProgressionPayloadSize) return std::nullopt;
+    std::size_t offset{};
+    MissionProgressionPayload payload{ReadLittleEndian<std::uint32_t>(bytes, offset),
+        ReadLittleEndian<std::uint32_t>(bytes, offset),
+        ReadLittleEndian<std::uint64_t>(bytes, offset),
+        static_cast<MissionProgressionPhase>(ReadLittleEndian<std::uint8_t>(bytes, offset)),
+        ReadLittleEndian<std::uint8_t>(bytes, offset),
+        ReadLittleEndian<std::uint8_t>(bytes, offset)};
+    const auto reserved8 = ReadLittleEndian<std::uint8_t>(bytes, offset);
+    const auto completionCashAward = ReadLittleEndian<std::int32_t>(bytes, offset);
+    try { (void)EncodeMissionProgression(payload); } catch (...) { return std::nullopt; }
+    payload.completionCashAward = completionCashAward;
+    return reserved8 == 0U ? std::optional<MissionProgressionPayload>{payload} : std::nullopt;
 }
 
 std::vector<std::uint8_t> EncodeCampaignCapability(

@@ -55,15 +55,50 @@ startup overlay under `F8` offers `HOST` and `JOIN` using a compact invite code
 passed only through the current-user IPC pipe and the Windows clipboard. `F10`
 hides or restores the top status bar, while `F9` opens the diagnostic command
 menu. The invite secret is never written to bridge logs.
-Spectator camera control, equipment resync and game-native checkpoint retry
-remain fail-closed. The simulator exercises the bridge-side command and state
-paths without launching the game.
+The host is the sole Story-mission authority. The guest receives the host's
+mission epoch, phase, safe anchor and companion objective marker without
+starting, unlocking, or overwriting a Story mission in the guest save. If a
+guest starts a private Story mission (for example, Chapter 3 while the host is
+in Chapter 2), it is quarantined and the native HUD tells the guest to exit it
+before following the host again. A downed pair never auto-retries: revive takes
+priority, and only the host can explicitly choose **Retry checkpoint** from the
+diagnostic menu. The actual RDR2 checkpoint-retry native remains unverified and
+therefore fail-closed. The simulator exercises these bridge-side authority and
+isolation paths without launching the game.
 
-The deterministic revive state machine enforces the planned 4 s hold, 2 m
-range and 35% restored health, and consumes refreshed `ReviveRequest` frames.
-Game-input initiation of the first request and restoration of the actual local
-RDR2 ped's health are not yet bound to verified natives, so in-game revive is
-not claimed as working in this preparation build.
+Protocol 27 adds a deny-by-default per-mission progression handshake. When an
+allow-listed Story mission becomes active, the host sends its exact MissionData
+hash. The guest accepts only an exact valid, required, incomplete and unrated
+Story MissionData record while RDR2 permits mission start; the host then binds
+that approval to that mission run
+and may send its completion event. The catalog contains the supplied Story
+mission script list, including `FUD1` (**The New South**) and `HNT1` (**Exit
+Pursued by a Bruised Ego**). The F9 **Arm FUD1** and **Arm HNT1** commands are
+optional controlled test paths for those two missions, not required for normal
+catalog detection. A matching eligible guest receives only MissionData's
+host's actual MissionData rating (normal completion, bronze, silver, or gold),
+then `MISSIONDATA_WAS_COMPLETED` is verified. The positive cash-balance delta
+over that exact host mission run is also transferred, capped at $100,000 and
+applied once only after the guest completion succeeds. Explicit catalogue
+records are then applied idempotently: `HNT1` grants the Legendary Animals map
+plus its challenge unlock, while `FUD1` grants the permanent Fishing Rod. The
+guest catalogue also includes the permanent `SAD3` Carcano and `MAR8`
+Binoculars fallback grants plus the `AB21` Sadie telegram. The fishing rod
+used by `RABI1` is a temporary mission loan and is therefore not copied as a
+permanent weapon reward. The
+inventory path uses the public Character-GUID/slot grant sequence and verifies
+the resulting item count. Horses and any weapon, unlock, document, or recipe
+without an exact tested mission mapping are not copied. The guest retains its
+own preflight decision locally: a completion can be applied only when it
+matches that offer and positive local decision, and an accepted completion
+event is applied at most once.
+
+The deterministic revive state machine enforces a 4 s hold, 2 m range and 35%
+restored health. When an alive player is near a downed peer, the native HUD
+shows a hold-to-revive prompt using the normal Story context control; releasing
+or leaving range cancels it. The host validates the interaction and each game
+restores only its own local RDR2 ped. This remains a two-PC live-test gate
+under the explicit unverified-native-binding switch.
 
 ## Direct build after prerequisites are installed
 

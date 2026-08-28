@@ -35,7 +35,7 @@ public:
     [[nodiscard]] std::span<const BridgeCommand> Commands() const noexcept;
     [[nodiscard]] static std::string_view Label(BridgeCommand command) noexcept;
     [[nodiscard]] static constexpr std::size_t PrimaryCommandCount() noexcept {
-        return 10U;
+        return 12U;
     }
     void Close() noexcept { open_ = false; }
 

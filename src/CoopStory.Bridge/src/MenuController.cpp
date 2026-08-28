@@ -17,6 +17,7 @@ constexpr std::array kCommands{
     BridgeCommand::StopSession,
     BridgeCommand::ProbePoisonThrowingKnifePamphlet,
     BridgeCommand::ToggleDiagnostics,
+    BridgeCommand::ArmFud1MissionProgression,
     BridgeCommand::RetryCheckpoint,
     BridgeCommand::GrantTestLasso,
     BridgeCommand::ToggleSoloTest,
@@ -25,6 +26,9 @@ constexpr std::array kCommands{
     BridgeCommand::ProbeRepeatingShotgunShopUnlock,
     BridgeCommand::EnableRepeatingShotgunShopUnlock,
     BridgeCommand::EnablePoisonThrowingKnifePamphlet,
+    BridgeCommand::GrantTestPistol,
+    BridgeCommand::ArmHunt1MissionProgression,
+    BridgeCommand::DisarmMissionProgression,
     BridgeCommand::Unload,
 };
 
@@ -111,6 +115,12 @@ std::string_view MenuController::Label(const BridgeCommand command) noexcept {
             return "Probe Poison Throwing Knife pamphlet";
         case BridgeCommand::EnablePoisonThrowingKnifePamphlet:
             return "Enable Poison Throwing Knife pamphlet (test)";
+        case BridgeCommand::ArmHunt1MissionProgression:
+            return "Arm HNT1 / Exit Pursued shared progression (host)";
+        case BridgeCommand::ArmFud1MissionProgression:
+            return "Arm FUD1 shared progression (host)";
+        case BridgeCommand::DisarmMissionProgression:
+            return "Clear armed shared progression (host)";
         case BridgeCommand::EmergencyRecover:
             return "Emergency player recovery";
         case BridgeCommand::RetryCheckpoint:

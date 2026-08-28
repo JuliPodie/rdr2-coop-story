@@ -410,7 +410,7 @@ internal static class Program
 
     private static Task MissionCinematicProtocolAsync()
     {
-        Check.Equal((ushort)23, ProtocolConstants.Version);
+        Check.Equal((ushort)27, ProtocolConstants.Version);
         Check.Equal((ushort)35, (ushort)MessageType.MissionCinematicState);
         Check.Equal((ushort)36, (ushort)MessageType.MissionCinematicAction);
 
@@ -569,7 +569,7 @@ internal static class Program
 
     private static Task AppearanceAndAnimSceneProtocolAsync()
     {
-        Check.Equal((ushort)23, ProtocolConstants.Version);
+        Check.Equal((ushort)27, ProtocolConstants.Version);
         Check.Equal((ushort)37, (ushort)MessageType.PlayerAppearanceState);
         Check.Equal((ushort)38, (ushort)MessageType.AnimSceneReplicaState);
         Check.Equal((ushort)39, (ushort)MessageType.AnimSceneDefinition);
@@ -1861,7 +1861,7 @@ internal static class Program
 
     private static Task PlayerActionProtocolAsync()
     {
-        Check.Equal((ushort)23, ProtocolConstants.Version);
+        Check.Equal((ushort)27, ProtocolConstants.Version);
         Check.Equal((ushort)30, (ushort)MessageType.PlayerAction);
 
         var guestId = NetEntityId.Create(0x11223344, 2);
@@ -2127,7 +2127,7 @@ internal static class Program
 
     private static Task InteractionAuthorityProtocolAsync()
     {
-        Check.Equal((ushort)23, ProtocolConstants.Version);
+        Check.Equal((ushort)27, ProtocolConstants.Version);
         Check.Equal((ushort)32, (ushort)MessageType.InteractionIntent);
         Check.Equal((ushort)33, (ushort)MessageType.InteractionResult);
         Check.Equal((ushort)34, (ushort)MessageType.RestraintState);
@@ -3150,7 +3150,7 @@ internal static class Program
 
     private static Task AnimationReplicationPayloadsAsync()
     {
-        Check.Equal((ushort)23, ProtocolConstants.Version);
+        Check.Equal((ushort)27, ProtocolConstants.Version);
         Check.Equal((ushort)28, (ushort)MessageType.PlayerAnimationState);
         Check.Equal((ushort)29, (ushort)MessageType.MotionReplicationConfig);
 
@@ -3370,7 +3370,7 @@ internal static class Program
 
     private static Task WorldAndEquipmentAsync()
     {
-        Check.Equal((ushort)23, ProtocolConstants.Version);
+        Check.Equal((ushort)27, ProtocolConstants.Version);
         Check.Equal((ushort)23, (ushort)MessageType.WorldState);
         Check.Equal((ushort)24, (ushort)MessageType.EquipmentState);
         Check.Equal((ushort)25, (ushort)MessageType.PauseVote);
@@ -3712,6 +3712,38 @@ internal static class Program
         Check.True(SidecarRuntime.IsLocalBridgeMessageAuthorized(
             SessionRole.Guest,
             MessageType.DamageIntent));
+
+        var progression = new MissionProgressionPayload(
+            0x2C3469ED,
+            7,
+            0x700000001,
+            MissionProgressionPhase.Offer,
+            MissionProgressionFlags.None);
+        var progressionEnvelope = new ProtocolEnvelope(
+            MessageType.MissionProgression,
+            1,
+            2,
+            BinaryPayloadCodec.EncodeMissionProgression(progression));
+        SidecarRuntime.ValidateBinaryControlPayload(progressionEnvelope);
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, progressionEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest, progressionEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, progressionEnvelope));
+        Check.False(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Host, progressionEnvelope));
+        var completionProgression = new MissionProgressionPayload(
+            0x2C3469ED,
+            7,
+            0x700000001,
+            MissionProgressionPhase.Completion,
+            MissionProgressionFlags.VerifiedCompletionMapping,
+            CompletionRating: 4,
+            CompletionCashAward: 140);
+        var decodedCompletionProgression = BinaryPayloadCodec.DecodeMissionProgression(
+            BinaryPayloadCodec.EncodeMissionProgression(completionProgression));
+        Check.Equal(completionProgression, decodedCompletionProgression);
 
         ProtocolEnvelope CommandEnvelope(CommandOpcode opcode) =>
             new(
@@ -4059,6 +4091,24 @@ internal static class Program
                 {
                     Flags = PlayerMountStateFlags.Present |
                             PlayerMountStateFlags.BorrowedPeerMount
+                }));
+        var wagon = mount with
+        {
+            Flags = PlayerMountStateFlags.Present |
+                    PlayerMountStateFlags.Mounted |
+                    PlayerMountStateFlags.Vehicle |
+                    PlayerMountStateFlags.VehicleDriver
+        };
+        Check.Equal(
+            wagon,
+            BinaryPayloadCodec.DecodePlayerMountState(
+                BinaryPayloadCodec.EncodePlayerMountState(wagon)));
+        Check.Throws<ProtocolException>(
+            () => BinaryPayloadCodec.EncodePlayerMountState(
+                wagon with
+                {
+                    Flags = wagon.Flags |
+                            PlayerMountStateFlags.VehiclePassenger
                 }));
 
         var damage = new DamageIntentPayload(

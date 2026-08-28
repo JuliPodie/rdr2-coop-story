@@ -1,4 +1,5 @@
 #include "ScriptHookSdkFacade.hpp"
+#include "coopstory/bridge/CampaignMissionCatalog.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -1929,6 +1930,380 @@ void DrawNativeRectangle(
 
 }  // namespace
 
+[[nodiscard]] std::optional<CampaignMissionProbe>
+ScriptHookSdkFacade::ProbeCampaignMission(
+    const std::uint32_t expectedMissionId) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        const auto definition = FindCampaignMission(expectedMissionId);
+        if (!definition.has_value()) return std::nullopt;
+        const auto missionId = static_cast<std::uint32_t>(GAMEPLAY::GET_HASH_KEY(
+            const_cast<char*>(definition->scriptName.data())));
+        const auto runtimeScriptId = static_cast<std::uint32_t>(
+            GAMEPLAY::GET_HASH_KEY(
+                const_cast<char*>(definition->runtimeScriptName.data())));
+        if (missionId != definition->missionId || runtimeScriptId == 0U) {
+            Log("[MISSION_PROGRESSION] mission catalog hash mismatch for " +
+                std::string{definition->scriptName});
+            return std::nullopt;
+        }
+        // The public API has no mission-specific "can start" native. Build
+        // the strongest per-save preflight available from public MissionData:
+        // the exact record must be valid, required Story content, incomplete
+        // and unrated, in addition to RDR2 allowing this player to start a
+        // mission at all. This rejects a later-chapter guest who has already
+        // completed the offered mission instead of treating any open marker
+        // as eligibility for it.
+        const bool missionValid =
+            ::invoke<BOOL>(0xE54DC27571D5EDC5ULL, missionId) != FALSE;
+        const bool requiredStoryMission = missionValid &&
+            ::invoke<BOOL>(0xE824CE7D13FCB35EULL, missionId) != FALSE;
+        const bool wasCompleted = missionValid &&
+            ::invoke<BOOL>(0xE54DC27571D5EDC4ULL, missionId) != FALSE;
+        const std::uint8_t rating = missionValid
+            ? static_cast<std::uint8_t>(std::clamp(
+                ::invoke<int>(0x57E798B54C45EE1AULL, missionId), 0, 5))
+            : static_cast<std::uint8_t>(0U);
+        return CampaignMissionProbe{
+            missionId,
+            SCRIPT::_GET_NUMBER_OF_INSTANCES_OF_SCRIPT_WITH_NAME_HASH(
+                runtimeScriptId) > 0,
+            missionValid && requiredStoryMission && !wasCompleted &&
+                rating == 0U &&
+                PLAYER::CAN_PLAYER_START_MISSION(PLAYER::PLAYER_ID()) != FALSE,
+            wasCompleted, rating};
+#else
+        (void)expectedMissionId;
+#endif
+    } catch (...) {
+        Log("[MISSION_PROGRESSION] mission eligibility probe failed closed");
+    }
+    return std::nullopt;
+}
+
+bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
+    const std::uint32_t missionId,
+    const std::uint64_t completionEventId,
+    const std::uint8_t completionRating) noexcept {
+    (void)completionEventId;
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+    try {
+        constexpr auto kMissionRatingIncomplete = 0;
+        const auto definition = FindCampaignMission(missionId);
+        if (!definition.has_value() ||
+            !HasVerifiedCampaignCompletionMapping(missionId)) {
+            Log("[MISSION_PROGRESSION] completion mapping rejected: mission is not catalog-bound");
+            return false;
+        }
+        // The header supplied for the pinned native study names these direct
+        // public hashes as MISSIONDATA_IS_VALID, MISSIONDATA_GET_RATING,
+        // MISSIONDATA_WAS_COMPLETED and _MISSIONDATA_SET_MISSION_RATING.
+        if (::invoke<BOOL>(0xE54DC27571D5EDC5ULL, missionId) == FALSE) {
+            Log("[MISSION_PROGRESSION] completion mapping rejected: MissionData id is invalid");
+            return false;
+        }
+        const bool alreadyCompleted =
+            ::invoke<BOOL>(0xE54DC27571D5EDC4ULL, missionId) != FALSE;
+        const auto rating = ::invoke<int>(0x57E798B54C45EE1AULL, missionId);
+        if (completionRating < 2U || completionRating > 5U ||
+            (alreadyCompleted && rating != static_cast<int>(completionRating)) ||
+            (!alreadyCompleted && rating != kMissionRatingIncomplete)) {
+            Log("[MISSION_PROGRESSION] completion mapping rejected: guest MissionData state conflicts with host completion");
+            return false;
+        }
+        if (!alreadyCompleted) {
+            // The bundled ScriptHook SDK's invoke template cannot use void as
+            // a return type. MissionData's setter has no meaningful result,
+            // so receive its ABI-sized placeholder and deliberately discard it.
+            (void)::invoke<Any>(
+                0xE824CE7D13FCB300ULL, missionId,
+                static_cast<int>(completionRating));
+        }
+        const bool completed =
+            ::invoke<BOOL>(0xE54DC27571D5EDC4ULL, missionId) != FALSE &&
+            ::invoke<int>(0x57E798B54C45EE1AULL, missionId) ==
+                static_cast<int>(completionRating);
+        if (!completed) {
+            Log("[MISSION_PROGRESSION] MissionData completion verification failed");
+            return false;
+        }
+        const auto playerPed = PLAYER::PLAYER_PED_ID();
+        for (const auto& reward : CampaignMissionRewards(missionId)) {
+            bool rewardApplied{};
+            switch (reward.binding) {
+                case CampaignMissionRewardBinding::WeaponOwnership: {
+                    const auto weapon = static_cast<Hash>(reward.recordHash);
+                    // The lasso is a permanent WNT4 reward but is a utility
+                    // weapon; IS_WEAPON_VALID can report false for it during
+                    // the prologue even though the same delayed-grant native
+                    // accepts it. Keep this narrow exception tied to the
+                    // explicit catalogue record rather than weakening the
+                    // validation for arbitrary reward hashes.
+                    const bool isKnownUtilityWeapon =
+                        weapon == static_cast<Hash>(kWeaponLasso);
+                    if (playerPed != 0 &&
+                        (WEAPON::IS_WEAPON_VALID(weapon) != FALSE ||
+                         isKnownUtilityWeapon)) {
+                        if (WEAPON::HAS_PED_GOT_WEAPON(
+                                playerPed, weapon, FALSE, FALSE) != FALSE) {
+                            rewardApplied = true;
+                        } else {
+                            WEAPON::GIVE_DELAYED_WEAPON_TO_PED(
+                                playerPed, weapon,
+                                static_cast<int>(reward.amount), FALSE, 0);
+                            rewardApplied = WEAPON::HAS_PED_GOT_WEAPON(
+                                playerPed, weapon, FALSE, FALSE) != FALSE;
+                        }
+                    }
+                    break;
+                }
+                case CampaignMissionRewardBinding::UnlockVisible: {
+                    const auto unlock = static_cast<Hash>(reward.recordHash);
+                    const bool visible =
+                        UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+                    if (!visible) {
+                        UNLOCK::_0x46B901A8ECDB5A61(unlock, TRUE);
+                    }
+                    rewardApplied =
+                        UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+                    break;
+                }
+                case CampaignMissionRewardBinding::RecipeUnlock: {
+                    // RDR2 stores a recipe's availability separately from
+                    // the pamphlet held in inventory. The verified mission
+                    // catalogue therefore models this as an explicit second
+                    // reward record, rather than inferring it from a
+                    // document grant.
+                    const auto unlock = static_cast<Hash>(reward.recordHash);
+                    const bool visible =
+                        UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+                    const bool unlocked =
+                        UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+                    if (!visible) {
+                        UNLOCK::_0x46B901A8ECDB5A61(unlock, TRUE);
+                    }
+                    if (!unlocked) {
+                        UNLOCK::_0x1B7C5ADA8A6910A0(unlock, TRUE);
+                    }
+                    rewardApplied =
+                        UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE &&
+                        UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+                    break;
+                }
+                case CampaignMissionRewardBinding::UnlockEntitlement: {
+                    const auto unlock = static_cast<Hash>(reward.recordHash);
+                    const bool visible =
+                        UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
+                    const bool unlocked =
+                        UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+                    if (!visible) {
+                        UNLOCK::_0x46B901A8ECDB5A61(unlock, TRUE);
+                    }
+                    if (!unlocked) {
+                        UNLOCK::_0x1B7C5ADA8A6910A0(unlock, TRUE);
+                    }
+                    rewardApplied =
+                        UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE &&
+                        UNLOCK::_0xC4B660C7B6040E75(unlock) != FALSE;
+                    break;
+                }
+                case CampaignMissionRewardBinding::WeaponShopEligibility: {
+                    // Unlike a weapon ownership reward, this preserves the
+                    // guest's economy: the item becomes buyable through the
+                    // same local gunsmith path as vanilla Story Mode.
+                    rewardApplied = UnlockLocalWeaponEntitlement(
+                        reward.recordHash);
+                    break;
+                }
+                case CampaignMissionRewardBinding::InventoryItem: {
+                    // Story scripts create a CHARACTER parent GUID, resolve
+                    // any required container GUID, resolve the item's own
+                    // GUID/slot, then add the item. Follow that public-native
+                    // sequence exactly; a raw item hash without its parent
+                    // and compatible slot can corrupt or orphan inventory
+                    // records.
+                    constexpr Hash kDefaultInventorySlot = 1084182731U;
+                    constexpr Hash kWardrobeInventorySlot = 1034665895U;
+                    constexpr Hash kKitCampInventorySlot =
+                        static_cast<Hash>(-1311702610);
+                    constexpr Hash kAddReasonAwards = 0xB784AD1EU;
+                    // joaat("CHARACTER") is deliberately calculated with
+                    // the same stable hash routine used by the catalogue.
+                    constexpr Hash kCharacter = static_cast<Hash>(
+                        CampaignMissionId("CHARACTER"));
+                    constexpr Hash kWardrobe = static_cast<Hash>(
+                        CampaignMissionId("WARDROBE"));
+                    constexpr Hash kKitCamp = static_cast<Hash>(
+                        CampaignMissionId("KIT_CAMP"));
+                    const auto item = static_cast<Hash>(reward.recordHash);
+                    // These public inventory natives are named in the
+                    // supplied header but absent from the older bundled SDK.
+                    constexpr std::uint64_t kInventoryIdFromPed =
+                        0x13D234A2A3F66E63ULL;
+                    constexpr std::uint64_t kInventoryCountByItem =
+                        0xE787F05DFC977BDEULL;
+                    constexpr std::uint64_t kInventoryGuidFromItem =
+                        0x886DFD3E185C8A89ULL;
+                    constexpr std::uint64_t kInventoryGuidIsValid =
+                        0xB881CA836CC4B6D4ULL;
+                    constexpr std::uint64_t kInventoryFitsSlotId =
+                        0x780C5B9AE2819807ULL;
+                    constexpr std::uint64_t kInventoryAddWithGuid =
+                        0xCB5D11F9508A928DULL;
+                    constexpr std::uint64_t kItemDatabaseKeyValid =
+                        0x6D5D51B188333FD1ULL;
+                    if (::invoke<BOOL>(kItemDatabaseKeyValid, item, 0) ==
+                        FALSE) {
+                        break;
+                    }
+                    const auto inventoryId = ::invoke<int>(
+                        kInventoryIdFromPed, PLAYER::PLAYER_PED_ID());
+                    const auto before = inventoryId >= 0
+                        ? ::invoke<int>(kInventoryCountByItem, inventoryId,
+                            item, FALSE)
+                        : -1;
+                    if (inventoryId < 0 || before < 0 || reward.amount == 0U) {
+                        break;
+                    }
+                    if (before > 0) {
+                        rewardApplied = true;
+                        break;
+                    }
+                    std::array<Any, 4U> emptyGuid{};
+                    std::array<Any, 4U> characterGuid{};
+                    std::array<Any, 4U> itemGuid{};
+                    if (::invoke<BOOL>(kInventoryGuidFromItem, inventoryId,
+                            emptyGuid.data(), kCharacter, 0,
+                            characterGuid.data()) == FALSE ||
+                        ::invoke<BOOL>(kInventoryGuidIsValid,
+                            characterGuid.data()) == FALSE) {
+                        break;
+                    }
+                    // This mirrors the standard Story helper's compatible
+                    // slot selection. It makes documents, wardrobe records
+                    // and camp-kit records distinct instead of forcing every
+                    // reward into the CHARACTER/default slot.
+                    auto itemSlot = kDefaultInventorySlot;
+                    auto parentGuid = characterGuid;
+                    if (::invoke<BOOL>(kInventoryFitsSlotId, item,
+                            kDefaultInventorySlot) == FALSE) {
+                        if (::invoke<BOOL>(kInventoryFitsSlotId, item,
+                                kWardrobeInventorySlot) != FALSE) {
+                            if (::invoke<BOOL>(kInventoryGuidFromItem,
+                                    inventoryId, characterGuid.data(),
+                                    kWardrobe, 0, parentGuid.data()) == FALSE ||
+                                ::invoke<BOOL>(kInventoryGuidIsValid,
+                                    parentGuid.data()) == FALSE) {
+                                break;
+                            }
+                            itemSlot = kWardrobeInventorySlot;
+                        } else if (::invoke<BOOL>(kInventoryFitsSlotId, item,
+                                       kKitCampInventorySlot) != FALSE) {
+                            if (::invoke<BOOL>(kInventoryGuidFromItem,
+                                    inventoryId, characterGuid.data(),
+                                    kKitCamp, 0, parentGuid.data()) == FALSE ||
+                                ::invoke<BOOL>(kInventoryGuidIsValid,
+                                    parentGuid.data()) == FALSE) {
+                                break;
+                            }
+                            itemSlot = kKitCampInventorySlot;
+                        } else {
+                            Log("[MISSION_REWARD] inventory item has no supported Story slot");
+                            break;
+                        }
+                    }
+                    if (::invoke<BOOL>(kInventoryGuidFromItem, inventoryId,
+                            parentGuid.data(), item, itemSlot,
+                            itemGuid.data()) == FALSE ||
+                        ::invoke<BOOL>(kInventoryAddWithGuid, inventoryId,
+                            itemGuid.data(), parentGuid.data(), item, itemSlot,
+                            static_cast<int>(reward.amount),
+                            kAddReasonAwards) == FALSE) {
+                        break;
+                    }
+                    const auto after =
+                        ::invoke<int>(kInventoryCountByItem, inventoryId,
+                            item, FALSE);
+                    rewardApplied = after >= before +
+                        static_cast<int>(reward.amount);
+                    break;
+                }
+            }
+            if (!rewardApplied) {
+                Log("[MISSION_REWARD] catalog reward failed closed for " +
+                    std::string{definition->scriptName} + ", record=" +
+                    std::to_string(reward.recordHash));
+                return false;
+            }
+        }
+        // MissionData persists the actual completion and rating. Mark the
+        // guest's vanilla mission journal only after every companion reward
+        // has also succeeded, so a failed retry cannot advertise a completed
+        // mission whose guest state is still incomplete. The documented UI
+        // native is idempotent for an already-completed mission.
+        (void)::invoke<Any>(0xDE31D66D1E54C471ULL, missionId);
+        Log("[MISSION_PROGRESSION] MissionData completion mapping " +
+            std::string{definition->scriptName} + " result=" +
+            std::to_string(completed ? 1 : 0) + ", rating=" +
+            std::to_string(completionRating));
+        return true;
+    } catch (...) {
+        Log("[MISSION_PROGRESSION] MissionData completion mapping raised an exception");
+    }
+#else
+    (void)missionId;
+#endif
+    return false;
+}
+
+std::optional<std::int32_t> ScriptHookSdkFacade::QueryLocalCashBalance()
+    noexcept {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+    try {
+        // MONEY::_MONEY_GET_CASH_BALANCE is public in the supplied native
+        // header. It is sampled as a delta only; the total is never sent.
+        const auto cash = ::invoke<int>(0x0C02DABFA3B98176ULL);
+        return cash >= 0 ? std::optional<std::int32_t>{cash} : std::nullopt;
+    } catch (...) {
+        Log("[MISSION_REWARD] local cash snapshot failed");
+    }
+#endif
+    return std::nullopt;
+}
+
+bool ScriptHookSdkFacade::ApplyCampaignMissionCashAward(
+    const std::uint64_t completionEventId,
+    const std::int32_t amount) noexcept {
+    constexpr std::int32_t kMaximumMissionCashAward = 10'000'000;
+    if (completionEventId == 0U || amount <= 0 ||
+        amount > kMaximumMissionCashAward) {
+        return false;
+    }
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+    try {
+        constexpr Hash kAddReasonAwards = 0xB784AD1EU;
+        const auto before = ::invoke<int>(0x0C02DABFA3B98176ULL);
+        if (before < 0 || ::invoke<BOOL>(
+                0xBC3422DC91667621ULL, amount, kAddReasonAwards) == FALSE) {
+            return false;
+        }
+        const auto after = ::invoke<int>(0x0C02DABFA3B98176ULL);
+        const bool applied = after >= before && after - before == amount;
+        Log("[MISSION_REWARD] cash event=" +
+            std::to_string(completionEventId) + ", amount=" +
+            std::to_string(amount) + ", result=" +
+            std::to_string(applied ? 1 : 0));
+        return applied;
+    } catch (...) {
+        Log("[MISSION_REWARD] guest cash award raised an exception");
+    }
+#else
+    (void)completionEventId;
+    (void)amount;
+#endif
+    return false;
+}
+
 ScriptHookSdkFacade::ScriptHookSdkFacade()
     : started_(std::chrono::steady_clock::now()) {}
 
@@ -2355,6 +2730,8 @@ void ScriptHookSdkFacade::RefreshRemotePlayerActionDerivedState() noexcept {
         channelActive(PlayerActionKind::Hogtie);
     remoteActionKnockdownActive_ =
         channelActive(PlayerActionKind::Knockdown);
+    remoteActionCraftingActive_ =
+        channelActive(PlayerActionKind::Crafting);
 }
 
 void ScriptHookSdkFacade::CancelRemoteMeleeVisual(
@@ -2495,6 +2872,7 @@ void ScriptHookSdkFacade::ClearRemotePlayerActions() noexcept {
     remoteActionGrappleActive_ = false;
     remoteActionLassoActive_ = false;
     remoteActionKnockdownActive_ = false;
+    remoteActionCraftingActive_ = false;
     remotePeerDismountActionId_ = 0U;
     remotePeerDismountStartedMs_ = 0U;
     remotePeerDismountLastAttemptMs_ = 0U;
@@ -3451,6 +3829,65 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
                 mount.heading = missionSpectatorSavedHeading_;
             }
             sample.mount = mount;
+        }
+    }
+    // A wagon is represented through the same relationship lane as a mount:
+    // one endpoint owns the local physics (the driver) while the other is
+    // assigned a seat in its own non-networked replica.  Never publish a
+    // process-local vehicle handle.
+    if (PED::IS_PED_IN_ANY_VEHICLE(ped, FALSE) != FALSE) {
+        const auto vehicle = PED::GET_VEHICLE_PED_IS_IN(ped, FALSE);
+        if (vehicle != 0 && ENTITY::DOES_ENTITY_EXIST(vehicle) != FALSE) {
+            const auto localVehicleHandle =
+                static_cast<LocalEntityHandle>(vehicle);
+            const auto sharedVehicle =
+                remoteVehicleReplicas_.FindNetwork(localVehicleHandle);
+            const bool borrowedVehicle = sharedVehicle.has_value();
+            const auto modelHash = static_cast<std::uint32_t>(
+                ENTITY::GET_ENTITY_MODEL(vehicle));
+            if (!borrowedVehicle) {
+                localKnownVehicleHandle_ = localVehicleHandle;
+                localKnownVehicleModelHash_ = modelHash;
+            }
+            LocalMountSample relationship;
+            relationship.localHandle = localVehicleHandle;
+            relationship.sharedEntityId =
+                sharedVehicle.value_or(NetEntityId{});
+            relationship.sharedGeneration = borrowedVehicle
+                ? (remoteVehicleGeneration_ == 0U
+                       ? 1U
+                       : remoteVehicleGeneration_)
+                : 0U;
+            relationship.modelHash = modelHash;
+            relationship.position = ToBridgeVector(
+                ENTITY::GET_ENTITY_COORDS(vehicle, TRUE, FALSE));
+            relationship.velocity = ToBridgeVector(
+                ENTITY::GET_ENTITY_VELOCITY(vehicle, 0));
+            auto vehicleHeading = ENTITY::GET_ENTITY_HEADING(vehicle);
+            vehicleHeading = std::fmod(vehicleHeading, 360.0F);
+            if (vehicleHeading < 0.0F) {
+                vehicleHeading += 360.0F;
+            }
+            relationship.heading = vehicleHeading;
+            const auto vehicleHealth = static_cast<float>(
+                ENTITY::GET_ENTITY_HEALTH(vehicle));
+            const auto vehicleMaximumHealth = static_cast<float>(
+                ENTITY::GET_ENTITY_MAX_HEALTH(vehicle, FALSE));
+            relationship.healthFraction = vehicleMaximumHealth > 0.0F
+                ? std::clamp(vehicleHealth / vehicleMaximumHealth, 0.0F, 1.0F)
+                : 1.0F;
+            relationship.mounted = true;
+            relationship.dead = vehicleHealth <= 0.0F;
+            relationship.borrowedPeerMount = borrowedVehicle;
+            relationship.vehicle = true;
+            relationship.vehicleDriver =
+                VEHICLE::GET_PED_IN_VEHICLE_SEAT(vehicle, -1) == ped;
+            relationship.vehiclePassenger = !relationship.vehicleDriver;
+            if (relationship.modelHash != 0U &&
+                IsFinite(relationship.position) &&
+                IsFinite(relationship.velocity)) {
+                sample.mount = relationship;
+            }
         }
     }
     sample.aiming =
@@ -5741,7 +6178,9 @@ void ScriptHookSdkFacade::DrawBridgeHud(
             state.diagnosticsEnabled !=
                 previousHudState_.diagnosticsEnabled ||
             state.soloOverrideEnabled !=
-                previousHudState_.soloOverrideEnabled;
+                previousHudState_.soloOverrideEnabled ||
+            state.reviveAvailable != previousHudState_.reviveAvailable ||
+            state.missionConflict != previousHudState_.missionConflict;
         previousHudState_ = state;
         hasPreviousHudState_ = true;
 
@@ -5816,6 +6255,49 @@ void ScriptHookSdkFacade::DrawBridgeHud(
             red,
             green,
             blue);
+        if (state.reviveAvailable) {
+            const auto percent = static_cast<int>(std::lround(
+                std::clamp(state.reviveProgress, 0.0F, 1.0F) * 100.0F));
+            const std::string prompt = state.reviveProgress > 0.0F
+                ? "REVIVING PEER " + std::to_string(percent) + "% — KEEP HOLDING CONTEXT"
+                : "HOLD CONTEXT NEAR YOUR DOWNED PEER TO REVIVE";
+            DrawNativeRectangle(
+                0.5F,
+                0.82F,
+                0.54F,
+                0.042F,
+                4,
+                9,
+                12,
+                210);
+            DrawNativeText(
+                prompt,
+                0.016F,
+                0.81F,
+                0.265F,
+                255,
+                235,
+                170);
+        }
+        if (state.missionConflict) {
+            DrawNativeRectangle(
+                0.5F,
+                0.765F,
+                0.68F,
+                0.042F,
+                55,
+                18,
+                12,
+                220);
+            DrawNativeText(
+                "LOCAL STORY MISSION IS ISOLATED — EXIT IT TO FOLLOW THE HOST",
+                0.016F,
+                0.755F,
+                0.225F,
+                255,
+                205,
+                130);
+        }
 #endif
     } catch (...) {
         // HUD rendering and status logging are best effort only.
@@ -6745,6 +7227,7 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
                     break;
                 case PlayerActionKind::Aim:
                 case PlayerActionKind::Knockdown:
+                case PlayerActionKind::Crafting:
                 case PlayerActionKind::None:
                     break;
             }
@@ -6840,6 +7323,15 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
                 DeleteRemotePeerLassoRope();
                 ++remotePlayerActionNativeCancels_;
             }
+            if (action.kind == PlayerActionKind::Crafting &&
+                actor.has_value() &&
+                ENTITY::DOES_ENTITY_EXIST(*actor) != FALSE) {
+                // This is a bridge-owned puppet task, never the local
+                // player's crafting UI or inventory transaction.
+                AI::CLEAR_PED_TASKS(*actor, FALSE, FALSE);
+                PED::SET_PED_KEEP_TASK(*actor, FALSE);
+                ++remotePlayerActionNativeCancels_;
+            }
             Log(
                 "[ACTION_FSM] terminal kind=" +
                 std::to_string(static_cast<std::uint8_t>(action.kind)) +
@@ -6851,6 +7343,45 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
         }
 
         if (newAction &&
+            action.phase == PlayerActionPhase::Begin &&
+            action.kind == PlayerActionKind::Crafting) {
+            bool scenarioStarted{};
+            if (actor.has_value() &&
+                ENTITY::DOES_ENTITY_EXIST(*actor) != FALSE &&
+                (action.flags & static_cast<std::uint32_t>(
+                     PlayerActionFlag::ActorAnchorValid)) != 0U &&
+                IsFinite(action.actorAnchor) &&
+                PED::IS_PED_ON_MOUNT(*actor) == FALSE &&
+                PED::IS_PED_RAGDOLL(*actor) == FALSE) {
+                constexpr float kCraftingScenarioRadiusMeters = 2.5F;
+                if (AI::DOES_SCENARIO_EXIST_IN_AREA(
+                        action.actorAnchor.x,
+                        action.actorAnchor.y,
+                        action.actorAnchor.z,
+                        kCraftingScenarioRadiusMeters,
+                        TRUE,
+                        0,
+                        FALSE) != FALSE) {
+                    AI::TASK_USE_NEAREST_SCENARIO_TO_COORD_WARP(
+                        *actor,
+                        action.actorAnchor.x,
+                        action.actorAnchor.y,
+                        action.actorAnchor.z,
+                        kCraftingScenarioRadiusMeters,
+                        0,
+                        TRUE,
+                        FALSE,
+                        FALSE,
+                        FALSE);
+                    PED::SET_PED_KEEP_TASK(*actor, TRUE);
+                    scenarioStarted = true;
+                    Log("[CRAFTING_ACTIVITY] remote scenario presentation started");
+                }
+            }
+            if (!scenarioStarted) {
+                Log("[CRAFTING_ACTIVITY] semantic activity accepted; no matching local scenario");
+            }
+        } else if (newAction &&
             action.phase == PlayerActionPhase::Begin &&
             action.kind == PlayerActionKind::MeleeAttack) {
             bool visualStarted{};
@@ -7235,11 +7766,40 @@ bool ScriptHookSdkFacade::ApplyInteractionResult(
         }
         if (result.kind == InteractionKind::MountDriver ||
             result.kind == InteractionKind::MountPassenger) {
-            // The mount registry applies rider/mount ownership on its next
-            // authoritative PlayerMountState. Completing the semantic
-            // transaction here without creating a second horse is safer than
-            // resolving a process-local handle from an untrusted ID.
-            return result.secondaryEntityId.IsValid();
+            if (!result.secondaryEntityId.IsValid()) {
+                return false;
+            }
+            // A shared vehicle is resolved only through bridge-owned local
+            // registries.  The wire identity is never treated as an RDR2
+            // handle, which prevents a peer from seating a ped in an
+            // arbitrary local carriage.
+            auto vehicleHandle = remoteVehicleReplicas_.FindLocal(
+                result.secondaryEntityId);
+            if (!vehicleHandle.has_value() && localKnownVehicleHandle_ != 0) {
+                vehicleHandle = localKnownVehicleHandle_;
+            }
+            if (!vehicleHandle.has_value() ||
+                ENTITY::DOES_ENTITY_EXIST(*vehicleHandle) == FALSE) {
+                // Horse relationships remain applied by the next
+                // PlayerMountState, as before.
+                return true;
+            }
+            const auto rider = result.actorEntityId == localEntityId
+                ? PLAYER::PLAYER_PED_ID()
+                : replicas_.FindLocal(result.actorEntityId).value_or(0);
+            if (rider == 0 || rider == PLAYER::PLAYER_PED_ID() &&
+                result.actorEntityId != localEntityId) {
+                return false;
+            }
+            const auto seat = result.kind == InteractionKind::MountDriver
+                ? -1
+                : 0;
+            const auto vehicle = static_cast<Vehicle>(*vehicleHandle);
+            if (VEHICLE::GET_PED_IN_VEHICLE_SEAT(vehicle, seat) != rider) {
+                PED::SET_PED_INTO_VEHICLE(rider, vehicle, seat);
+            }
+            Log("[SHARED_WAGON] authoritative seat assignment applied");
+            return true;
         }
         return true;
 #else
@@ -11904,6 +12464,12 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
         constexpr auto kBorrowedPeerMount =
             static_cast<std::uint8_t>(
                 PlayerMountStateFlag::BorrowedPeerMount);
+        constexpr auto kVehicle =
+            static_cast<std::uint8_t>(PlayerMountStateFlag::Vehicle);
+        constexpr auto kVehicleDriver =
+            static_cast<std::uint8_t>(PlayerMountStateFlag::VehicleDriver);
+        constexpr auto kVehiclePassenger =
+            static_cast<std::uint8_t>(PlayerMountStateFlag::VehiclePassenger);
         if (!state.playerEntityId.IsValid() ||
             !state.mountEntityId.IsValid() ||
             state.playerEntityId != remotePlayerId_ ||
@@ -11912,6 +12478,106 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
         }
         if ((state.flags & kPresent) == 0U) {
             ClearRemoteMount();
+            return true;
+        }
+        const bool vehicle = (state.flags & kVehicle) != 0U;
+        const bool vehicleDriver = (state.flags & kVehicleDriver) != 0U;
+        const bool vehiclePassenger =
+            (state.flags & kVehiclePassenger) != 0U;
+        if (vehicle) {
+            if (!vehicleDriver == !vehiclePassenger ||
+                state.modelHash == 0U || !IsFinite(state.position) ||
+                !IsFinite(state.velocity) || !std::isfinite(state.heading) ||
+                state.heading < 0.0F || state.heading >= 360.0F) {
+                return false;
+            }
+            const auto remotePlayer = replicas_.FindLocal(state.playerEntityId);
+            if (!remotePlayer.has_value() ||
+                *remotePlayer == PLAYER::PLAYER_PED_ID() ||
+                ENTITY::DOES_ENTITY_EXIST(*remotePlayer) == FALSE) {
+                return false;
+            }
+            const auto rider = static_cast<Ped>(*remotePlayer);
+            const bool borrowed = (state.flags & kBorrowedPeerMount) != 0U;
+            const bool aliasesLocalVehicle =
+                localState.has_value() &&
+                (localState->flags & kPresent) != 0U &&
+                (localState->flags & kVehicle) != 0U &&
+                (localState->flags & kBorrowedPeerMount) == 0U &&
+                localState->mountEntityId == state.mountEntityId &&
+                localState->generation == state.generation;
+            Vehicle vehicleHandle{};
+            if (borrowed || aliasesLocalVehicle) {
+                if (!aliasesLocalVehicle || localKnownVehicleHandle_ == 0) {
+                    return true;
+                }
+                vehicleHandle = static_cast<Vehicle>(localKnownVehicleHandle_);
+                if (ENTITY::DOES_ENTITY_EXIST(vehicleHandle) == FALSE ||
+                    static_cast<std::uint32_t>(
+                        ENTITY::GET_ENTITY_MODEL(vehicleHandle)) != state.modelHash) {
+                    return true;
+                }
+            } else {
+                if (remoteVehicleId_.IsValid() &&
+                    (remoteVehicleId_ != state.mountEntityId ||
+                     remoteVehicleModelHash_ != state.modelHash ||
+                     remoteVehicleGeneration_ != state.generation)) {
+                    ClearRemoteMount();
+                }
+                remoteVehicleId_ = state.mountEntityId;
+                remoteVehicleModelHash_ = state.modelHash;
+                remoteVehicleGeneration_ = state.generation;
+                auto handle = remoteVehicleReplicas_.FindLocal(state.mountEntityId);
+                if (handle.has_value() &&
+                    ENTITY::DOES_ENTITY_EXIST(*handle) == FALSE) {
+                    (void)remoteVehicleReplicas_.Remove(state.mountEntityId);
+                    handle.reset();
+                }
+                if (!handle.has_value()) {
+                    const auto model = static_cast<Hash>(state.modelHash);
+                    if (STREAMING::IS_MODEL_VALID(model) == FALSE ||
+                        STREAMING::IS_MODEL_A_VEHICLE(model) == FALSE) {
+                        return false;
+                    }
+                    if (remoteVehicleRequestedAtMs_ == 0U) {
+                        remoteVehicleRequestedAtMs_ = TickMilliseconds();
+                    }
+                    STREAMING::REQUEST_MODEL(model, FALSE);
+                    if (STREAMING::HAS_MODEL_LOADED(model) == FALSE) {
+                        return true;
+                    }
+                    vehicleHandle = VEHICLE::CREATE_VEHICLE(
+                        model, state.position.x, state.position.y, state.position.z,
+                        state.heading, FALSE, FALSE, FALSE, FALSE);
+                    STREAMING::SET_MODEL_AS_NO_LONGER_NEEDED(model);
+                    if (vehicleHandle == 0) {
+                        return true;
+                    }
+                    ENTITY::SET_ENTITY_AS_MISSION_ENTITY(vehicleHandle, TRUE, TRUE);
+                    ENTITY::SET_ENTITY_CAN_BE_DAMAGED(vehicleHandle, FALSE);
+                    ENTITY::SET_ENTITY_COLLISION(vehicleHandle, TRUE, TRUE);
+                    if (!remoteVehicleReplicas_.Bind(
+                            state.mountEntityId,
+                            static_cast<LocalEntityHandle>(vehicleHandle))) {
+                        VEHICLE::DELETE_VEHICLE(&vehicleHandle);
+                        return false;
+                    }
+                    Log("[SHARED_WAGON] remote vehicle replica created");
+                } else {
+                    vehicleHandle = static_cast<Vehicle>(*handle);
+                }
+                ENTITY::SET_ENTITY_COORDS_NO_OFFSET(
+                    vehicleHandle, state.position.x, state.position.y, state.position.z,
+                    FALSE, FALSE, FALSE);
+                ENTITY::SET_ENTITY_HEADING(vehicleHandle, state.heading);
+                ENTITY::SET_ENTITY_VELOCITY(
+                    vehicleHandle, state.velocity.x, state.velocity.y, state.velocity.z);
+            }
+            const auto desiredSeat = vehicleDriver ? -1 : 0;
+            if (PED::GET_VEHICLE_PED_IS_IN(rider, FALSE) != vehicleHandle ||
+                VEHICLE::GET_PED_IN_VEHICLE_SEAT(vehicleHandle, desiredSeat) != rider) {
+                PED::SET_PED_INTO_VEHICLE(rider, vehicleHandle, desiredSeat);
+            }
             return true;
         }
         const auto exactSceneRider = replicas_.FindLocal(state.playerEntityId);
@@ -12395,6 +13061,13 @@ void ScriptHookSdkFacade::ClearRemoteMount() noexcept {
                 PED::DELETE_PED(&mount);
             }
         }
+        for (const auto handle : remoteVehicleReplicas_.Drain()) {
+            auto vehicle = static_cast<Vehicle>(handle);
+            if (vehicle != 0 &&
+                ENTITY::DOES_ENTITY_EXIST(vehicle) != FALSE) {
+                VEHICLE::DELETE_VEHICLE(&vehicle);
+            }
+        }
         if (remoteMountModelHash_ != 0U) {
             STREAMING::SET_MODEL_AS_NO_LONGER_NEEDED(
                 static_cast<Hash>(
@@ -12408,6 +13081,10 @@ void ScriptHookSdkFacade::ClearRemoteMount() noexcept {
     remoteMountModelHash_ = 0U;
     remoteMountGeneration_ = 0U;
     remoteMountRequestedAtMs_ = 0U;
+    remoteVehicleId_ = NetEntityId{};
+    remoteVehicleModelHash_ = 0U;
+    remoteVehicleGeneration_ = 0U;
+    remoteVehicleRequestedAtMs_ = 0U;
     previousRemoteMountTaskMs_ = 0U;
     previousRemoteMountTransformMs_ = 0U;
     remoteMountDiagnosticsStartedMs_ = 0U;
@@ -14273,13 +14950,12 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                     GetAnimSceneActiveCameraCount(candidate) <= 0) {
                     return false;
                 }
-                // Never DELETE, pause, or accelerate a game-owned scene: its
-                // Story script can be waiting for exact authored timing. The
-                // V31.5 4x rate was visible after the host scene completed and
-                // is the direct cause of the guest's super-fast second scene.
-                // Quarantine owns presentation while the vanilla scene keeps
-                // its native rate in the background.
-                SetAnimScenePaused(candidate, false);
+                // Never DELETE, pause, unpause, or accelerate a game-owned
+                // scene: its Story script can be waiting for exact authored
+                // timing. The previous unconditional unpause here could race
+                // a script-owned pause and advance a private guest scene
+                // independently of the host. Quarantine owns presentation
+                // while the vanilla scene keeps its own native timing.
                 guestMissionQuarantinedAnimSceneHandles_.insert(candidate);
                 guestMissionAuthoredSceneSeenUntilMs_ =
                     now + kGuestMissionClearConfirmationMilliseconds;

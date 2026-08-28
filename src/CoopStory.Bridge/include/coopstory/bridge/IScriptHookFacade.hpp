@@ -32,6 +32,12 @@ struct LocalMountSample final {
     bool mounted{};
     bool dead{};
     bool borrowedPeerMount{};
+    // The mount-state lane is also used for a shared wagon/carriage.  It is
+    // deliberately a relationship sample, not a claim that vehicle physics
+    // are deterministic on both machines.
+    bool vehicle{};
+    bool vehicleDriver{};
+    bool vehiclePassenger{};
 };
 
 struct LocalPlayerSample final {
@@ -107,6 +113,9 @@ struct BridgeHudState final {
     bool remoteConnected{};
     bool diagnosticsEnabled{};
     bool soloOverrideEnabled{};
+    bool reviveAvailable{};
+    float reviveProgress{};
+    bool missionConflict{};
 };
 
 struct PauseVoteView final {
@@ -162,6 +171,19 @@ struct MissionCameraSample final {
     Vec3 rotation{};
     float fieldOfView{};
     std::uint32_t flags{};
+};
+
+// A catalog entry is intentionally a stable script hash rather than a save
+// offset.  `canStart` is evidence from the guest's own save; it is never
+// inferred from the host chapter or copied between machines. `wasCompleted`
+// is a read-only MISSIONDATA result and distinguishes normal completion from
+// an aborted or unloaded mission script.
+struct CampaignMissionProbe final {
+    std::uint32_t missionId{};
+    bool active{};
+    bool canStart{};
+    bool wasCompleted{};
+    std::uint8_t rating{};
 };
 
 // Host-process capture records. These types may contain RDR2 handles, so they
@@ -355,6 +377,34 @@ public:
     [[nodiscard]] virtual std::vector<CampaignCapabilityObservation>
     DrainCampaignCapabilityObservations() noexcept {
         return {};
+    }
+    [[nodiscard]] virtual std::optional<CampaignMissionProbe>
+    ProbeCampaignMission(std::uint32_t expectedMissionId) noexcept {
+        (void)expectedMissionId;
+        return std::nullopt;
+    }
+    // This must return false until the entry's exact native completion mapping
+    // has been validated on the pinned game build. It must never write saves
+    // or script globals directly.
+    [[nodiscard]] virtual bool ApplyCampaignMissionCompletion(
+        std::uint32_t missionId,
+        std::uint64_t completionEventId,
+        std::uint8_t completionRating) noexcept {
+        (void)missionId;
+        (void)completionEventId;
+        (void)completionRating;
+        return false;
+    }
+    [[nodiscard]] virtual std::optional<std::int32_t>
+    QueryLocalCashBalance() noexcept {
+        return std::nullopt;
+    }
+    [[nodiscard]] virtual bool ApplyCampaignMissionCashAward(
+        std::uint64_t completionEventId,
+        std::int32_t amount) noexcept {
+        (void)completionEventId;
+        (void)amount;
+        return false;
     }
     [[nodiscard]] virtual std::optional<float> HostGuestDistanceMeters() noexcept = 0;
     [[nodiscard]] virtual MenuInputState ReadMenuInput() noexcept = 0;

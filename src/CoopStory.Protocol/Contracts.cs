@@ -45,6 +45,30 @@ public readonly record struct CampaignCapabilityAckPayload(
     uint RecordHash,
     ulong HostEventId);
 
+public enum MissionProgressionPhase : byte
+{
+    Offer = 1,
+    Eligibility = 2,
+    Completion = 3
+}
+
+[Flags]
+public enum MissionProgressionFlags : byte
+{
+    None = 0,
+    GuestCanStart = 1 << 0,
+    VerifiedCompletionMapping = 1 << 1
+}
+
+public readonly record struct MissionProgressionPayload(
+    uint MissionId,
+    uint MissionEpoch,
+    ulong EventId,
+    MissionProgressionPhase Phase,
+    MissionProgressionFlags Flags,
+    byte CompletionRating = 0,
+    int CompletionCashAward = 0);
+
 // Positive native collection evidence only. No money, items, or private
 // inventory is allowed on this channel.
 public readonly record struct PickupCollectedPayload(
@@ -174,7 +198,8 @@ public enum PlayerActionKind : byte
     Grapple = 4,
     Lasso = 5,
     Hogtie = 6,
-    Knockdown = 7
+    Knockdown = 7,
+    Crafting = 8
 }
 
 public enum PlayerActionPhase : byte
@@ -377,7 +402,10 @@ public enum PlayerMountStateFlags : byte
     Present = 1 << 0,
     Mounted = 1 << 1,
     Dead = 1 << 2,
-    BorrowedPeerMount = 1 << 3
+    BorrowedPeerMount = 1 << 3,
+    Vehicle = 1 << 4,
+    VehicleDriver = 1 << 5,
+    VehiclePassenger = 1 << 6
 }
 
 public readonly record struct PlayerMountStatePayload(
@@ -493,7 +521,9 @@ public enum MissionStateFlags : byte
     CheckpointRecovery = 1 << 2,
     ScriptedControlLock = 1 << 3,
     ScreenTransition = 1 << 4,
-    ScenarioActivity = 1 << 5
+    ScenarioActivity = 1 << 5,
+    ScriptedVehicleTransition = 1 << 6,
+    MinigameActivity = 1 << 7
 }
 
 public readonly record struct MissionStatePayload(

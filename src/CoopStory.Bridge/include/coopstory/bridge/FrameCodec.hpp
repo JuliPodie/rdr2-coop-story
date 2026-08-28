@@ -12,7 +12,7 @@
 namespace coopstory::bridge {
 
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
-inline constexpr std::uint16_t kProtocolVersion = 23U;
+inline constexpr std::uint16_t kProtocolVersion = 27U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
@@ -61,6 +61,7 @@ enum class MessageType : std::uint16_t {
     CampaignCapability = 41,
     CampaignCapabilityAck = 42,
     PickupCollected = 43,
+    MissionProgression = 44,
 };
 
 [[nodiscard]] bool IsKnownMessageType(std::uint16_t value) noexcept;
@@ -253,6 +254,7 @@ enum class PlayerActionKind : std::uint8_t {
     Lasso = 5,
     Hogtie = 6,
     Knockdown = 7,
+    Crafting = 8,
 };
 
 enum class PlayerActionPhase : std::uint8_t {
@@ -545,6 +547,9 @@ enum class PlayerMountStateFlag : std::uint8_t {
     Mounted = 1U << 1U,
     Dead = 1U << 2U,
     BorrowedPeerMount = 1U << 3U,
+    Vehicle = 1U << 4U,
+    VehicleDriver = 1U << 5U,
+    VehiclePassenger = 1U << 6U,
 };
 
 struct PlayerMountStatePayload final {
@@ -1048,6 +1053,9 @@ enum class BridgeCommand : std::uint16_t {
     EnableRepeatingShotgunShopUnlock = 19,
     ProbePoisonThrowingKnifePamphlet = 20,
     EnablePoisonThrowingKnifePamphlet = 21,
+    ArmHunt1MissionProgression = 22,
+    ArmFud1MissionProgression = 23,
+    DisarmMissionProgression = 24,
 };
 
 enum class CampaignCapabilityKind : std::uint8_t {
@@ -1080,6 +1088,39 @@ struct PickupCollectedPayload final {
     std::uint64_t collectionId{};
     std::uint32_t pickupHash{};
 };
+
+// A deny-by-default per-mission handshake.  It contains only a catalog mission
+// ID and transaction identity—never a save path, inventory, or script memory.
+enum class MissionProgressionPhase : std::uint8_t {
+    Offer = 1,
+    Eligibility = 2,
+    Completion = 3,
+};
+enum class MissionProgressionFlag : std::uint8_t {
+    GuestCanStart = 1U << 0U,
+    VerifiedCompletionMapping = 1U << 1U,
+};
+struct MissionProgressionPayload final {
+    std::uint32_t missionId{};
+    std::uint32_t missionEpoch{};
+    std::uint64_t eventId{};
+    MissionProgressionPhase phase{MissionProgressionPhase::Offer};
+    std::uint8_t flags{};
+    // MissionData rating from the host's completed mission: normal complete
+    // (2), bronze (3), silver (4), or gold (5). It is zero for offer and
+    // eligibility frames and audit-only completions.
+    std::uint8_t completionRating{};
+    // Positive local-cash delta observed over this exact host mission run.
+    // It is bounded and never represents the host's total balance.
+    std::int32_t completionCashAward{};
+    [[nodiscard]] constexpr bool operator==(
+        const MissionProgressionPayload&) const noexcept = default;
+};
+inline constexpr std::size_t kMissionProgressionPayloadSize = 24U;
+[[nodiscard]] std::vector<std::uint8_t> EncodeMissionProgression(
+    const MissionProgressionPayload& payload);
+[[nodiscard]] std::optional<MissionProgressionPayload> DecodeMissionProgression(
+    std::span<const std::uint8_t> bytes);
 inline constexpr std::size_t kPickupCollectedPayloadSize = 24U;
 [[nodiscard]] std::vector<std::uint8_t> EncodePickupCollected(const PickupCollectedPayload& payload);
 [[nodiscard]] std::optional<PickupCollectedPayload> DecodePickupCollected(std::span<const std::uint8_t> bytes);

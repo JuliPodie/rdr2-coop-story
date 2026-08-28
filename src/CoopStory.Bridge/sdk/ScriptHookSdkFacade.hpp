@@ -64,6 +64,17 @@ public:
     DrainVanillaPickupCollections() noexcept override;
     [[nodiscard]] std::vector<CampaignCapabilityObservation>
     DrainCampaignCapabilityObservations() noexcept override;
+    [[nodiscard]] std::optional<CampaignMissionProbe>
+    ProbeCampaignMission(std::uint32_t expectedMissionId) noexcept override;
+    [[nodiscard]] bool ApplyCampaignMissionCompletion(
+        std::uint32_t missionId,
+        std::uint64_t completionEventId,
+        std::uint8_t completionRating) noexcept override;
+    [[nodiscard]] std::optional<std::int32_t>
+    QueryLocalCashBalance() noexcept override;
+    [[nodiscard]] bool ApplyCampaignMissionCashAward(
+        std::uint64_t completionEventId,
+        std::int32_t amount) noexcept override;
     void ObserveVanillaPickupCollection() noexcept;
     void ObserveScriptEvents() noexcept;
     [[nodiscard]] std::optional<float> HostGuestDistanceMeters()
@@ -309,6 +320,7 @@ private:
     std::size_t previousSessionSelection_{};
     EntityRegistry replicas_{};
     EntityRegistry remoteMountReplicas_{};
+    EntityRegistry remoteVehicleReplicas_{};
     NetEntityId remotePlayerId_{};
     NetEntityId remoteMountId_{};
     std::uint32_t remoteMountModelHash_{};
@@ -336,6 +348,12 @@ private:
     std::uint32_t localKnownMountModelHash_{};
     std::uint64_t localKnownMountConfirmedMs_{};
     std::uint64_t previousOwnedMountScanMs_{};
+    LocalEntityHandle localKnownVehicleHandle_{};
+    std::uint32_t localKnownVehicleModelHash_{};
+    NetEntityId remoteVehicleId_{};
+    std::uint32_t remoteVehicleModelHash_{};
+    std::uint32_t remoteVehicleGeneration_{};
+    std::uint64_t remoteVehicleRequestedAtMs_{};
     int localTraversalProbeHandle_{};
     std::uint64_t previousLocalTraversalProbeMs_{};
     std::uint64_t localTraversalObstacleCapturedAtMs_{};
@@ -491,7 +509,7 @@ private:
     std::uint64_t animGraphCoverFallbackStarts_{};
     std::uint64_t animGraphCoverReacquires_{};
     std::uint64_t animGraphCoverFallbackRecoveries_{};
-    std::array<RemotePlayerActionChannel, 8> remotePlayerActionChannels_{};
+    std::array<RemotePlayerActionChannel, 9> remotePlayerActionChannels_{};
     bool reliablePlayerActionProtocolObserved_{};
     bool remoteActionAimActive_{};
     bool remoteActionMeleeActive_{};
@@ -499,6 +517,7 @@ private:
     bool remoteActionGrappleActive_{};
     bool remoteActionLassoActive_{};
     bool remoteActionKnockdownActive_{};
+    bool remoteActionCraftingActive_{};
     std::uint32_t remoteMeleeVisualActionId_{};
     std::uint64_t remoteMeleeVisualDeadlineMs_{};
     std::uint32_t remotePeerDismountActionId_{};

@@ -1,4 +1,7 @@
 #include "coopstory/bridge/BridgeRuntime.hpp"
+#include "coopstory/bridge/BuildInfo.hpp"
+
+#include "coopstory/bridge/CampaignMissionCatalog.hpp"
 
 #include <chrono>
 #include "coopstory/bridge/RemoteMotion.hpp"
@@ -115,6 +118,9 @@ constexpr std::uint32_t kTransientPlayerActionDurationMilliseconds =
         case BridgeCommand::SaveProblemMarker:
         case BridgeCommand::SkipCutscene:
         case BridgeCommand::EmergencyRecover:
+        case BridgeCommand::ArmHunt1MissionProgression:
+        case BridgeCommand::ArmFud1MissionProgression:
+        case BridgeCommand::DisarmMissionProgression:
             // This command is carried by the local-only session-menu channel
             // and never reaches MenuOpcode.
             return CommandOpcode::ToggleDiagnostics;
@@ -257,6 +263,9 @@ constexpr std::uint32_t kTransientPlayerActionDurationMilliseconds =
 
 [[nodiscard]] std::string_view ActionLifecycleTag(
     const PlayerActionKind kind) noexcept {
+    if (kind == PlayerActionKind::Crafting) {
+        return "[CRAFTING_LIFECYCLE]";
+    }
     return kind == PlayerActionKind::Lasso ||
                    kind == PlayerActionKind::Hogtie
                ? "[LASSO_LIFECYCLE]"
@@ -608,6 +617,13 @@ bool BridgeRuntime::Start(
     localPlayerActionId_ = 0U;
     localMissionState_.reset();
     remoteMissionState_.reset();
+    localMissionProgressionOffer_.reset();
+    localMissionProgressionStartingCash_.reset();
+    remoteMissionProgressionOffer_.reset();
+    remoteMissionProgressionEligible_ = false;
+    remoteMissionProgressionAppliedEventId_.reset();
+    localProgressionMissionId_ = 0U;
+    guestMissionProgressionEligible_ = false;
     localMissionCinematicState_.reset();
     remoteMissionCinematicState_.reset();
     remoteMissionCameraState_.reset();
@@ -744,7 +760,10 @@ bool BridgeRuntime::Start(
         facade_.Log(error);
         nextReconnectMs_ = now + 1'000U;
     }
-    facade_.Log("CoopStory bridge enabled for offline Story Mode");
+    facade_.Log(
+        "[BUILD] bridge=" + std::string{kBridgeBuildId} +
+        ", protocol=" + std::to_string(kProtocolVersion) +
+        "; offline Story Mode enabled");
     return true;
 }
 
@@ -781,7 +800,7 @@ void BridgeRuntime::SendHello(const bool reconnect) {
         std::uint32_t playerActionSequence{};
         std::uint32_t playerActionId{};
         std::uint32_t missionCinematicActionId{};
-        std::array<LocalPlayerActionRuntime, 8> playerActions{};
+        std::array<LocalPlayerActionRuntime, 9> playerActions{};
         std::uint32_t appearanceRevision{};
         std::optional<PlayerAppearanceStatePayload> lastAppearance{};
         std::uint32_t mountGeneration{};
@@ -2050,6 +2069,30 @@ void BridgeRuntime::Tick() {
     }
     VerifyPendingTeleport(now);
     if (sessionMenu_.IsHudVisible()) {
+        bool reviveAvailable{};
+        float reviveProgress{};
+        if (localSlot_.has_value()) {
+            const auto remoteSlot = OtherSlot(*localSlot_);
+            const auto remoteDowned =
+                players_.State(remoteSlot).lifecycle == PlayerLifecycle::Downed ||
+                players_.State(remoteSlot).lifecycle == PlayerLifecycle::Reviving;
+            const auto distance = facade_.HostGuestDistanceMeters().value_or(
+                std::numeric_limits<float>::infinity());
+            const auto localAlive =
+                players_.State(*localSlot_).lifecycle == PlayerLifecycle::Alive;
+            reviveAvailable = localAlive && remoteDowned && std::isfinite(distance) &&
+                distance <= 2.0F;
+            if (localInteraction_.active &&
+                localInteraction_.kind == InteractionKind::Revive &&
+                localInteraction_.startedAtMs != 0U && now >=
+                    localInteraction_.startedAtMs) {
+                reviveProgress = std::clamp(
+                    static_cast<float>(now - localInteraction_.startedAtMs) /
+                        4'000.0F,
+                    0.0F,
+                    1.0F);
+            }
+        }
         facade_.DrawBridgeHud(
             BridgeHudState{
                 active_,
@@ -2057,7 +2100,10 @@ void BridgeRuntime::Tick() {
                 localSlot_,
                 remoteStreaming,
                 diagnostics_,
-                soloOverride_});
+                soloOverride_,
+                reviveAvailable,
+                reviveProgress,
+                guestMissionQuarantineActive_});
     }
 
     lastTickStage_ = "local-player-actions-and-mission";
@@ -2306,6 +2352,7 @@ void BridgeRuntime::Tick() {
             localSlot,
             now,
             checkpointRespawnConfirmed);
+        TickMissionProgression(*sample, now);
         TickMissionCinematic(sample, localSlot, now);
         // TickMissionAuthority may have entered or left a host cutscene in
         // this same frame. Re-evaluate after publishing the new phase so the
@@ -2557,9 +2604,9 @@ void BridgeRuntime::Tick() {
             const auto localOwnedMountEntityId =
                 NetEntityId::Compose(
                     sessionEpoch_,
-                    localSlot == PlayerSlot::Host
-                        ? 10U
-                        : 11U);
+                    sample->mount.has_value() && sample->mount->vehicle
+                        ? (localSlot == PlayerSlot::Host ? 12U : 13U)
+                        : (localSlot == PlayerSlot::Host ? 10U : 11U));
             const bool borrowedPeerMount =
                 sample->mount.has_value() &&
                 sample->mount->borrowedPeerMount &&
@@ -2623,6 +2670,15 @@ void BridgeRuntime::Tick() {
                 constexpr auto kBorrowedPeerMount =
                     static_cast<std::uint8_t>(
                         PlayerMountStateFlag::BorrowedPeerMount);
+                constexpr auto kVehicle =
+                    static_cast<std::uint8_t>(
+                        PlayerMountStateFlag::Vehicle);
+                constexpr auto kVehicleDriver =
+                    static_cast<std::uint8_t>(
+                        PlayerMountStateFlag::VehicleDriver);
+                constexpr auto kVehiclePassenger =
+                    static_cast<std::uint8_t>(
+                        PlayerMountStateFlag::VehiclePassenger);
                 mountState.flags = kPresent;
                 mountState.flags |=
                     sample->mount->mounted
@@ -2636,6 +2692,13 @@ void BridgeRuntime::Tick() {
                     borrowedPeerMount
                         ? kBorrowedPeerMount
                         : 0U;
+                mountState.flags |= sample->mount->vehicle ? kVehicle : 0U;
+                mountState.flags |= sample->mount->vehicleDriver
+                    ? kVehicleDriver
+                    : 0U;
+                mountState.flags |= sample->mount->vehiclePassenger
+                    ? kVehiclePassenger
+                    : 0U;
                 mountState.modelHash =
                     sample->mount->modelHash;
                 mountState.position =
@@ -2681,6 +2744,10 @@ void BridgeRuntime::Tick() {
                     std::to_string(mountState.flags) +
                     ", borrowed=" +
                     (borrowedPeerMount
+                         ? std::string{"true"}
+                         : std::string{"false"}) +
+                    ", vehicle=" +
+                    (sample->mount.has_value() && sample->mount->vehicle
                          ? std::string{"true"}
                          : std::string{"false"}));
                 constexpr auto kMountedFlag =
@@ -2902,6 +2969,15 @@ void BridgeRuntime::TickWorldMirror(
         guestCinematicMirrorWindow;
     if (!safeMirrorWindow) {
         if (localSlot_ == PlayerSlot::Host) {
+            if (localSample.has_value() && localSample->cutsceneActive &&
+                !hostCinematicMirrorWindow) {
+                // The Story frontend briefly uses a cutscene camera while
+                // loading an ordinary save. It is unsafe to sample/update
+                // the graph in that window, but it is equally unsafe to
+                // destroy the stable graph: no mission cinematic authority
+                // exists yet to recreate it for the guest.
+                return;
+            }
             if (forceHostWorldMirrorReplay_ &&
                 hostWorldReplayAwaitingGuest_ &&
                 !remoteStreaming) {
@@ -3321,6 +3397,14 @@ void BridgeRuntime::TickMissionAuthority(
         sample.missionActive &&
         (!localMissionInitialized_ ||
          !previousLocalMissionActive_);
+    const auto completedMissionProbe =
+        !sample.missionActive && previousLocalMissionActive_ &&
+            localProgressionMissionId_ != 0U
+        ? facade_.ProbeCampaignMission(localProgressionMissionId_)
+        : std::optional<CampaignMissionProbe>{};
+    const bool missionCompleted = completedMissionProbe.has_value() &&
+        completedMissionProbe->missionId == localProgressionMissionId_ &&
+        completedMissionProbe->wasCompleted;
     if (!localMissionInitialized_) {
         localMissionEpoch_ = sessionEpoch_ == 0U ? 1U : sessionEpoch_;
         localMissionRevision_ = 1U;
@@ -3354,10 +3438,16 @@ void BridgeRuntime::TickMissionAuthority(
         localMissionCinematicState_.has_value() &&
         IsCinematicPresentationPhase(
             localMissionCinematicState_->phase);
+    // RDR2 reports a short-lived cutscene/loading camera while an ordinary
+    // Story save is loading.  That is not mission authority and must never
+    // start the two-player cinematic resume barrier.  Once a real mission
+    // scene has been latched we retain it through its terminal hand-off,
+    // including the frame where the game has already cleared missionActive.
     const bool immediatePresentation =
         cinematicPresentationLatched ||
-        (sample.cutsceneActive && !localCinematicTerminalLatchActive_) ||
-        sample.minigameActive;
+        (sample.missionActive &&
+         ((sample.cutsceneActive && !localCinematicTerminalLatchActive_) ||
+          sample.minigameActive));
     // A mission-owned loss of control covers forced AnimScenes, QTE/button
     // prompts, and scripted vehicle/horse entry.  Do not trigger on those
     // raw observations in free roam: ordinary mounting and scenarios remain
@@ -3492,6 +3582,52 @@ void BridgeRuntime::TickMissionAuthority(
     frame.header.tick = nowMs;
     frame.payload = EncodeMissionState(next);
     SendBestEffort(std::move(frame));
+    if (missionCompleted && localMissionProgressionOffer_.has_value()) {
+        const auto& offer = *localMissionProgressionOffer_;
+        Frame completion;
+        completion.header.type = MessageType::MissionProgression;
+        completion.header.sequence = sequencer_.Next();
+        completion.header.tick = nowMs;
+        // Recognition does not imply save-write authority. A catalog entry
+        // must explicitly be marked verified after a controlled two-save
+        // test before this bit can be emitted.
+        const auto completionRating = completedMissionProbe.has_value() &&
+                completedMissionProbe->wasCompleted
+            ? completedMissionProbe->rating
+            : 0U;
+        const auto completionCash = facade_.QueryLocalCashBalance();
+        // Money native values are cents; cap an individual transfer at
+        // $100,000 while preserving the exact in-game delta below that.
+        constexpr std::int32_t kMaximumMissionCashAward = 10'000'000;
+        const auto completionCashAward = completionCash.has_value() &&
+                localMissionProgressionStartingCash_.has_value()
+            ? std::clamp(
+                  *completionCash - *localMissionProgressionStartingCash_,
+                  0, kMaximumMissionCashAward)
+            : 0;
+        const auto completionFlags = guestMissionProgressionEligible_ &&
+                HasVerifiedCampaignCompletionMapping(offer.missionId) &&
+                completionRating >= 2U && completionRating <= 5U
+            ? static_cast<std::uint8_t>(
+                  MissionProgressionFlag::VerifiedCompletionMapping)
+            : static_cast<std::uint8_t>(0U);
+        completion.payload = EncodeMissionProgression(MissionProgressionPayload{
+            offer.missionId, offer.missionEpoch, offer.eventId,
+            MissionProgressionPhase::Completion, completionFlags,
+            static_cast<std::uint8_t>(
+                completionFlags != 0U ? completionRating : 0U),
+            completionFlags != 0U ? completionCashAward : 0});
+        SendBestEffort(std::move(completion));
+        const auto definition = FindCampaignMission(offer.missionId);
+        const auto name = definition.has_value() ? definition->scriptName : "unknown";
+        facade_.Log(completionFlags != 0U
+            ? "[MISSION_PROGRESSION] " + std::string{name} + " completion sent with verified mapping"
+            : guestMissionProgressionEligible_
+                ? "[MISSION_PROGRESSION] " + std::string{name} + " completion sent as audit-only; verified save mapping disabled"
+                : "[MISSION_PROGRESSION] " + std::string{name} + " completed with no eligible guest; companion-only retained");
+        localProgressionMissionId_ = 0U;
+        localMissionProgressionStartingCash_.reset();
+    }
     if (missionStarted || checkpointChanged) {
         // MissionState is queued first. The guest can therefore quarantine a
         // competing local mission or defer a recovery teleport before the
@@ -3514,6 +3650,120 @@ void BridgeRuntime::TickMissionAuthority(
         std::to_string(next.checkpointGeneration) +
         ", mission-active=" +
         std::to_string(sample.missionActive ? 1 : 0));
+}
+
+void BridgeRuntime::TickMissionProgression(
+    const LocalPlayerSample& sample,
+    const std::uint64_t nowMs) {
+    if (!localSlot_.has_value() || !transport_.IsConnected()) return;
+
+    if (*localSlot_ == PlayerSlot::Host) {
+        for (const auto& definition : kCampaignMissionCatalog) {
+            const auto probe = facade_.ProbeCampaignMission(definition.missionId);
+            if (!sample.missionActive || !probe.has_value() || !probe->active ||
+                probe->missionId != definition.missionId) {
+                continue;
+            }
+            localProgressionMissionId_ = probe->missionId;
+            if (!localMissionProgressionOffer_.has_value() ||
+                localMissionProgressionOffer_->missionEpoch != localMissionEpoch_) {
+                const auto eventId =
+                    (static_cast<std::uint64_t>(localMissionEpoch_) << 32U) | 1U;
+                MissionProgressionPayload offer{
+                    probe->missionId, localMissionEpoch_, eventId,
+                    MissionProgressionPhase::Offer, 0U};
+                Frame frame;
+                frame.header.type = MessageType::MissionProgression;
+                frame.header.sequence = sequencer_.Next();
+                frame.header.tick = nowMs;
+                frame.payload = EncodeMissionProgression(offer);
+                SendBestEffort(std::move(frame));
+                localMissionProgressionOffer_ = offer;
+                localMissionProgressionStartingCash_ =
+                    facade_.QueryLocalCashBalance();
+                guestMissionProgressionEligible_ = false;
+                facade_.Log("[MISSION_PROGRESSION] " +
+                    std::string{definition.scriptName} +
+                    " offer sent; awaiting guest startability confirmation");
+            }
+            break;
+        }
+        return;
+    }
+
+    // A guest never originates an offer or completion. Their confirmation is
+    // calculated from their own save's current startability evidence.
+    (void)sample;
+}
+
+void BridgeRuntime::HandleRemoteMissionProgression(
+    const MissionProgressionPayload& payload) {
+    if (!localSlot_.has_value()) return;
+    constexpr auto kGuestCanStart = static_cast<std::uint8_t>(
+        MissionProgressionFlag::GuestCanStart);
+    constexpr auto kVerifiedMapping = static_cast<std::uint8_t>(
+        MissionProgressionFlag::VerifiedCompletionMapping);
+    if (*localSlot_ == PlayerSlot::Guest) {
+        if (payload.phase == MissionProgressionPhase::Offer) {
+            const auto probe = facade_.ProbeCampaignMission(payload.missionId);
+            const bool eligible = probe.has_value() &&
+                probe->missionId == payload.missionId && probe->canStart &&
+                !probe->active;
+            remoteMissionProgressionOffer_ = payload;
+            remoteMissionProgressionEligible_ = eligible;
+            remoteMissionProgressionAppliedEventId_.reset();
+            Frame reply;
+            reply.header.type = MessageType::MissionProgression;
+            reply.header.sequence = sequencer_.Next();
+            reply.header.tick = facade_.TickMilliseconds();
+            reply.payload = EncodeMissionProgression(MissionProgressionPayload{
+                payload.missionId, payload.missionEpoch, payload.eventId,
+                MissionProgressionPhase::Eligibility,
+                eligible ? kGuestCanStart : 0U});
+            SendBestEffort(std::move(reply));
+            facade_.Log(eligible
+                ? "[MISSION_PROGRESSION] guest confirmed matching mission is startable"
+                : "[MISSION_PROGRESSION] guest rejected progression: matching mission is not startable in this save");
+        } else if (payload.phase == MissionProgressionPhase::Completion) {
+            const bool matched = remoteMissionProgressionOffer_.has_value() &&
+                remoteMissionProgressionOffer_->missionId == payload.missionId &&
+                remoteMissionProgressionOffer_->missionEpoch == payload.missionEpoch &&
+                remoteMissionProgressionOffer_->eventId == payload.eventId;
+            if (!matched || !remoteMissionProgressionEligible_ ||
+                (payload.flags & kVerifiedMapping) == 0U) {
+                facade_.Log("[MISSION_PROGRESSION] completion retained as audit-only; no verified guest save mapping");
+            } else if (remoteMissionProgressionAppliedEventId_.has_value() &&
+                       *remoteMissionProgressionAppliedEventId_ ==
+                           payload.eventId) {
+                facade_.Log("[MISSION_PROGRESSION] duplicate completion ignored after successful guest mapping");
+            } else if (!facade_.ApplyCampaignMissionCompletion(
+                           payload.missionId, payload.eventId,
+                           payload.completionRating)) {
+                facade_.Log("[MISSION_PROGRESSION] verified completion mapping failed closed");
+            } else if (payload.completionCashAward > 0 &&
+                       !facade_.ApplyCampaignMissionCashAward(
+                           payload.eventId, payload.completionCashAward)) {
+                // Do not consume the event. The completion and catalog
+                // rewards are idempotent, so a retransmission can retry the
+                // one missing award instead of marking a partial result done.
+                facade_.Log("[MISSION_PROGRESSION] guest cash award failed; completion event remains retryable");
+            } else {
+                remoteMissionProgressionAppliedEventId_ = payload.eventId;
+                facade_.Log("[MISSION_PROGRESSION] verified guest completion mapping applied exactly once");
+            }
+        }
+        return;
+    }
+    if (payload.phase == MissionProgressionPhase::Eligibility &&
+        localMissionProgressionOffer_.has_value() &&
+        payload.missionId == localMissionProgressionOffer_->missionId &&
+        payload.missionEpoch == localMissionProgressionOffer_->missionEpoch &&
+        payload.eventId == localMissionProgressionOffer_->eventId) {
+        guestMissionProgressionEligible_ = (payload.flags & kGuestCanStart) != 0U;
+        facade_.Log(guestMissionProgressionEligible_
+            ? "[MISSION_PROGRESSION] host accepted guest mission eligibility"
+            : "[MISSION_PROGRESSION] host retained companion-only mode for this guest save");
+    }
 }
 
 void BridgeRuntime::TickMissionLoadingAuthority(
@@ -3878,8 +4128,15 @@ void BridgeRuntime::TickMissionCinematic(
             return;
         }
 
+        // The frontend uses a cutscene camera while loading a normal Story
+        // save. Only the mission authority classifier may promote that raw
+        // signal into the replicated cinematic FSM.
+        const bool missionPresentationActive =
+            localMissionState_->phase == MissionPhase::Cutscene ||
+            localMissionState_->phase == MissionPhase::Loading;
         const bool cutsceneActive =
-            sample.has_value() && sample->cutsceneActive;
+            missionPresentationActive && sample.has_value() &&
+            sample->cutsceneActive;
 
         // PrepareResume is a one-way commit. RDR2 briefly reports its
         // cinematic camera as active again while restoring the HUD and
@@ -6137,7 +6394,7 @@ void BridgeRuntime::TickLocalPlayerActions(
         bool restartOnEdge{};
         std::uint32_t variantHash{};
     };
-    const std::array<ActionInput, 6> inputs{
+    const std::array<ActionInput, 7> inputs{
         ActionInput{
             PlayerActionKind::Aim,
             sample.aiming && sample.aimTargetValid,
@@ -6182,7 +6439,15 @@ void BridgeRuntime::TickLocalPlayerActions(
             false,
             sample.peerMountPull
                 ? kPlayerActionVariantPeerMountPull
-                : 0U}};
+                : 0U},
+        ActionInput{
+            PlayerActionKind::Crafting,
+            sample.scenarioActive && !sample.mounted && !sample.downed &&
+                !sample.missionActive,
+            true,
+            false,
+            false,
+            0U}};
 
     constexpr auto kIntent = static_cast<std::uint32_t>(
         PlayerActionFlag::Intent);
@@ -6396,20 +6661,38 @@ void BridgeRuntime::TickLocalInteractions(
     const auto remoteSlot = OtherSlot(localSlot);
     const auto remoteId = playerEntityIds_[SlotIndex(remoteSlot)];
     const auto remoteLifecycle = players_.State(remoteSlot).lifecycle;
+    const bool localAlive =
+        players_.State(localSlot).lifecycle == PlayerLifecycle::Alive;
     const bool remoteDowned =
         remoteLifecycle == PlayerLifecycle::Downed ||
         remoteLifecycle == PlayerLifecycle::Reviving;
     const bool remoteRestrained =
         remoteRestraintState_.has_value() &&
         remoteRestraintState_->subjectEntityId == remoteId &&
-        remoteRestraintState_->state != PlayerRestraintState::Free;
+            remoteRestraintState_->state != PlayerRestraintState::Free;
+    constexpr auto kMountPresent = static_cast<std::uint8_t>(
+        PlayerMountStateFlag::Present);
+    constexpr auto kVehicle = static_cast<std::uint8_t>(
+        PlayerMountStateFlag::Vehicle);
+    constexpr auto kVehicleDriver = static_cast<std::uint8_t>(
+        PlayerMountStateFlag::VehicleDriver);
+    const bool remoteDrivingSharedWagon =
+        localSlot == PlayerSlot::Guest && remoteMountState_.has_value() &&
+        (remoteMountState_->flags & (kMountPresent | kVehicle | kVehicleDriver)) ==
+            (kMountPresent | kVehicle | kVehicleDriver) &&
+        remoteMountState_->mountEntityId.IsValid();
+    const bool alreadyInSharedWagon =
+        sample.mount.has_value() && sample.mount->vehicle;
     const auto distance = facade_.HostGuestDistanceMeters().value_or(
         std::numeric_limits<float>::infinity());
     const auto desiredKind =
-        remoteDowned && distance <= 2.0F
+        localAlive && remoteDowned && distance <= 2.0F
             ? InteractionKind::Revive
             : remoteRestrained && distance <= 2.0F
                   ? InteractionKind::ReleaseRestraint
+                  : remoteDrivingSharedWagon && !alreadyInSharedWagon &&
+                            distance <= 3.5F
+                      ? InteractionKind::MountPassenger
                   : InteractionKind::None;
     const bool wantsInteraction =
         sample.interactionHeld &&
@@ -6445,7 +6728,12 @@ void BridgeRuntime::TickLocalInteractions(
             AdvanceNonZero(localInteractionId_);
         localInteractionId_ = localInteraction_.interactionId;
         localInteraction_.revision = 1U;
+        localInteraction_.startedAtMs = nowMs;
         localInteraction_.targetEntityId = remoteId;
+        localInteraction_.secondaryEntityId =
+            desiredKind == InteractionKind::MountPassenger
+                ? remoteMountState_->mountEntityId
+                : NetEntityId{};
         localInteraction_.kind = desiredKind;
         localInteraction_.active = true;
     } else {
@@ -6454,6 +6742,7 @@ void BridgeRuntime::TickLocalInteractions(
     }
     intent.actorEntityId = localEntityId_;
     intent.targetEntityId = localInteraction_.targetEntityId;
+    intent.secondaryEntityId = localInteraction_.secondaryEntityId;
     intent.interactionId = localInteraction_.interactionId;
     intent.revision = localInteraction_.revision;
     intent.actorSlot = localSlot;
@@ -7585,6 +7874,15 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
             }
             break;
         }
+        case MessageType::MissionProgression: {
+            const auto progression = DecodeMissionProgression(frame.payload);
+            if (!progression.has_value()) {
+                facade_.Log("[MISSION_PROGRESSION] rejected malformed payload");
+                break;
+            }
+            HandleRemoteMissionProgression(*progression);
+            break;
+        }
         case MessageType::PlayerMountState: {
             const auto mount =
                 DecodePlayerMountState(frame.payload);
@@ -8091,6 +8389,58 @@ void BridgeRuntime::HandleSessionOverlayAction(
 }
 
 void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
+    if (command == BridgeCommand::DisarmMissionProgression) {
+        if (localSlot_ != PlayerSlot::Host || !transport_.IsConnected()) {
+            facade_.Log("[MISSION_PROGRESSION] clear rejected: host session is not ready");
+            return;
+        }
+        localMissionProgressionOffer_.reset();
+        localMissionProgressionStartingCash_.reset();
+        guestMissionProgressionEligible_ = false;
+        localProgressionMissionId_ = 0U;
+        facade_.Log("[MISSION_PROGRESSION] armed progression cleared; companion-only mode retained");
+        return;
+    }
+    if (command == BridgeCommand::ArmHunt1MissionProgression ||
+        command == BridgeCommand::ArmFud1MissionProgression) {
+        const auto missionId = command == BridgeCommand::ArmHunt1MissionProgression
+            ? kHunt1MissionId
+            : kFud1MissionId;
+        const auto definition = FindCampaignMission(missionId);
+        if (!definition.has_value()) return;
+        const auto missionName = definition->scriptName;
+        if (localSlot_ != PlayerSlot::Host || !transport_.IsConnected() ||
+            !localMissionInitialized_) {
+            facade_.Log("[MISSION_PROGRESSION] " + std::string{missionName} +
+                " preflight rejected: host session is not ready");
+            return;
+        }
+        const auto probe = facade_.ProbeCampaignMission(missionId);
+        if (!probe.has_value() || probe->missionId != missionId ||
+            probe->active || !probe->canStart) {
+            facade_.Log("[MISSION_PROGRESSION] " + std::string{missionName} +
+                " preflight rejected: stand at the available mission giver before arming");
+            return;
+        }
+        const auto plannedEpoch = AdvanceNonZero(localMissionEpoch_);
+        const auto eventId =
+            (static_cast<std::uint64_t>(plannedEpoch) << 32U) | 1U;
+        MissionProgressionPayload offer{
+            missionId, plannedEpoch, eventId,
+            MissionProgressionPhase::Offer, 0U};
+        Frame frame;
+        frame.header.type = MessageType::MissionProgression;
+        frame.header.sequence = sequencer_.Next();
+        frame.header.tick = facade_.TickMilliseconds();
+        frame.payload = EncodeMissionProgression(offer);
+        SendBestEffort(std::move(frame));
+        localMissionProgressionOffer_ = offer;
+        localMissionProgressionStartingCash_ = facade_.QueryLocalCashBalance();
+        guestMissionProgressionEligible_ = false;
+        facade_.Log("[MISSION_PROGRESSION] " + std::string{missionName} +
+            " preflight sent; wait for guest eligibility before starting the mission");
+        return;
+    }
     if (command == BridgeCommand::SkipCutscene) {
         RequestCutsceneSkip(facade_.TickMilliseconds());
         return;
@@ -8333,6 +8683,18 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
         nextEquipmentRefreshMs_ = 0U;
         handledLocally = true;
     } else if (command == BridgeCommand::RetryCheckpoint) {
+        if (localSlot_ != PlayerSlot::Host) {
+            facade_.Log(
+                "[MISSION_RETRY] rejected guest retry request; only the host may choose a checkpoint retry");
+            return;
+        }
+        if (!localMissionState_.has_value()) {
+            facade_.Log(
+                "[MISSION_RETRY] rejected host retry request without an active host mission authority record");
+            return;
+        }
+        facade_.Log(
+            "[MISSION_RETRY] host-approved checkpoint retry requested; guest remains isolated until the host recovery transition is complete");
         facade_.RequestCheckpointRetry();
     } else if (command == BridgeCommand::ToggleDiagnostics) {
         diagnostics_ = !diagnostics_;
@@ -8651,9 +9013,6 @@ void BridgeRuntime::HandlePlayerSignals(
                 SendReviveCompleted(
                     signal.subject,
                     signal.value);
-                break;
-            case PlayerRuntimeSignalKind::RetryCheckpoint:
-                HandleMenuCommand(BridgeCommand::RetryCheckpoint);
                 break;
             case PlayerRuntimeSignalKind::SpectatorEntered:
                 SendLifecycleState(

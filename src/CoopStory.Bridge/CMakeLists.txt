@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.25)
 
 project(CoopStoryBridge VERSION 0.1.0 LANGUAGES CXX)
 
+# A configure-time marker lets an in-game log identify the exact locally
+# built ASI that was loaded, even when the project semantic version has not
+# changed between tester builds.
+string(TIMESTAMP COOPSTORY_BRIDGE_BUILD_TIMESTAMP "%Y%m%dT%H%M%SZ" UTC)
+set(
+    COOPSTORY_BRIDGE_BUILD_ID
+    "${PROJECT_VERSION}-p27-${COOPSTORY_BRIDGE_BUILD_TIMESTAMP}"
+)
+
 if(NOT WIN32)
     message(FATAL_ERROR "CoopStory.Bridge supports Windows only.")
 endif()
@@ -54,6 +63,7 @@ target_compile_definitions(CoopStory.Bridge.Core
         _WIN32_WINNT=0x0A00
         UNICODE
         _UNICODE
+        COOPSTORY_BRIDGE_BUILD_ID=\"${COOPSTORY_BRIDGE_BUILD_ID}\"
 )
 target_link_libraries(CoopStory.Bridge.Core
     PUBLIC

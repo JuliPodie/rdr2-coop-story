@@ -46,6 +46,38 @@ public static class BinaryPayloadCodec
     public const int CampaignCapabilitySize = 24;
     public const int CampaignCapabilityAckSize = 16;
     public const int PickupCollectedSize = 24;
+    public const int MissionProgressionSize = 24;
+
+    public static byte[] EncodeMissionProgression(MissionProgressionPayload payload)
+    {
+        ValidateMissionProgression(payload);
+        var bytes = new byte[MissionProgressionSize];
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes, payload.MissionId);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), payload.MissionEpoch);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), payload.EventId);
+        bytes[16] = (byte)payload.Phase;
+        bytes[17] = (byte)payload.Flags;
+        bytes[18] = payload.CompletionRating;
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(20), payload.CompletionCashAward);
+        return bytes;
+    }
+
+    public static MissionProgressionPayload DecodeMissionProgression(ReadOnlySpan<byte> payload)
+    {
+        RequireLength(payload, MissionProgressionSize, nameof(MissionProgressionPayload));
+        if (payload[19] != 0)
+            throw new ProtocolException("Mission progression reserved bytes must be zero.");
+        var result = new MissionProgressionPayload(
+            BinaryPrimitives.ReadUInt32LittleEndian(payload),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[4..]),
+            BinaryPrimitives.ReadUInt64LittleEndian(payload[8..]),
+            (MissionProgressionPhase)payload[16],
+            (MissionProgressionFlags)payload[17],
+            payload[18],
+            BinaryPrimitives.ReadInt32LittleEndian(payload[20..]));
+        ValidateMissionProgression(result);
+        return result;
+    }
 
     public static byte[] EncodePickupCollected(PickupCollectedPayload payload)
     {
@@ -1883,7 +1915,10 @@ public static class BinaryPayloadCodec
             PlayerMountStateFlags.Present |
             PlayerMountStateFlags.Mounted |
             PlayerMountStateFlags.Dead |
-            PlayerMountStateFlags.BorrowedPeerMount;
+            PlayerMountStateFlags.BorrowedPeerMount |
+            PlayerMountStateFlags.Vehicle |
+            PlayerMountStateFlags.VehicleDriver |
+            PlayerMountStateFlags.VehiclePassenger;
         if (!payload.PlayerEntityId.IsValid ||
             !payload.MountEntityId.IsValid ||
             payload.PlayerEntityId == payload.MountEntityId ||
@@ -1898,10 +1933,26 @@ public static class BinaryPayloadCodec
         var mounted = (payload.Flags & PlayerMountStateFlags.Mounted) != 0;
         var borrowed =
             (payload.Flags & PlayerMountStateFlags.BorrowedPeerMount) != 0;
+        var vehicle =
+            (payload.Flags & PlayerMountStateFlags.Vehicle) != 0;
+        var driver =
+            (payload.Flags & PlayerMountStateFlags.VehicleDriver) != 0;
+        var passenger =
+            (payload.Flags & PlayerMountStateFlags.VehiclePassenger) != 0;
         if (borrowed && (!present || !mounted))
         {
             throw new ProtocolException(
                 "A borrowed peer mount must be present and mounted.");
+        }
+        if (vehicle && (!present || !mounted || driver == passenger))
+        {
+            throw new ProtocolException(
+                "A shared vehicle must be mounted with exactly one seat role.");
+        }
+        if (!vehicle && (driver || passenger))
+        {
+            throw new ProtocolException(
+                "Vehicle seat flags require a shared vehicle.");
         }
         if (!present &&
             (payload.Flags != PlayerMountStateFlags.None ||
@@ -2148,7 +2199,12 @@ public static class BinaryPayloadCodec
         const MissionStateFlags allowedFlags =
             MissionStateFlags.AnchorValid |
             MissionStateFlags.MissionActive |
-            MissionStateFlags.CheckpointRecovery;
+            MissionStateFlags.CheckpointRecovery |
+            MissionStateFlags.ScriptedControlLock |
+            MissionStateFlags.ScreenTransition |
+            MissionStateFlags.ScenarioActivity |
+            MissionStateFlags.ScriptedVehicleTransition |
+            MissionStateFlags.MinigameActivity;
         if (!payload.HostEntityId.IsValid ||
             payload.MissionEpoch == 0 ||
             payload.Revision == 0)
@@ -2733,6 +2789,27 @@ public static class BinaryPayloadCodec
     {
         if (!Enum.IsDefined(payload.Kind) || payload.RecordHash == 0 || payload.HostEventId == 0 || payload.GrantedAtUnixMilliseconds <= 0)
             throw new ProtocolException("Campaign capability payload is invalid.");
+    }
+
+    private static void ValidateMissionProgression(MissionProgressionPayload payload)
+    {
+        const MissionProgressionFlags allowed =
+            MissionProgressionFlags.GuestCanStart |
+            MissionProgressionFlags.VerifiedCompletionMapping;
+        var completion = payload.Phase == MissionProgressionPhase.Completion;
+        var appliesMapping =
+            (payload.Flags & MissionProgressionFlags.VerifiedCompletionMapping) != 0;
+        if (payload.MissionId == 0 || payload.MissionEpoch == 0 ||
+            payload.EventId == 0 || !Enum.IsDefined(payload.Phase) ||
+            (payload.Flags & ~allowed) != 0 ||
+            (!completion && payload.CompletionRating != 0) ||
+            (!completion && payload.CompletionCashAward != 0) ||
+            payload.CompletionCashAward < 0 ||
+            (appliesMapping && (!completion || payload.CompletionRating is < 2 or > 5)))
+        {
+            throw new ProtocolException(
+                "Mission progression requires a catalog mission, epoch, event and valid flags.");
+        }
     }
 
     private static void ValidateCampaignCapabilityAck(CampaignCapabilityAckPayload payload)

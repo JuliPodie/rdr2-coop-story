@@ -37,7 +37,7 @@ so test one feature group at a time and keep backup saves.
   ownership, lobby, password flow, and redacted diagnostics;
 - a C++20 Story Mode bridge and Script Hook facade;
 - a separate .NET sidecar for authenticated TCP/UDP networking;
-- binary protocol 23, interpolation, entity and animation replication contracts;
+- binary protocol 26, interpolation, entity and animation replication contracts;
 - reconnect, world mirror, mission presentation, player action, mount, and
   diagnostics experiments;
 - C# and C++ self-tests;

@@ -1,5 +1,6 @@
 #include "coopstory/bridge/BridgeRuntime.hpp"
 #include "coopstory/bridge/AnimationReplicationCodec.hpp"
+#include "coopstory/bridge/CampaignMissionCatalog.hpp"
 #include "coopstory/bridge/EntityRegistry.hpp"
 #include "coopstory/bridge/FrameCodec.hpp"
 #include "coopstory/bridge/MenuController.hpp"
@@ -59,7 +60,7 @@ void FrameCodecRoundTrip() {
     CHECK(bytes[1] == static_cast<std::uint8_t>('2'));
     CHECK(bytes[2] == static_cast<std::uint8_t>('C'));
     CHECK(bytes[3] == static_cast<std::uint8_t>('P'));
-    CHECK(bytes[4] == 23U);
+    CHECK(bytes[4] == 27U);
     CHECK(bytes[5] == 0U);
     CHECK(bytes[6] == 4U);
     CHECK(bytes[7] == 0U);
@@ -111,6 +112,131 @@ void FrameCodecRoundTrip() {
         rejected = true;
     }
     CHECK(rejected);
+}
+
+void CampaignMissionCatalogIsExplicitAndBound() {
+    const auto fud1 = FindCampaignMission(kFud1MissionId);
+    CHECK(fud1.has_value());
+    CHECK(kFud1MissionId == 0x979E7766U);
+    CHECK(fud1->scriptName == "FUD1");
+    CHECK(fud1->displayName == "The New South");
+    const auto hunt1 = FindCampaignMission(kHunt1MissionId);
+    CHECK(hunt1.has_value());
+    CHECK(kHunt1MissionId == CampaignMissionId("HNT1"));
+    CHECK(hunt1->scriptName == "HNT1");
+    CHECK(hunt1->runtimeScriptName == "hunting1");
+    CHECK(hunt1->displayName == "Exit Pursued by a Bruised Ego");
+    CHECK(HasVerifiedCampaignCompletionMapping(kFud1MissionId));
+    CHECK(HasVerifiedCampaignCompletionMapping(kHunt1MissionId));
+    const auto fud1Rewards = CampaignMissionRewards(kFud1MissionId);
+    CHECK(fud1Rewards.size() == 1U);
+    CHECK(fud1Rewards.front().binding ==
+        CampaignMissionRewardBinding::WeaponOwnership);
+    CHECK(fud1Rewards.front().recordHash ==
+        CampaignMissionId("WEAPON_FISHINGROD"));
+    CHECK(fud1Rewards.front().amount == 1U);
+    const auto sad3Rewards = CampaignMissionRewards(CampaignMissionId("SAD3"));
+    CHECK(sad3Rewards.size() == 1U);
+    CHECK(sad3Rewards.front().binding ==
+        CampaignMissionRewardBinding::WeaponOwnership);
+    CHECK(sad3Rewards.front().recordHash ==
+        CampaignMissionId("WEAPON_SNIPERRIFLE_CARCANO"));
+    CHECK(sad3Rewards.front().amount == 50U);
+    const auto mar8Rewards = CampaignMissionRewards(CampaignMissionId("MAR8"));
+    CHECK(mar8Rewards.size() == 1U);
+    CHECK(mar8Rewards.front().binding ==
+        CampaignMissionRewardBinding::WeaponOwnership);
+    CHECK(mar8Rewards.front().recordHash ==
+        CampaignMissionId("WEAPON_KIT_BINOCULARS"));
+    CHECK(mar8Rewards.front().amount == 0U);
+    const auto ab21Rewards = CampaignMissionRewards(CampaignMissionId("AB21"));
+    CHECK(ab21Rewards.size() == 1U);
+    CHECK(ab21Rewards.front().binding ==
+        CampaignMissionRewardBinding::InventoryItem);
+    CHECK(ab21Rewards.front().recordHash ==
+        CampaignMissionId("DOCUMENT_LETTER_SADIE_TELEGRAM"));
+    CHECK(ab21Rewards.front().amount == 1U);
+    const auto rabi1Rewards = CampaignMissionRewards(CampaignMissionId("RABI1"));
+    // The fishing rod is temporarily lent by RABI1 and removed by the same
+    // script, so it is intentionally not a permanent completion reward.
+    CHECK(rabi1Rewards.empty());
+    const auto wnt4Rewards = CampaignMissionRewards(CampaignMissionId("WNT4"));
+    CHECK(wnt4Rewards.size() == 2U);
+    CHECK(wnt4Rewards.front().binding ==
+        CampaignMissionRewardBinding::WeaponOwnership);
+    CHECK(wnt4Rewards.front().recordHash ==
+        CampaignMissionId("WEAPON_REPEATER_CARBINE"));
+    CHECK(wnt4Rewards.front().amount == 99U);
+    CHECK(wnt4Rewards[1].binding ==
+        CampaignMissionRewardBinding::WeaponOwnership);
+    CHECK(wnt4Rewards[1].recordHash == CampaignMissionId("WEAPON_LASSO"));
+    CHECK(wnt4Rewards[1].amount == 1U);
+    const auto sen1Rewards = CampaignMissionRewards(CampaignMissionId("SEN1"));
+    CHECK(sen1Rewards.size() == 1U);
+    CHECK(sen1Rewards[0].binding ==
+        CampaignMissionRewardBinding::WeaponOwnership);
+    CHECK(sen1Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_THROWN_TOMAHAWK"));
+    const auto dst1Rewards = CampaignMissionRewards(CampaignMissionId("DST1"));
+    CHECK(dst1Rewards.size() == 2U);
+    CHECK(dst1Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_SHOTGUN_DOUBLEBARREL"));
+    CHECK(dst1Rewards[1].recordHash ==
+        CampaignMissionId("WEAPON_THROWN_THROWING_KNIVES"));
+    const auto ind3Rewards = CampaignMissionRewards(CampaignMissionId("IND3"));
+    CHECK(ind3Rewards.size() == 1U);
+    CHECK(ind3Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_SHOTGUN_SEMIAUTO"));
+    const auto mud4Rewards = CampaignMissionRewards(CampaignMissionId("MUD4"));
+    CHECK(mud4Rewards.size() == 1U);
+    CHECK(mud4Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_SNIPERRIFLE_ROLLINGBLOCK"));
+    const auto tre1Rewards = CampaignMissionRewards(CampaignMissionId("TRE1"));
+    CHECK(tre1Rewards.size() == 1U);
+    CHECK(tre1Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_SNIPERRIFLE_ROLLINGBLOCK_EXOTIC"));
+    const auto mud1Rewards = CampaignMissionRewards(CampaignMissionId("MUD1"));
+    CHECK(mud1Rewards.size() == 1U);
+    CHECK(mud1Rewards[0].binding ==
+        CampaignMissionRewardBinding::WeaponShopEligibility);
+    CHECK(mud1Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_THROWN_TOMAHAWK"));
+    const auto gry1Rewards = CampaignMissionRewards(CampaignMissionId("GRY1"));
+    CHECK(gry1Rewards.size() == 1U);
+    CHECK(gry1Rewards[0].binding ==
+        CampaignMissionRewardBinding::WeaponShopEligibility);
+    CHECK(gry1Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_REPEATER_EVANS"));
+    const auto hunt1Rewards = CampaignMissionRewards(kHunt1MissionId);
+    CHECK(hunt1Rewards.size() == 2U);
+    CHECK(hunt1Rewards[0].binding ==
+        CampaignMissionRewardBinding::InventoryItem);
+    CHECK(hunt1Rewards[0].recordHash ==
+        CampaignMissionId("DOCUMENT_MAP_LEGENDARY_ANIMALS"));
+    CHECK(hunt1Rewards[0].amount == 1U);
+    CHECK(hunt1Rewards[1].binding ==
+        CampaignMissionRewardBinding::UnlockVisible);
+    CHECK(hunt1Rewards[1].recordHash ==
+        CampaignMissionId("SP_CHAL_HUNT_ROOT"));
+    CHECK(static_cast<std::uint8_t>(
+              CampaignMissionRewardBinding::RecipeUnlock) == 4U);
+    CHECK(static_cast<std::uint8_t>(
+              CampaignMissionRewardBinding::UnlockEntitlement) == 5U);
+    CHECK(static_cast<std::uint8_t>(
+              CampaignMissionRewardBinding::WeaponShopEligibility) == 6U);
+    CHECK(std::size(kCampaignMissionCatalog) > 2U);
+    for (std::size_t index{}; index < std::size(kCampaignMissionCatalog); ++index) {
+        const auto& definition = kCampaignMissionCatalog[index];
+        CHECK(definition.missionId == CampaignMissionId(definition.scriptName));
+        CHECK(!definition.runtimeScriptName.empty());
+        CHECK(HasVerifiedCampaignCompletionMapping(definition.missionId));
+        for (std::size_t other = index + 1U;
+             other < std::size(kCampaignMissionCatalog);
+             ++other) {
+            CHECK(definition.missionId != kCampaignMissionCatalog[other].missionId);
+        }
+    }
+    CHECK(!FindCampaignMission(0xFFFFFFFFU).has_value());
 }
 
 void PlayerActionEpochPolicy() {
@@ -736,6 +862,40 @@ void PayloadContracts() {
                  missionBytes.data(),
                  missionBytes.size() - 1U})
              .has_value());
+
+    const MissionProgressionPayload progression{
+        0x2C3469EDU, 7U, 0x700000001ULL,
+        MissionProgressionPhase::Eligibility,
+        static_cast<std::uint8_t>(MissionProgressionFlag::GuestCanStart)};
+    const auto progressionBytes = EncodeMissionProgression(progression);
+    CHECK(progressionBytes.size() == kMissionProgressionPayloadSize);
+    const auto decodedProgression = DecodeMissionProgression(progressionBytes);
+    CHECK(decodedProgression.has_value());
+    CHECK(*decodedProgression == progression);
+    auto invalidProgression = progressionBytes;
+    invalidProgression[17] = 0x80U;
+    CHECK(!DecodeMissionProgression(invalidProgression).has_value());
+    const MissionProgressionPayload completionProgression{
+        0x2C3469EDU, 7U, 0x700000001ULL,
+        MissionProgressionPhase::Completion,
+        static_cast<std::uint8_t>(
+            MissionProgressionFlag::VerifiedCompletionMapping),
+        4U, 140};
+    const auto completionProgressionBytes =
+        EncodeMissionProgression(completionProgression);
+    const auto decodedCompletionProgression =
+        DecodeMissionProgression(completionProgressionBytes);
+    CHECK(decodedCompletionProgression.has_value());
+    CHECK(*decodedCompletionProgression == completionProgression);
+    auto invalidCompletionProgression = completionProgression;
+    invalidCompletionProgression.completionRating = 1U;
+    bool invalidCompletionRejected{};
+    try {
+        (void)EncodeMissionProgression(invalidCompletionProgression);
+    } catch (const std::invalid_argument&) {
+        invalidCompletionRejected = true;
+    }
+    CHECK(invalidCompletionRejected);
     auto missionWithUnknownPhase = missionBytes;
     missionWithUnknownPhase[20] = 0xFFU;
     CHECK(
@@ -1315,7 +1475,7 @@ void PayloadContracts() {
 }
 
 void AnimationReplicationPayloadContracts() {
-    CHECK(kProtocolVersion == 23U);
+    CHECK(kProtocolVersion == 27U);
     CHECK(
         static_cast<std::uint16_t>(MessageType::PlayerAnimationState) ==
         28U);
@@ -1940,10 +2100,7 @@ void ReviveStateMachine() {
 
     players.SetDowned(PlayerSlot::Host);
     signals = players.Tick(16U, std::nullopt);
-    CHECK(signals.size() == 1U);
-    CHECK(
-        signals.front().kind ==
-        PlayerRuntimeSignalKind::RetryCheckpoint);
+    CHECK(signals.empty());
     CHECK(players.Tick(16U, std::nullopt).empty());
 }
 
@@ -1995,14 +2152,14 @@ void MenuEdges() {
     (void)soloMenu.Update(MenuInputState{.up = true});
     CHECK(
         soloMenu.Commands()[soloMenu.Selection()] ==
-        BridgeCommand::ProbePoisonThrowingKnifePamphlet);
-    CHECK(soloMenu.Commands().size() == 20U);
+        BridgeCommand::ArmFud1MissionProgression);
+    CHECK(soloMenu.Commands().size() == 24U);
     CHECK(
         soloMenu.Commands()[0U] ==
         BridgeCommand::SkipCutscene);
     CHECK(
         soloMenu.Commands()[MenuController::PrimaryCommandCount()] ==
-        BridgeCommand::ToggleDiagnostics);
+        BridgeCommand::RetryCheckpoint);
 
     MenuController columnMenu;
     (void)columnMenu.Update(MenuInputState{.f9 = true});
@@ -2010,7 +2167,7 @@ void MenuEdges() {
     (void)columnMenu.Update(MenuInputState{.right = true});
     CHECK(
         columnMenu.Commands()[columnMenu.Selection()] ==
-        BridgeCommand::ToggleDiagnostics);
+        BridgeCommand::RetryCheckpoint);
     (void)columnMenu.Update({});
     (void)columnMenu.Update(MenuInputState{.left = true});
     CHECK(columnMenu.Selection() == 0U);
@@ -3157,6 +3314,35 @@ public:
         pendingCampaignCapabilityObservations.clear();
         return result;
     }
+    std::optional<CampaignMissionProbe> ProbeCampaignMission(
+        const std::uint32_t expectedMissionId) noexcept override {
+        if (!sampledCampaignMission.has_value() ||
+            sampledCampaignMission->missionId != expectedMissionId) {
+            return std::nullopt;
+        }
+        return sampledCampaignMission;
+    }
+    bool ApplyCampaignMissionCompletion(
+        const std::uint32_t missionId,
+        const std::uint64_t completionEventId,
+        const std::uint8_t completionRating) noexcept override {
+        ++campaignMissionCompletionApplyCount;
+        appliedCampaignMissionId = missionId;
+        appliedCampaignMissionEventId = completionEventId;
+        appliedCampaignMissionRating = completionRating;
+        return applyCampaignMissionCompletionResult;
+    }
+    std::optional<std::int32_t> QueryLocalCashBalance() noexcept override {
+        return localCashBalance;
+    }
+    bool ApplyCampaignMissionCashAward(
+        const std::uint64_t completionEventId,
+        const std::int32_t amount) noexcept override {
+        ++campaignMissionCashApplyCount;
+        appliedCampaignMissionCashEventId = completionEventId;
+        appliedCampaignMissionCashAmount = amount;
+        return applyCampaignMissionCashAwardResult;
+    }
     std::optional<float> HostGuestDistanceMeters() noexcept override {
         return distance;
     }
@@ -3518,6 +3704,17 @@ public:
             0U,
             0U,
             0.0F}};
+    std::optional<CampaignMissionProbe> sampledCampaignMission{};
+    bool applyCampaignMissionCompletionResult{};
+    std::size_t campaignMissionCompletionApplyCount{};
+    std::uint32_t appliedCampaignMissionId{};
+    std::uint64_t appliedCampaignMissionEventId{};
+    std::uint8_t appliedCampaignMissionRating{};
+    std::optional<std::int32_t> localCashBalance{100};
+    bool applyCampaignMissionCashAwardResult{true};
+    std::size_t campaignMissionCashApplyCount{};
+    std::uint64_t appliedCampaignMissionCashEventId{};
+    std::int32_t appliedCampaignMissionCashAmount{};
     std::optional<float> distance{25.0F};
     std::size_t retryCount{};
     std::vector<std::string> logs{};
@@ -3791,6 +3988,18 @@ public:
             mission.has_value()) {
             return mission;
         }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<MissionProgressionPayload>
+LastSentMissionProgression(const TestTransport& transport) {
+    for (auto frame = transport.sent.rbegin();
+         frame != transport.sent.rend();
+         ++frame) {
+        if (frame->header.type != MessageType::MissionProgression) continue;
+        if (const auto payload = DecodeMissionProgression(frame->payload);
+            payload.has_value()) return payload;
     }
     return std::nullopt;
 }
@@ -5535,6 +5744,186 @@ void RuntimeHostEmitsMissionStateTransitions() {
     CHECK(HasLog(facade, "[MISSION_TX][MISSION_FSM]"));
 }
 
+void RuntimeIgnoresNonMissionStoryLoadCamera() {
+    TestFacade facade;
+    // The regular Story Mode load briefly reports a cutscene camera before
+    // a mission is active. It must not open a cinematic resume barrier.
+    facade.sample.cutsceneActive = true;
+    TestTransport transport;
+    transport.acknowledgementPayload = {
+        static_cast<std::uint8_t>(PlayerSlot::Host)};
+    BridgeRuntime runtime{facade, transport};
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+
+    const auto mission = LastSentMissionState(transport);
+    CHECK(mission.has_value());
+    CHECK(mission->phase == MissionPhase::Idle);
+    CHECK(!LastSentMissionCinematicState(transport).has_value());
+    CHECK(!HasLog(facade, "[MISSION_RESUME_BARRIER]"));
+}
+
+void RuntimeHunt1MissionProgressionHandshake() {
+    constexpr std::uint32_t kHunt1 = kHunt1MissionId;
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+
+    TestFacade hostFacade;
+    hostFacade.sample.missionActive = true;
+    hostFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, true, false, false, 0U};
+    TestTransport hostTransport;
+    hostTransport.acknowledgementPayload = {static_cast<std::uint8_t>(PlayerSlot::Host)};
+    BridgeRuntime host{hostFacade, hostTransport};
+    CHECK(host.Start(supported, error));
+    host.Tick();
+    const auto offer = LastSentMissionProgression(hostTransport);
+    CHECK(offer.has_value());
+    CHECK(offer->phase == MissionProgressionPhase::Offer);
+    CHECK(offer->missionId == kHunt1);
+
+    TestFacade guestFacade;
+    guestFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, false, true, false, 0U};
+    TestTransport guestTransport;
+    guestTransport.acknowledgementPayload = {static_cast<std::uint8_t>(PlayerSlot::Guest)};
+    BridgeRuntime guest{guestFacade, guestTransport};
+    CHECK(guest.Start(supported, error));
+    guest.Tick();
+    Frame offered;
+    offered.header.type = MessageType::MissionProgression;
+    offered.header.sequence = ++guestTransport.inboundSequence;
+    offered.header.tick = guestFacade.tick;
+    offered.payload = EncodeMissionProgression(*offer);
+    guestTransport.inbound.push_back(std::move(offered));
+    guest.Tick();
+    const auto eligibility = LastSentMissionProgression(guestTransport);
+    CHECK(eligibility.has_value());
+    CHECK(eligibility->phase == MissionProgressionPhase::Eligibility);
+    CHECK((eligibility->flags & static_cast<std::uint8_t>(
+        MissionProgressionFlag::GuestCanStart)) != 0U);
+
+    Frame eligible;
+    eligible.header.type = MessageType::MissionProgression;
+    eligible.header.sequence = ++hostTransport.inboundSequence;
+    eligible.header.tick = hostFacade.tick;
+    eligible.payload = EncodeMissionProgression(*eligibility);
+    hostTransport.inbound.push_back(std::move(eligible));
+    host.Tick();
+    CHECK(HasLog(hostFacade, "host accepted guest mission eligibility"));
+
+    hostTransport.sent.clear();
+    hostFacade.sample.missionActive = false;
+    hostFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, false, false, true, 4U};
+    hostFacade.localCashBalance = 240;
+    hostFacade.tick += 1'000U;
+    host.Tick();
+    const auto completion = LastSentMissionProgression(hostTransport);
+    CHECK(completion.has_value());
+    CHECK(completion->phase == MissionProgressionPhase::Completion);
+    CHECK(completion->eventId == offer->eventId);
+    CHECK((completion->flags & static_cast<std::uint8_t>(
+        MissionProgressionFlag::VerifiedCompletionMapping)) != 0U);
+    CHECK(completion->completionRating == 4U);
+    CHECK(completion->completionCashAward == 140);
+
+    // A future allow-listed save mapping is still constrained by the guest's
+    // own preflight evidence and is exactly-once even if the completion is
+    // retransmitted after a reconnect.
+    guestFacade.applyCampaignMissionCompletionResult = true;
+    Frame mappedCompletion;
+    mappedCompletion.header.type = MessageType::MissionProgression;
+    mappedCompletion.header.sequence = ++guestTransport.inboundSequence;
+    mappedCompletion.header.tick = guestFacade.tick;
+    mappedCompletion.payload = EncodeMissionProgression(MissionProgressionPayload{
+        offer->missionId, offer->missionEpoch, offer->eventId,
+        MissionProgressionPhase::Completion,
+        static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping),
+        4U, 140});
+    guestTransport.inbound.push_back(mappedCompletion);
+    guest.Tick();
+    CHECK(guestFacade.campaignMissionCompletionApplyCount == 1U);
+    CHECK(guestFacade.appliedCampaignMissionId == kHunt1);
+    CHECK(guestFacade.appliedCampaignMissionEventId == offer->eventId);
+    CHECK(guestFacade.appliedCampaignMissionRating == 4U);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 1U);
+    CHECK(guestFacade.appliedCampaignMissionCashEventId == offer->eventId);
+    CHECK(guestFacade.appliedCampaignMissionCashAmount == 140);
+
+    mappedCompletion.header.sequence = ++guestTransport.inboundSequence;
+    guestTransport.inbound.push_back(std::move(mappedCompletion));
+    guest.Tick();
+    CHECK(guestFacade.campaignMissionCompletionApplyCount == 1U);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 1U);
+
+    // A cash write failure does not consume the event. Completion/reward
+    // application is safe to repeat; the next delivery retries the missing
+    // cash award rather than falsely recording a complete result.
+    const MissionProgressionPayload retryOffer{
+        kHunt1, offer->missionEpoch + 2U, offer->eventId + 2U,
+        MissionProgressionPhase::Offer, 0U};
+    guestFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, false, true, false, 0U};
+    Frame retryOfferFrame;
+    retryOfferFrame.header.type = MessageType::MissionProgression;
+    retryOfferFrame.header.sequence = ++guestTransport.inboundSequence;
+    retryOfferFrame.header.tick = guestFacade.tick;
+    retryOfferFrame.payload = EncodeMissionProgression(retryOffer);
+    guestTransport.inbound.push_back(std::move(retryOfferFrame));
+    guest.Tick();
+    guestFacade.applyCampaignMissionCashAwardResult = false;
+    Frame retryCompletion;
+    retryCompletion.header.type = MessageType::MissionProgression;
+    retryCompletion.header.sequence = ++guestTransport.inboundSequence;
+    retryCompletion.header.tick = guestFacade.tick;
+    retryCompletion.payload = EncodeMissionProgression(MissionProgressionPayload{
+        retryOffer.missionId, retryOffer.missionEpoch, retryOffer.eventId,
+        MissionProgressionPhase::Completion,
+        static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping),
+        4U, 140});
+    guestTransport.inbound.push_back(retryCompletion);
+    guest.Tick();
+    CHECK(guestFacade.campaignMissionCompletionApplyCount == 2U);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 2U);
+    guestFacade.applyCampaignMissionCashAwardResult = true;
+    retryCompletion.header.sequence = ++guestTransport.inboundSequence;
+    guestTransport.inbound.push_back(std::move(retryCompletion));
+    guest.Tick();
+    CHECK(guestFacade.campaignMissionCompletionApplyCount == 3U);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 3U);
+
+    guestFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, false, false, false, 0U};
+    const MissionProgressionPayload ineligibleOffer{
+        kHunt1, offer->missionEpoch + 1U, offer->eventId + 1U,
+        MissionProgressionPhase::Offer, 0U};
+    Frame rejectedOffer;
+    rejectedOffer.header.type = MessageType::MissionProgression;
+    rejectedOffer.header.sequence = ++guestTransport.inboundSequence;
+    rejectedOffer.header.tick = guestFacade.tick;
+    rejectedOffer.payload = EncodeMissionProgression(ineligibleOffer);
+    guestTransport.inbound.push_back(std::move(rejectedOffer));
+    guest.Tick();
+
+    Frame rejectedCompletion;
+    rejectedCompletion.header.type = MessageType::MissionProgression;
+    rejectedCompletion.header.sequence = ++guestTransport.inboundSequence;
+    rejectedCompletion.header.tick = guestFacade.tick;
+    rejectedCompletion.payload = EncodeMissionProgression(MissionProgressionPayload{
+        ineligibleOffer.missionId, ineligibleOffer.missionEpoch,
+        ineligibleOffer.eventId, MissionProgressionPhase::Completion,
+        static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping),
+        4U, 140});
+    guestTransport.inbound.push_back(std::move(rejectedCompletion));
+    guest.Tick();
+    CHECK(guestFacade.campaignMissionCompletionApplyCount == 3U);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 3U);
+}
+
 void RuntimeHostDebouncesScriptedControlPresentation() {
     TestFacade facade;
     facade.sample.position = {12.0F, 13.0F, 14.0F};
@@ -5583,6 +5972,7 @@ void RuntimeHostDebouncesScriptedControlPresentation() {
 
 void RuntimeHostSpectatesMinigamesImmediately() {
     TestFacade facade;
+    facade.sample.missionActive = true;
     facade.sample.minigameActive = true;
     TestTransport transport;
     transport.acknowledgementPayload = {
@@ -8776,6 +9166,7 @@ void RuntimeHostStreamsAndCleansWorldMirror() {
     CHECK(replayedEntity.has_value());
     CHECK(replayedEntity->entityId == spawned->entityId);
 
+    facade.sample.missionActive = true;
     facade.sample.cutsceneActive = true;
     const auto updatesBeforeCutscene = std::count_if(
         transport.sent.begin(),
@@ -9477,7 +9868,10 @@ void RuntimeHostEnforcesLifecycleAuthority() {
 
     facade.sample.downed = true;
     runtime.Tick();
-    CHECK(facade.retryCount == 1U);
+    // A mutual down is recoverable through the normal revive flow.  It must
+    // never silently discard the checkpoint; only an explicit host menu choice
+    // may issue a retry request.
+    CHECK(facade.retryCount == 0U);
 }
 
 void RuntimeResyncEquipmentRespectsRoleAuthority() {
@@ -10186,6 +10580,8 @@ void RuntimeCheckpointRespawnRestoresLifecycle() {
 int main() {
     const std::vector<std::pair<std::string_view, std::function<void()>>> tests{
         {"FrameCodecRoundTrip", FrameCodecRoundTrip},
+        {"CampaignMissionCatalogIsExplicitAndBound",
+         CampaignMissionCatalogIsExplicitAndBound},
         {"PlayerActionEpochPolicy", PlayerActionEpochPolicy},
         {"GuestMissionGatePolicy", GuestMissionGatePolicy},
         {"PeerMountPullInputPolicy", PeerMountPullInputPolicy},
@@ -10227,6 +10623,10 @@ int main() {
          RuntimeAppliesHostWorldOutsideCutscenes},
         {"RuntimeHostEmitsMissionStateTransitions",
          RuntimeHostEmitsMissionStateTransitions},
+        {"RuntimeIgnoresNonMissionStoryLoadCamera",
+         RuntimeIgnoresNonMissionStoryLoadCamera},
+        {"RuntimeHunt1MissionProgressionHandshake",
+         RuntimeHunt1MissionProgressionHandshake},
         {"RuntimeHostDebouncesScriptedControlPresentation",
          RuntimeHostDebouncesScriptedControlPresentation},
         {"RuntimeHostSpectatesMinigamesImmediately",

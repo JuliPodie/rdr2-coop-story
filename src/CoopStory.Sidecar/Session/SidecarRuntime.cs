@@ -5897,6 +5897,9 @@ public sealed class SidecarRuntime : IAsyncDisposable
             case MessageType.PickupCollected:
                 _ = BinaryPayloadCodec.DecodePickupCollected(envelope.Payload.Span);
                 break;
+            case MessageType.MissionProgression:
+                _ = BinaryPayloadCodec.DecodeMissionProgression(envelope.Payload.Span);
+                break;
             case MessageType.PlayerAppearanceState:
                 _ = BinaryPayloadCodec.DecodePlayerAppearanceState(
                     envelope.Payload.Span);
@@ -6139,6 +6142,18 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 action.SenderSlot == (byte)SessionRole.Guest;
         }
 
+        if (envelope.Type == MessageType.MissionProgression)
+        {
+            var progression = BinaryPayloadCodec.DecodeMissionProgression(
+                envelope.Payload.Span);
+            return localRole switch
+            {
+                SessionRole.Host => progression.Phase == MissionProgressionPhase.Eligibility,
+                SessionRole.Guest => progression.Phase is MissionProgressionPhase.Offer or MissionProgressionPhase.Completion,
+                _ => false
+            };
+        }
+
         if (envelope.Type == MessageType.PlayerAppearanceState)
         {
             var appearance =
@@ -6210,6 +6225,10 @@ public sealed class SidecarRuntime : IAsyncDisposable
         if (messageType == MessageType.CampaignCapabilityAck)
         {
             return localRole == SessionRole.Guest;
+        }
+        if (messageType == MessageType.MissionProgression)
+        {
+            return localRole is SessionRole.Host or SessionRole.Guest;
         }
         if (messageType == MessageType.MotionReplicationConfig)
         {
@@ -6316,6 +6335,18 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 envelope.Payload.Span);
             return localRole == SessionRole.Guest &&
                 action.SenderSlot == (byte)SessionRole.Guest;
+        }
+
+        if (envelope.Type == MessageType.MissionProgression)
+        {
+            var progression = BinaryPayloadCodec.DecodeMissionProgression(
+                envelope.Payload.Span);
+            return localRole switch
+            {
+                SessionRole.Host => progression.Phase is MissionProgressionPhase.Offer or MissionProgressionPhase.Completion,
+                SessionRole.Guest => progression.Phase == MissionProgressionPhase.Eligibility,
+                _ => false
+            };
         }
 
         if (envelope.Type == MessageType.PlayerAppearanceState)

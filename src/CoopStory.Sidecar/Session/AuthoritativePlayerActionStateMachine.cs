@@ -221,6 +221,10 @@ internal sealed class AuthoritativePlayerActionStateMachine
             PlayerActionKind.Knockdown => from == PlayerActionPhase.Begin &&
                 to is PlayerActionPhase.Impact or PlayerActionPhase.Recover ||
                 from == PlayerActionPhase.Impact && to == PlayerActionPhase.Recover,
+            PlayerActionKind.Crafting => from == PlayerActionPhase.Begin &&
+                to is PlayerActionPhase.Active or PlayerActionPhase.Sustain ||
+                from == PlayerActionPhase.Active && to == PlayerActionPhase.Sustain ||
+                from == PlayerActionPhase.Sustain && to == PlayerActionPhase.Active,
             _ => false
         };
     }

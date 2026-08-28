@@ -41,7 +41,9 @@ struct LocalInteractionRuntime final {
     std::uint32_t interactionId{};
     std::uint16_t revision{};
     std::uint64_t lastSentAtMs{};
+    std::uint64_t startedAtMs{};
     NetEntityId targetEntityId{};
+    NetEntityId secondaryEntityId{};
     InteractionKind kind{InteractionKind::None};
     bool active{};
 };
@@ -146,6 +148,11 @@ private:
     void HandleRemoteMissionState(
         const Frame& frame,
         const MissionStatePayload& state);
+    void TickMissionProgression(
+        const LocalPlayerSample& sample,
+        std::uint64_t nowMs);
+    void HandleRemoteMissionProgression(
+        const MissionProgressionPayload& payload);
     void TickMissionCinematic(
         const std::optional<LocalPlayerSample>& sample,
         PlayerSlot localSlot,
@@ -301,7 +308,7 @@ private:
     std::uint32_t localAnimationSampleSequence_{};
     std::uint32_t localPlayerActionSequence_{};
     std::uint32_t localPlayerActionId_{};
-    std::array<LocalPlayerActionRuntime, 8> localPlayerActions_{};
+    std::array<LocalPlayerActionRuntime, 9> localPlayerActions_{};
     LocalInteractionRuntime localInteraction_{};
     std::uint32_t localInteractionId_{};
     std::uint64_t localCapabilityEventId_{};
@@ -314,6 +321,18 @@ private:
         pendingRestraintStates_{};
     std::optional<MissionStatePayload> localMissionState_{};
     std::optional<MissionStatePayload> remoteMissionState_{};
+    std::optional<MissionProgressionPayload> localMissionProgressionOffer_{};
+    std::optional<std::int32_t> localMissionProgressionStartingCash_{};
+    std::optional<MissionProgressionPayload> remoteMissionProgressionOffer_{};
+    // This is calculated locally when the guest receives the offer.  A host
+    // completion frame may never substitute for that local-save evidence.
+    bool remoteMissionProgressionEligible_{};
+    // Completion frames are reliable enough to be retransmitted across a
+    // reconnect.  Keep their effects exactly-once even after a future native
+    // mapping is enabled.
+    std::optional<std::uint64_t> remoteMissionProgressionAppliedEventId_{};
+    std::uint32_t localProgressionMissionId_{};
+    bool guestMissionProgressionEligible_{};
     std::optional<MissionCinematicStatePayload>
         localMissionCinematicState_{};
     std::optional<MissionCinematicStatePayload>

@@ -30,7 +30,6 @@ enum class PlayerRuntimeSignalKind {
     ReviveStarted,
     ReviveCancelled,
     ReviveCompleted,
-    RetryCheckpoint,
     SpectatorEntered,
     SpectatorExited,
 };
@@ -57,12 +56,10 @@ public:
 
 private:
     [[nodiscard]] static std::size_t Index(PlayerSlot slot) noexcept;
-    [[nodiscard]] bool BothIncapacitated() const noexcept;
     void CancelRevive(PlayerSlot slot, std::vector<PlayerRuntimeSignal>& signals);
 
     std::array<PlayerRuntimeState, 2> players_{};
     std::array<PlayerLifecycle, 2> stateBeforeSpectator_{};
-    bool retrySignalLatched_{};
 };
 
 }  // namespace coopstory::bridge

@@ -57,14 +57,6 @@ std::vector<PlayerRuntimeSignal> CoopPlayerStateMachine::SetSpectator(
     return signals;
 }
 
-bool CoopPlayerStateMachine::BothIncapacitated() const noexcept {
-    const auto incapacitated = [](const PlayerRuntimeState& state) {
-        return state.lifecycle == PlayerLifecycle::Downed ||
-               state.lifecycle == PlayerLifecycle::Reviving;
-    };
-    return incapacitated(players_[0]) && incapacitated(players_[1]);
-}
-
 void CoopPlayerStateMachine::CancelRevive(
     const PlayerSlot slot,
     std::vector<PlayerRuntimeSignal>& signals) {
@@ -134,17 +126,8 @@ std::vector<PlayerRuntimeSignal> CoopPlayerStateMachine::Tick(
         }
     }
 
-    if (BothIncapacitated()) {
-        if (!retrySignalLatched_) {
-            retrySignalLatched_ = true;
-            signals.push_back(
-                {PlayerRuntimeSignalKind::RetryCheckpoint,
-                 PlayerSlot::Host,
-                 0.0F});
-        }
-    } else {
-        retrySignalLatched_ = false;
-    }
+    // A mutual down is a revive/recovery state, not consent to discard a
+    // checkpoint.  The host must explicitly choose any retry from the menu.
     return signals;
 }
 
