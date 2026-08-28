@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
 
-const title = 'RDR2 Coop Story — Source Foundation by Lifeely';
-const description = 'An archived, non-commercial RDR2 Story Mode co-op research prototype and player replication foundation by Lifeely.';
+const title = 'RDR2 Coop Story — Protocol 32 Tester Build';
+const description = 'An experimental, non-commercial private RDR2 Story Mode co-op tester build by Lifeely.';
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 const socialImage = siteUrl
   ? new URL('og.png', siteUrl.endsWith('/') ? siteUrl : `${siteUrl}/`).toString()

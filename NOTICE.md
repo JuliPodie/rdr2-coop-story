@@ -1,7 +1,7 @@
 # RDR2 Coop Story — source release notice
 
-RDR2 Coop Story is an archived, non-commercial technical prototype for PC Story
-Mode. It is not affiliated with, endorsed by, supported by, authorized by, or
+RDR2 Coop Story is an experimental, non-commercial private tester build for PC
+Story Mode. It is not affiliated with, endorsed by, supported by, authorized by, or
 associated with Rockstar Games, Take-Two Interactive, Alexander Blade, or any
 other third-party tool author.
 

@@ -13,8 +13,8 @@ Both testers may copy the same project-owned archive and verify the same
 After extraction, the host selects **Host** in the launcher, clicks **HOST**,
 and enters the private session password twice. The guest selects **Guest**,
 clicks **JOIN**, and enters the host IPv4 address and the same password. Share
-the IPv4 and password privately; there is no normal launcher session-code or
-invite-file step in V29.4.
+the IPv4 and password privately; there is no launcher session-code or
+invite-file step in the current tester workflow.
 
 The launcher derives the protocol credential locally from that password and
 the canonical host IPv4. It never stores the clear-text password in settings,
@@ -44,7 +44,7 @@ ZIP. Give `guest.config.json` directly to the invited tester only when using
 the headless workflow.
 
 `create-session` rejects loopback, wildcard, broadcast and multicast
-destinations. Protocol 23 supports IPv4. The normal Host sidecar listens on
+destinations. Protocol 32 supports IPv4. The normal Host sidecar listens on
 all IPv4 LAN/Hamachi interfaces on TCP `43120` and UDP `43121` by default. `local-test`
 and `simulate` bind only to `127.0.0.1`.
 
@@ -98,7 +98,7 @@ must use Story Mode only.
 
 For a direct LAN or Hamachi IPv4 test, the host may need to allow the host application on
 Windows **Private networks**. The package must not silently create firewall
-rules. Protocol 23 has no NAT traversal; an Internet test needs networking
+rules. Protocol 32 has no NAT traversal; an Internet test needs networking
 arranged by the testers outside this project.
 
 ## Diagnostics

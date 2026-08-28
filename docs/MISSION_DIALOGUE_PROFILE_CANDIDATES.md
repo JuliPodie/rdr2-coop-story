@@ -1,13 +1,15 @@
 # Dialogue profile candidates from build 1436
 
-This is **source evidence**, not an injected playback profile set. The
-installed game is pinned to RDR2 `1.0.1491.50`; the decompiled scripts below
-are from build 1436. The bridge may use the small initial list as a read-only
-probe: it observes created/loaded/playing/line state and exchanges a cue with
-the peer, but never starts, pauses, restarts, skips, stops, or otherwise
-mutates a conversation. A candidate must still pass the 1491.50 capture
-described in [Mission dialogue profiles](MISSION_DIALOGUE_PROFILES.md) before
-it can be treated as a verified profile.
+This is **source evidence**, not a promise that every listed root plays on the
+peer. The installed game is pinned to RDR2 `1.0.1491.50`; the decompiled
+scripts below are from build 1436. The bridge uses a small approved subset as a
+read-only host probe: it observes created/loaded/playing/line state and
+exchanges an epoch- and checkpoint-scoped cue. A matching guest retains its own
+vanilla playback. A companion-only guest can use only an approved,
+bridge-created audio presentation with bridge-owned hidden proxies. A candidate
+must still pass the 1491.50 capture described in
+[Mission dialogue profiles](MISSION_DIALOGUE_PROFILES.md) before it can be
+treated as a verified profile.
 
 ## What the script evidence proves
 
@@ -23,8 +25,10 @@ subtitle keys. The scripts also show that line position is observable through
 `AUDIO::GET_CURRENT_SCRIPTED_CONVERSATION_LINE(root)`.
 
 This evidence does **not** prove that the roots, line numbering, or the
-mission-owned cast bindings are unchanged in 1491.50. It also does not grant
-the bridge permission to create, restart, skip, pause, or stop a
+mission-owned cast bindings are unchanged in 1491.50. It does not authorize the
+bridge to mutate a Rockstar-owned mission conversation. The separate
+companion-only presentation may create and clean up only its own reviewed root
+and hidden proxies; it never pauses, restarts, skips, or stops a game-owned
 conversation.
 
 ## Local native-reference validation
@@ -40,8 +44,10 @@ confirms these exact public signatures and hashes:
 | root playing | `IS_SCRIPTED_CONVERSATION_PLAYING(const char*)` / `0x1ECC76792F661CF5` |
 | line index | `GET_CURRENT_SCRIPTED_CONVERSATION_LINE(const char*)` / `0x480357EE890C295A` |
 
-The bridge invokes only those four read-only operations. It does not use the
-reference's create, bind, start, pause, restart, skip, or stop declarations.
+The host observation probe invokes only those four read-only operations. The
+separate companion-only presentation uses reviewed public conversation calls
+only for a bridge-owned root and bridge-created hidden proxies; it does not use
+them on a game-owned conversation.
 The checkout is deliberately not copied into this repository, release ZIP, or
 game directory; it is a local validation source only. The reference itself
 still labels these declarations `b1207`, so it is not evidence of compatibility
@@ -98,16 +104,19 @@ Nearby, explicitly scripted fishing roots include `FUD1_HOS_TEASE`,
 `FUD1_DPLOSE`, `FUD1_HPCATCH`, `FUD1_DPCATCH`, `FUD1_HPTHROW`,
 `FUD1_DPTHROW`, `FUD1_HPKEEP`, and `FUD1_DPKEEP`.
 
-## Next runtime step
+## Current runtime guard
 
-Add a **read-only** facade probe for a narrowly enabled candidate root:
+The current narrow approved set is `HNT1` tracking roots and `FUD1` fishing
+talk roots listed in [Mission dialogue profiles](MISSION_DIALOGUE_PROFILES.md).
+For every current or future root, the guard is:
 
 1. Check whether the script-owned conversation is created/loaded/playing.
 2. Record its current line index and the active mission epoch/checkpoint.
 3. Require the guest to report the same root as locally loaded before the
    host emits a future-timestamped cue.
-4. Let each game start and animate its own conversation. Do not call a
-   conversation-mutating native from a cue.
+4. Let a matching guest start and animate its own conversation. A
+   companion-only guest may start only the bridge-owned reviewed presentation;
+   never mutate a game-owned conversation from a cue.
 
 If either local game does not prove the root in the pinned build, that segment
 falls back to vanilla dialogue and the host objective/camera presentation.

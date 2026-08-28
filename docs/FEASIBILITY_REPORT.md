@@ -31,7 +31,7 @@ Replicating visible state is not equivalent to synchronizing the underlying
 campaign logic. Mission-by-mission patches would also be expensive, fragile,
 and difficult to validate safely.
 
-## What this archive proves
+## What the current tester build proves
 
 - A launcher/bridge/sidecar topology can isolate transport from the game-facing
   native layer.
@@ -42,6 +42,9 @@ and difficult to validate safely.
   reduce accidental file and privacy problems.
 - Synthetic and dependency-free tests can validate large parts of the system
   without launching the game.
+- The Protocol 32 tester build also exercises an exact-MissionData barrier,
+  bounded dialogue cue/ready coordination, and 50 host-owned ambient encounter
+  detections. Those remain validation features, not proof of a shared campaign.
 
 ## What it does not prove
 

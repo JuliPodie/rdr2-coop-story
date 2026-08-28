@@ -9,8 +9,8 @@ third-party files.
 - Windows 10 or Windows 11 x64;
 - .NET SDK `10.0.203`;
 - CMake `3.25` or newer;
-- Visual Studio Build Tools 2022 `17.14` with MSVC v143, the Windows SDK, and
-  CMake tools;
+- Visual Studio Build Tools 2022 `17.14` or Visual Studio 2026 with MSVC x64,
+  the Windows SDK, and CMake tools;
 - for an ASI build only: a separately obtained Script Hook RDR2 SDK
   `1.0.1207.73`.
 
@@ -33,12 +33,13 @@ programs. No game or Script Hook file is required for this validation.
 
 ## 3. SDK-free C++ bridge validation
 
-Visual Studio 2022:
+Use the preset matching your installed Visual Studio version. For example,
+Visual Studio 2026:
 
 ```powershell
-cmake --preset bridge-vs2022
-cmake --build --preset bridge-vs2022-release
-ctest --preset bridge-vs2022-release
+cmake --preset bridge-vs2026
+cmake --build --preset bridge-vs2026-release
+ctest --preset bridge-vs2026-release
 ```
 
 The SDK-free preset builds the bridge core, simulator, and self-tests without an
@@ -55,9 +56,9 @@ then set a local environment variable that points to the extracted SDK root:
 
 ```powershell
 $env:SCRIPT_HOOK_RDR2_SDK_DIR = 'D:\path\to\your\extracted\ScriptHookRDR2_SDK'
-cmake --preset bridge-asi-vs2022
-cmake --build --preset bridge-asi-vs2022-release
-ctest --preset bridge-asi-vs2022-release
+cmake --preset bridge-asi-vs2026
+cmake --build --preset bridge-asi-vs2026-release
+ctest --preset bridge-asi-vs2026-release
 ```
 
 Never copy the SDK into this repository. Never commit or release its headers,
@@ -72,8 +73,8 @@ dotnet run --project .\src\CoopStory.Launcher\CoopStory.Launcher.csproj -c Relea
 ```
 
 The launcher expects a complete locally built package beside it before the main
-window can operate. The public website contains a translated, data-safe browser
-reconstruction for people who only want to inspect the UI.
+window can operate. The private tester ZIP is self-contained for testers; .NET
+is required only when building the source.
 
 The launcher now uses the Windows-provided Georgia typeface. No external TTF is
 loaded, bundled, or redistributed.

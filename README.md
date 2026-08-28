@@ -80,22 +80,24 @@ The Script Hook runtime and SDK are not vendored. The original author’s page i
 
 ## Build the safe source validation
 
-Install .NET SDK 10.0.203, CMake 3.25 or newer, and Visual Studio Build Tools
-2022 with MSVC v143 and the Windows SDK.
+Install .NET SDK 10.0.203, CMake 3.25 or newer, and either Visual Studio Build
+Tools 2022 or Visual Studio 2026 with MSVC x64 and the Windows SDK.
 
 ```powershell
 dotnet build .\CoopStory.slnx -c Release
 dotnet run --project .\tests\CoopStory.SelfTest -c Release
 dotnet run --project .\tests\CoopStory.Launcher.SelfTest -c Release
 
-cmake --preset bridge-vs2022
-cmake --build --preset bridge-vs2022-release
-ctest --preset bridge-vs2022-release
+cmake --preset bridge-vs2026
+cmake --build --preset bridge-vs2026-release
+ctest --preset bridge-vs2026-release
 ```
 
 These commands build and test the managed projects, SDK-free bridge simulator,
 and self-tests. Building an ASI requires a separately obtained Script Hook SDK
-and an additional legal/licensing review. See [BUILDING.md](BUILDING.md).
+and an additional legal/licensing review. See [BUILDING.md](BUILDING.md). For
+the exact tester scope, progression boundary, and two-PC checklist, see
+[docs/STATUS.md](docs/STATUS.md) and [docs/TESTING.md](docs/TESTING.md).
 
 ## Safety and legal status
 

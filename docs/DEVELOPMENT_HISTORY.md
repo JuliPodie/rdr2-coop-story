@@ -21,7 +21,11 @@ labels describe research milestones, not stable public releases.
 - **V31:** experimental Story VM capture and AnimScene definition replay,
   dependency-ordered cast binding, readiness/commit phases, and stricter safe
   fallback behavior.
+- **Protocol 30:** exact MissionData progression barrier, deny-by-default
+  completion/reward catalog, and mission dialogue cue/ready coordination.
+- **Protocol 32:** host-owned ambient-event coordinator and 50 reviewed
+  free-roam script detections spanning five bounded co-op profiles.
 
-The final archived label is **V31.10 Alpha**, protocol **20**. The work stopped
-before a supported shared campaign was completed. See [STATUS.md](STATUS.md) for
-the honest boundary of the preserved source.
+The current private tester line is **Protocol 32**. It remains experimental and
+does not claim a supported shared campaign. See [STATUS.md](STATUS.md) for the
+current capability boundary and [TESTING.md](TESTING.md) for the tester process.

@@ -8,9 +8,9 @@ const modules = [
   ['Launcher', 'C# / WinForms', 'A dark three-mode launcher, settings, safe installer ownership, lobby, password flow, and redacted diagnostics.'],
   ['Bridge', 'C++20 / ASI', 'The in-process Story Mode bridge, version gate, entity registry, remote presentation, and Script Hook facade.'],
   ['Sidecar', '.NET / TCP + UDP', 'A separate networking process for authentication, peer state, snapshots, reconnects, and diagnostics.'],
-  ['Protocol', 'Binary protocol 20', 'Shared contracts, authenticated frames, sequencing, interpolation, animation payloads, and session messages.'],
+  ['Protocol', 'Binary protocol 32', 'Shared contracts, authenticated frames, sequencing, AnimGraph, mission, dialogue, and ambient-event messages.'],
   ['Self-tests', 'C# + CTest', 'Dependency-light validation for codecs, networking, launcher safety, bridge logic, and failure gates.'],
-  ['Documentation', 'Architecture archive', 'Detailed notes covering the replication model, test history, limitations, and unfinished experiments.'],
+  ['Documentation', 'Tester guides', 'Current install, testing, protocol, architecture, safety, and known-limit documentation.'],
 ];
 
 const toolchain = [
@@ -33,7 +33,7 @@ export default function Home() {
         <nav aria-label="Primary navigation">
           <a href="#launcher">Launcher UI</a>
           <a href="#source">Inside the source</a>
-          <a href="#build">Build</a>
+          <a href="#build">Tester install</a>
           <a href="#legal">Legal</a>
           <a className="nav-cta" href="https://www.reddit.com/user/Lifeely_/" target="_blank" rel="noreferrer">
             Lifeely on Reddit
@@ -43,11 +43,11 @@ export default function Home() {
 
       <section className="hero" id="top">
         <div className="hero-copy">
-          <div className="eyebrow"><span /> Archived technical alpha</div>
-          <h1>A first foundation for two-player replication in RDR2 Story Mode.</h1>
+          <div className="eyebrow"><span /> Private Protocol 32 tester build</div>
+          <h1>A host-authoritative two-player test build for RDR2 Story Mode.</h1>
           <p className="hero-lead">
-            RDR2 Coop Story is a non-commercial research prototype that explored a host-authoritative
-            player, world, and presentation replication layer for two private PCs.
+            RDR2 Coop Story is an experimental, non-commercial player, world, mission-presentation,
+            and ambient-event replication layer for two private PCs.
           </p>
           <div className="hero-actions">
             <a className="button button-primary" href="#launcher">Explore the build</a>
@@ -60,19 +60,18 @@ export default function Home() {
 
         <aside className="hero-note" id="project-status">
           <p className="note-label">Project status</p>
-          <h2>Foundation shared. Development concluded.</h2>
+          <h2>Current tester build.</h2>
           <p>
-            I am no longer developing this project because the remaining work became too complex for
-            me to continue. I am publishing the foundation so others can study the player replication
-            work and decide where to take it next.
+            GitHub Releases is where matching tester ZIPs are published. Use only an asset whose
+            tag and BUILD_INFO protocol match; it never includes Script Hook or game files.
           </p>
           <div className="status-row">
-            <span>Last internal build</span>
-            <strong>V31.10 Alpha</strong>
+            <span>Current tester line</span>
+            <strong>Protocol 32</strong>
           </div>
           <div className="status-row">
             <span>Protocol</span>
-            <strong>20</strong>
+            <strong>32</strong>
           </div>
         </aside>
       </section>
@@ -91,7 +90,7 @@ export default function Home() {
           <div className="launcher-topbar">
             <div>
               <p className="launcher-title">RDR2 COOP STORY</p>
-              <p className="launcher-build">V31.10 ALPHA · LAUNCHER 11.4.0</p>
+              <p className="launcher-build">PROTOCOL 32 TESTER · PRIVATE STORY MODE</p>
             </div>
             <div className="launcher-nav"><span className="active">START</span><span>SETTINGS</span></div>
           </div>
@@ -142,9 +141,9 @@ export default function Home() {
             <h2 id="source-title">A source foundation, not a finished co-op campaign.</h2>
           </div>
           <p>
-            The repository preserves the original technical direction: a host-authoritative session,
-            a local game bridge, an external network sidecar, and a UI that keeps third-party
-            prerequisites separate. It is released for study and possible continuation.
+            The repository contains a host-authoritative session, local game bridge, external network
+            sidecar, and a UI that keeps third-party prerequisites separate. The current tester build
+            adds guarded mission progression, dialogue coordination, and host-owned ambient profiles.
           </p>
         </div>
 
@@ -166,7 +165,7 @@ export default function Home() {
             <ul>
               <li>Authenticated two-PC LAN/Hamachi session transport.</li>
               <li>Remote player transform, movement, action, mount, and animation replication paths.</li>
-              <li>Host-owned world entities, mission presentation experiments, reconnect, and diagnostics.</li>
+              <li>Host-owned world entities, mission/dialogue presentation, 50 ambient detections, reconnect, and diagnostics.</li>
               <li>A safe launcher, version checks, install ownership, and a hard Story Mode/RDO guard.</li>
             </ul>
           </article>
@@ -208,31 +207,32 @@ export default function Home() {
       <section className="build-section" id="build" aria-labelledby="build-title">
         <div className="build-wrap">
           <div className="build-intro">
-            <p className="eyebrow"><span /> Source release</p>
-            <h2 id="build-title">Download the code. Build only what you understand.</h2>
+            <p className="eyebrow"><span /> Tester package</p>
+            <h2 id="build-title">Download a tester ZIP that matches the release protocol.</h2>
             <p>
-              The public download is source-only. It includes the launcher UI source, bridge, sidecar,
-              protocol, tests, and documentation. It intentionally excludes ready-to-run mod binaries
-              and every third-party or game-owned file.
+              Both players use the same self-contained tester ZIP. The current source line is
+              Protocol 32, so its release tag and BUILD_INFO must report 32. The ZIP includes the
+              project launcher, sidecar, and bridge, but excludes Script Hook and every third-party
+              or game-owned file.
             </p>
-            <a className="button button-primary download-button" href="downloads/RDR2-CoopStory-Source.zip" download>
-              Download source ZIP
+            <a className="button button-primary download-button" href="https://github.com/JuliPodie/rdr2-coop-story/releases">
+              Open GitHub Releases
             </a>
-            <small>The ZIP is generated from the repository by the GitHub Pages workflow.</small>
+            <small>Source builders should follow BUILDING.md; testers do not need .NET.</small>
           </div>
 
           <div className="build-steps">
             <article className="build-step">
-              <span>01</span><div><h3>Install the development prerequisites</h3><p>Windows 10/11 x64, .NET SDK 10.0.203, CMake 3.25+, and Visual Studio Build Tools 2022 with MSVC v143 and the Windows SDK.</p></div>
+              <span>01</span><div><h3>Prepare two private Story Mode PCs</h3><p>Use backed-up local saves, a trusted private network, and independently obtained Script Hook. Never use the project in Red Dead Online.</p></div>
             </article>
             <article className="build-step">
-              <span>02</span><div><h3>Build the managed solution</h3><pre><code>dotnet build .\CoopStory.slnx -c Release</code></pre></div>
+              <span>02</span><div><h3>Download and extract the identical tester ZIP</h3><p>Get the matching tagged asset from GitHub Releases on both PCs. Do not run it from inside the ZIP.</p></div>
             </article>
             <article className="build-step">
-              <span>03</span><div><h3>Run the dependency-free validation</h3><pre><code>{`dotnet run --project .\\tests\\CoopStory.SelfTest -c Release\ndotnet run --project .\\tests\\CoopStory.Launcher.SelfTest -c Release\ncmake --preset bridge-vs2022\ncmake --build --preset bridge-vs2022-release\nctest --preset bridge-vs2022-release`}</code></pre></div>
+              <span>03</span><div><h3>Run START_COOP.bat</h3><p>Choose RDR2.exe, browse to your separately extracted Script Hook if needed, then host or join with the private host IPv4 address and password.</p></div>
             </article>
             <article className="build-step">
-              <span>04</span><div><h3>Build the ASI only after a separate SDK review</h3><p>Point <code>SCRIPT_HOOK_RDR2_SDK_DIR</code> at an independently extracted SDK 1.0.1207.73, then use the <code>bridge-asi-vs2022</code> preset. Do not commit or redistribute the SDK.</p></div>
+              <span>04</span><div><h3>Build source only if you need to change it</h3><p>Use .NET SDK 10.0.203, CMake 3.25+, and Visual Studio 2022 or 2026. Read BUILDING.md before an ASI build; do not commit or redistribute the SDK.</p></div>
             </article>
           </div>
         </div>
@@ -281,7 +281,7 @@ export default function Home() {
       </section>
 
       <footer>
-        <span>RDR2 Coop Story · archived source foundation · 2026</span>
+        <span>RDR2 Coop Story · Protocol 32 private tester build · 2026</span>
         <span>Original project code: MIT · third-party rights reserved by their owners</span>
       </footer>
     </main>

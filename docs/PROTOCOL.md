@@ -1,92 +1,103 @@
-# Protocol 23 overview
+# Protocol 32 overview
 
-Protocol 23 is the private tester wire revision. The
-implementation in `src/CoopStory.Protocol` and the corresponding native bridge
-code are the source of truth; this document describes the design rather than a
-stable public API.
+Protocol 32 is the current private-tester wire revision. The implementation in
+`src/CoopStory.Protocol` and the matching native bridge code are the source of
+truth; this document records the supported design, not a public compatibility
+promise. Host and guest must always use the same tester package and protocol
+revision.
 
 ## Session establishment
 
-1. The launcher derives a private protocol credential from the session
-   password and validated host address.
-2. Host and guest sidecars perform a versioned authenticated handshake.
-3. The peers bind the UDP path to the authenticated session.
+1. The launcher derives a private protocol credential from the session password
+   and validated host address.
+2. Host and guest sidecars complete a versioned authenticated handshake.
+3. The peers bind the UDP path to that authenticated session.
 4. The local bridge connects to its sidecar and negotiates role, protocol,
    motion mode, and logical session generation.
-5. Replication begins only after the required role and generation gates pass.
+5. Replication begins only after every role and generation gate passes.
 
 Mismatched protocol or motion modes fail closed. Credentials are never written
 to normal logs or exported diagnostics.
 
 ## Transport split
 
-Authenticated TCP carries ordering-sensitive data such as:
+Authenticated TCP carries ordering-sensitive data, including:
 
-- handshake and role control;
-- entity spawn/despawn and lifecycle changes;
-- reliable player actions and interaction transactions;
-- mission/cinematic state and authoritative replay batches;
-- reconnect, goodbye, marker, and session-menu control.
+- handshake, role, lobby, reconnect, goodbye, and session-menu control;
+- entity lifecycle, reliable player actions, and interaction transactions;
+- mission state, objective, camera, cinematic, progression, and dialogue
+  control; and
+- authoritative replay batches and ambient-encounter state.
 
-Authenticated UDP carries high-frequency replaceable data such as:
+Authenticated UDP carries high-frequency replaceable data, including player
+transforms, motion and AnimGraph snapshots, and camera/world snapshots for
+which a newer state supersedes an older one. UDP validation rejects
+unauthenticated, replayed, malformed, oversized, and wrong-session datagrams.
 
-- player transforms and interpolation samples;
-- animation and motion snapshots;
-- camera and world snapshots where a newer state supersedes an older one.
+## Current message families
 
-UDP validation rejects unauthenticated, replayed, malformed, oversized, or
-wrong-session datagrams.
-
-## Message families
-
-The codebase contains versioned contracts for:
+Protocol 32 contains versioned contracts for:
 
 - session hello/goodbye, identity, and lobby state;
-- player state, motion, animation graph, action, and traversal data;
-- mount and host-authoritative interaction state;
-- world entity, equipment, damage intent, and dependency graph updates;
-- mission state, objective, camera, cinematic, MetaPed, and AnimScene data;
-- peer resynchronization and reconnect replay;
-- diagnostic problem markers and session controls.
+- player transform, motion, animation graph, action, traversal, damage,
+  downed, revive, restraint, mount, and interaction state;
+- host-owned world entity lifecycle and dependency graph updates;
+- mission state, objective, camera, cinematic, MetaPed, AnimScene, and exact
+  MissionData progression barriers;
+- mission dialogue cue/ready messages scoped to a mission epoch and checkpoint;
+- host-authoritative ambient-encounter proposal and state messages; and
+- peer resynchronization, reconnect replay, diagnostics, and session controls.
 
-Every decoder validates bounds, flags, enum values, lengths, and authority
-before a payload reaches game-facing logic.
+Every decoder validates payload bounds, flags, enum values, lengths, sequence,
+and authority before a payload reaches game-facing logic.
 
-## Ordering and reconnect rules
+## Ordering, reconnect, and authority rules
 
 - Sequence comparison is wrap-safe.
 - Logical session generations invalidate queued work from earlier connections.
 - The sidecar bounds and coalesces high-frequency delivery instead of allowing
   unbounded queues.
-- Reliable authoritative state is replayed in dependency order after a
-  reconnect.
-- Tombstones prevent a late snapshot from recreating an entity that the host
-  already removed.
-- Bridge sends and receives are generation-bound across named-pipe reconnects.
+- Reliable host state is replayed in dependency order after reconnect.
+- Tombstones prevent a late snapshot from recreating an entity already removed
+  by the host.
+- Bridge sends and receives remain generation-bound across named-pipe reconnects.
+- The host accepts only validated guest intents; it owns world lifecycle,
+  encounter phase/outcome, and authoritative interaction mutations.
 
-## Player presentation
+## Mission and dialogue boundary
 
-Player transforms are interpolated from recent validated samples. Reliable
-actions use explicit begin, sustain, end, and cancel semantics so a missing end
-does not leave a remote task active indefinitely. Watchdogs and session reset
-logic clear stale actions.
+The host publishes an exact MissionData ID, mission epoch, phase, safe anchor,
+and bounded objective/camera presentation. A guest may use its own matching
+vanilla mission prompt only through the short exact-ID barrier, after proving
+that same incomplete mission is locally startable. An unavailable, mismatched,
+or timed-out guest remains companion-only and receives no save change.
 
-The archived AnimGraph and AnimScene paths are experimental presentation
-layers. They do not prove identical game script execution or a synchronized
-campaign.
+Completion replication is deny-by-default. It carries a host rating and bounded
+positive cash delta only for a matching, eligible run, and the guest applies
+only the reviewed idempotent MissionData/reward records in the catalog. This
+does not synchronize Rockstar's mission VM, checkpoints, AI, or save files.
 
-## Authority checks
+Dialogue cues identify only catalogue-owned roots and an observed line. A
+matching guest reports whether its own vanilla root/line is ready; a
+companion-only guest can use only a reviewed bridge-owned audio presentation.
+Stale, mismatched, unavailable, retry, reconnect, cinematic, and mission-end
+cues are rejected or cleared. No message asks the peer to guess or advance a
+Rockstar conversation.
 
-The host owns world lifecycle and accepted mutations. Guest-originated intents
-are validated against:
+## Ambient encounter boundary
 
-- authenticated peer identity;
-- current logical session generation;
-- allowed entity ownership and state;
-- bounded distances, identifiers, and transaction phases;
-- current feature and motion-mode negotiation.
+Fifty reviewed local free-roam script IDs map to five bridge-owned profiles:
+roadside ambush, hostage rescue, wagon defense, animal attack, and camp
+clear-out. A host detection or guest proposal becomes one shared instance only
+after host validation of session state, safety, distance, anchor, and profile.
+The host creates the physical roster and decides success, failure, abandonment,
+and cleanup; the guest contributes through validated combat intent and receives
+the host world presentation.
 
-Messages that cannot be validated are rejected instead of guessed.
+These messages never make the underlying Rockstar ambient script shared.
+Original script state, law, wagon physics, dialogue, Honor, money, campaign
+progress, unique rewards, and inventories remain local. Ordinary local corpse
+loot is not represented by the protocol.
 
 ## Network defaults
 
@@ -96,16 +107,17 @@ Messages that cannot be validated are rejected instead of guessed.
 | UDP | `43121` | Trusted private network only |
 
 Do not forward these ports to the public internet. There is no public server,
-matchmaking service, relay, or supported WAN security model.
+matchmaking service, relay, NAT traversal, or supported WAN security model.
 
-## Compatibility
+## Compatibility boundary
 
-Historical development used:
+Historical development and the current tester gate use:
 
 - RDR2 PC file version `1.0.1491.50`;
 - Script Hook RDR2 runtime `1.0.1491.17`;
-- Script Hook RDR2 SDK `1.0.1207.73`;
-- project protocol `20`.
+- Script Hook RDR2 SDK `1.0.1207.73`; and
+- project protocol `32`.
 
-These values document the development context, not a current compatibility
-promise. Do not disable version, online-mode, or protocol gates to force a test.
+These values document a pinned private-test context, not a broad compatibility
+promise. Do not disable game-version, online-mode, or protocol gates to force a
+test.

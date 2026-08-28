@@ -1,9 +1,9 @@
 # Architecture
 
-RDR2 Coop Story is an archived research prototype for a private, two-PC,
-host-authoritative replication layer in Red Dead Redemption 2 Story Mode. It is
-not a finished shared campaign and does not synchronize Rockstar's complete
-Story script virtual machine.
+RDR2 Coop Story is a private, two-PC, host-authoritative replication layer for
+Red Dead Redemption 2 Story Mode. The current Protocol 32 tester build is not
+a finished shared campaign and does not synchronize Rockstar's complete Story
+script virtual machine, save files, AI, or physics.
 
 ## System topology
 
@@ -33,12 +33,15 @@ self-tests.
 ## Authority model
 
 The host is authoritative for the session generation, replicated peer state,
-world graph, mission presentation experiments, entity lifecycle, and accepted
-interaction mutations. The guest sends local player input/state and consumes
-host-approved snapshots or transactions.
+world graph, mission presentation, bridge-owned ambient encounters, entity
+lifecycle, and accepted interaction mutations. The guest sends local player
+input/state and consumes host-approved snapshots or transactions.
 
-The host remains the only owner of campaign progress and its save. The project
-does not merge saves or promise deterministic mission script execution on both
+The host remains the owner of its campaign save. A guest's save can change only
+through the separate exact-MissionData progression gate: the guest proves the
+same incomplete mission startable locally, verifies its own completion write,
+and receives only an allow-listed idempotent reward mapping. The project does
+not merge saves or promise deterministic mission script execution on both
 machines.
 
 ## Data paths
@@ -61,11 +64,18 @@ The source contains foundations for:
 - host-owned world entities and dependency-ordered lifecycle updates;
 - mission state, camera, objective, cinematic, MetaPed, and AnimScene
   presentation experiments;
+- epoch/checkpoint-scoped mission dialogue cue/ready coordination with a small
+  bridge-owned companion-audio fallback;
+- five host-owned ambient profiles backed by 50 reviewed local script
+  detections: roadside ambush, hostage rescue, wagon defense, animal attack,
+  and camp clear-out;
 - interpolation, reconnect replay, impairment simulation, ghost recording, and
   correlated diagnostics.
 
 These systems are incomplete. They do not establish a supported shared Story
-campaign, identical AI, identical local audio, or deterministic script state.
+campaign, identical AI/audio, or deterministic script state. Ambient profiles
+do not execute Rockstar's original event scripts or transfer their law, reward,
+Honor, inventory, or progression state.
 
 ## Safety boundaries
 

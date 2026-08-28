@@ -9,7 +9,7 @@ test from a completed guest mission or an Online session.
 
 ## Matching-instance barrier (two-PC required)
 
-Protocol 30 adds a 45-second, exact-MissionData start window. It keeps the
+Protocol 32 uses a 45-second, exact-MissionData start window. It keeps the
 guest prompt blocked for the first 250 ms while it verifies that the guest was
 idle, so an independently started local mission cannot be adopted. This is a
 separate live gate from completion/reward validation and must be tested before

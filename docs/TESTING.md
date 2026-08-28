@@ -13,7 +13,7 @@ dotnet run --project .\tests\CoopStory.SelfTest -c Release
 dotnet run --project .\tests\CoopStory.Launcher.SelfTest -c Release
 ```
 
-Expected results for the archived source are:
+Expected results for the current Protocol 32 source are:
 
 - solution build: zero errors;
 - protocol/sidecar self-test: `49/49`;
