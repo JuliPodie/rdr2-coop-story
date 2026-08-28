@@ -59,7 +59,7 @@ void FrameCodecRoundTrip() {
     CHECK(bytes[1] == static_cast<std::uint8_t>('2'));
     CHECK(bytes[2] == static_cast<std::uint8_t>('C'));
     CHECK(bytes[3] == static_cast<std::uint8_t>('P'));
-    CHECK(bytes[4] == 22U);
+    CHECK(bytes[4] == 23U);
     CHECK(bytes[5] == 0U);
     CHECK(bytes[6] == 4U);
     CHECK(bytes[7] == 0U);
@@ -1315,7 +1315,7 @@ void PayloadContracts() {
 }
 
 void AnimationReplicationPayloadContracts() {
-    CHECK(kProtocolVersion == 22U);
+    CHECK(kProtocolVersion == 23U);
     CHECK(
         static_cast<std::uint16_t>(MessageType::PlayerAnimationState) ==
         28U);
@@ -3151,6 +3151,12 @@ public:
         }
         return result;
     }
+    std::vector<CampaignCapabilityObservation>
+    DrainCampaignCapabilityObservations() noexcept override {
+        auto result = std::move(pendingCampaignCapabilityObservations);
+        pendingCampaignCapabilityObservations.clear();
+        return result;
+    }
     std::optional<float> HostGuestDistanceMeters() noexcept override {
         return distance;
     }
@@ -3536,6 +3542,8 @@ public:
         remoteMountLocalStates{};
     std::vector<HostWorldEntitySample> sampledWorldEntities{};
     std::optional<DamageIntentPayload> pendingWorldDamageIntent{};
+    std::vector<CampaignCapabilityObservation>
+        pendingCampaignCapabilityObservations{};
     std::vector<WorldEntityStatePayload> worldEntitySpawns{};
     std::vector<WorldEntityStatePayload> worldEntityUpdates{};
     std::vector<NetEntityId> worldEntityDespawns{};
@@ -5525,6 +5533,173 @@ void RuntimeHostEmitsMissionStateTransitions() {
          static_cast<std::uint8_t>(
              MissionStateFlag::MissionActive)) != 0U);
     CHECK(HasLog(facade, "[MISSION_TX][MISSION_FSM]"));
+}
+
+void RuntimeHostDebouncesScriptedControlPresentation() {
+    TestFacade facade;
+    facade.sample.position = {12.0F, 13.0F, 14.0F};
+    facade.sample.missionActive = true;
+    facade.sample.controlLocked = true;
+    facade.sample.vehicleEntryTransition = true;
+    TestTransport transport;
+    transport.acknowledgementPayload = {
+        static_cast<std::uint8_t>(PlayerSlot::Host)};
+    transport.remoteSlot = PlayerSlot::Guest;
+    transport.remoteEntityId =
+        NetEntityId::Compose(0xA0B0C0D0U, 2U);
+    BridgeRuntime runtime{facade, transport};
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    CHECK(runtime.Start(supported, error));
+
+    runtime.Tick();
+    const auto initial = LastSentMissionState(transport);
+    CHECK(initial.has_value());
+    CHECK(initial->phase == MissionPhase::Active);
+
+    facade.tick += 149U;
+    runtime.Tick();
+    const auto shortLock = LastSentMissionState(transport);
+    CHECK(shortLock.has_value());
+    CHECK(shortLock->phase == MissionPhase::Active);
+
+    facade.tick += 1U;
+    runtime.Tick();
+    const auto scriptedTransition = LastSentMissionState(transport);
+    CHECK(scriptedTransition.has_value());
+    CHECK(scriptedTransition->phase == MissionPhase::Cutscene);
+    CHECK(
+        (scriptedTransition->flags &
+         static_cast<std::uint8_t>(
+             MissionStateFlag::ScriptedControlLock)) != 0U);
+    CHECK(
+        (scriptedTransition->flags &
+         static_cast<std::uint8_t>(
+             MissionStateFlag::ScriptedVehicleTransition)) != 0U);
+}
+
+void RuntimeHostSpectatesMinigamesImmediately() {
+    TestFacade facade;
+    facade.sample.minigameActive = true;
+    TestTransport transport;
+    transport.acknowledgementPayload = {
+        static_cast<std::uint8_t>(PlayerSlot::Host)};
+    transport.remoteSlot = PlayerSlot::Guest;
+    transport.remoteEntityId =
+        NetEntityId::Compose(0xA0B0C0D0U, 2U);
+    BridgeRuntime runtime{facade, transport};
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+    const auto state = LastSentMissionState(transport);
+    CHECK(state.has_value());
+    CHECK(state->phase == MissionPhase::Cutscene);
+    CHECK(
+        (state->flags &
+         static_cast<std::uint8_t>(
+             MissionStateFlag::MinigameActivity)) != 0U);
+}
+
+void RuntimeVerticalMissionRewardCutsceneReconnect() {
+    TestFacade facade;
+    TestTransport transport;
+    transport.acknowledgementPayload = {
+        static_cast<std::uint8_t>(PlayerSlot::Host)};
+    transport.remoteSlot = PlayerSlot::Guest;
+    transport.remoteEntityId =
+        NetEntityId::Compose(0xA0B0C0D0U, 2U);
+    BridgeRuntime runtime{facade, transport};
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+    facade.sample.missionActive = true;
+    facade.tick += 50U;
+    runtime.Tick();
+    facade.pendingCampaignCapabilityObservations.push_back(
+        {CampaignCapabilityKind::WeaponShopEligibility, 1'674'213'418U});
+    facade.tick += 50U;
+    runtime.Tick();
+    CHECK(std::any_of(transport.sent.begin(), transport.sent.end(),
+        [](const Frame& frame) {
+            return frame.header.type == MessageType::CampaignCapability;
+        }));
+
+    facade.sample.cutsceneActive = true;
+    facade.tick += 50U;
+    runtime.Tick();
+    CHECK(LastSentMissionState(transport)->phase == MissionPhase::Cutscene);
+
+    transport.connectSucceeds = false;
+    transport.disconnectOnNextPoll = true;
+    facade.tick += 50U;
+    runtime.Tick();
+    CHECK(!transport.connected);
+    facade.tick += 100U;
+    runtime.Tick();
+    transport.connectSucceeds = true;
+    const auto beforeReconnect = transport.sent.size();
+    facade.tick += 1'001U;
+    runtime.Tick();
+    CHECK(transport.connected);
+    const auto resent = std::find_if(
+        transport.sent.begin() + static_cast<std::ptrdiff_t>(beforeReconnect),
+        transport.sent.end(), [](const Frame& frame) {
+            return frame.header.type == MessageType::MissionState &&
+                DecodeMissionState(frame.payload)->phase == MissionPhase::Cutscene;
+        });
+    CHECK(resent != transport.sent.end());
+}
+
+void RuntimeHostForwardsObservedCampaignCapability() {
+    TestFacade facade;
+    TestTransport transport;
+    transport.acknowledgementPayload = {
+        static_cast<std::uint8_t>(PlayerSlot::Host)};
+    transport.remoteSlot = PlayerSlot::Guest;
+    transport.remoteEntityId =
+        NetEntityId::Compose(0xA0B0C0D0U, 2U);
+    BridgeRuntime runtime{facade, transport};
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+    CHECK(runtime.LocalSlot() == PlayerSlot::Host);
+
+    transport.sent.clear();
+    facade.pendingCampaignCapabilityObservations.push_back(
+        CampaignCapabilityObservation{
+            CampaignCapabilityKind::WeaponShopEligibility,
+            1'674'213'418U});
+    facade.tick += 1U;
+    runtime.Tick();
+
+    std::optional<CampaignCapabilityPayload> forwarded;
+    for (const auto& frame : transport.sent) {
+        if (frame.header.type == MessageType::CampaignCapability) {
+            forwarded = DecodeCampaignCapability(frame.payload);
+        }
+    }
+    CHECK(forwarded.has_value());
+    CHECK(
+        forwarded->kind ==
+        CampaignCapabilityKind::WeaponShopEligibility);
+    CHECK(forwarded->recordHash == 1'674'213'418U);
+    CHECK(forwarded->hostEventId != 0U);
+    CHECK(forwarded->grantedAtUnixMilliseconds > 0);
 }
 
 void RuntimeHostStreamsAndStopsMissionCamera() {
@@ -10052,6 +10227,14 @@ int main() {
          RuntimeAppliesHostWorldOutsideCutscenes},
         {"RuntimeHostEmitsMissionStateTransitions",
          RuntimeHostEmitsMissionStateTransitions},
+        {"RuntimeHostDebouncesScriptedControlPresentation",
+         RuntimeHostDebouncesScriptedControlPresentation},
+        {"RuntimeHostSpectatesMinigamesImmediately",
+         RuntimeHostSpectatesMinigamesImmediately},
+        {"RuntimeVerticalMissionRewardCutsceneReconnect",
+         RuntimeVerticalMissionRewardCutsceneReconnect},
+        {"RuntimeHostForwardsObservedCampaignCapability",
+         RuntimeHostForwardsObservedCampaignCapability},
         {"RuntimeHostStreamsAndStopsMissionCamera",
          RuntimeHostStreamsAndStopsMissionCamera},
         {"RuntimeAnimSceneTransportPrefersNativeAndFallsBackToCamera",

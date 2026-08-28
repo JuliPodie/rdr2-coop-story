@@ -52,6 +52,8 @@ internal static class Program
             AuthoritativeWorldGraphAsync),
         ("player identity validation and reliable refresh", PlayerIdentityAsync),
         ("player inventories and map loot remain independent", PlayerInventoryAsync),
+        ("pickup collection payload is fixed, bounded, and itemless",
+            PickupCollectionProtocolAsync),
         ("campaign capability journal is idempotent and recovers atomically",
             CapabilityJournalRecoveryAsync),
         ("atomic guest profile write and backup recovery", ProfileRecoveryAsync),
@@ -408,7 +410,7 @@ internal static class Program
 
     private static Task MissionCinematicProtocolAsync()
     {
-        Check.Equal((ushort)22, ProtocolConstants.Version);
+        Check.Equal((ushort)23, ProtocolConstants.Version);
         Check.Equal((ushort)35, (ushort)MessageType.MissionCinematicState);
         Check.Equal((ushort)36, (ushort)MessageType.MissionCinematicAction);
 
@@ -567,7 +569,7 @@ internal static class Program
 
     private static Task AppearanceAndAnimSceneProtocolAsync()
     {
-        Check.Equal((ushort)22, ProtocolConstants.Version);
+        Check.Equal((ushort)23, ProtocolConstants.Version);
         Check.Equal((ushort)37, (ushort)MessageType.PlayerAppearanceState);
         Check.Equal((ushort)38, (ushort)MessageType.AnimSceneReplicaState);
         Check.Equal((ushort)39, (ushort)MessageType.AnimSceneDefinition);
@@ -1859,7 +1861,7 @@ internal static class Program
 
     private static Task PlayerActionProtocolAsync()
     {
-        Check.Equal((ushort)22, ProtocolConstants.Version);
+        Check.Equal((ushort)23, ProtocolConstants.Version);
         Check.Equal((ushort)30, (ushort)MessageType.PlayerAction);
 
         var guestId = NetEntityId.Create(0x11223344, 2);
@@ -2057,7 +2059,7 @@ internal static class Program
 
     private static Task InteractionAuthorityProtocolAsync()
     {
-        Check.Equal((ushort)22, ProtocolConstants.Version);
+        Check.Equal((ushort)23, ProtocolConstants.Version);
         Check.Equal((ushort)32, (ushort)MessageType.InteractionIntent);
         Check.Equal((ushort)33, (ushort)MessageType.InteractionResult);
         Check.Equal((ushort)34, (ushort)MessageType.RestraintState);
@@ -3080,7 +3082,7 @@ internal static class Program
 
     private static Task AnimationReplicationPayloadsAsync()
     {
-        Check.Equal((ushort)22, ProtocolConstants.Version);
+        Check.Equal((ushort)23, ProtocolConstants.Version);
         Check.Equal((ushort)28, (ushort)MessageType.PlayerAnimationState);
         Check.Equal((ushort)29, (ushort)MessageType.MotionReplicationConfig);
 
@@ -3300,7 +3302,7 @@ internal static class Program
 
     private static Task WorldAndEquipmentAsync()
     {
-        Check.Equal((ushort)22, ProtocolConstants.Version);
+        Check.Equal((ushort)23, ProtocolConstants.Version);
         Check.Equal((ushort)23, (ushort)MessageType.WorldState);
         Check.Equal((ushort)24, (ushort)MessageType.EquipmentState);
         Check.Equal((ushort)25, (ushort)MessageType.PauseVote);
@@ -4329,6 +4331,21 @@ internal static class Program
         restored.RestoreReconnectState(reconnect);
         Check.Equal(12.50m, restored.GetSnapshot(host).Money);
         Check.Equal(LootClaimStatus.AlreadyClaimed, restored.ClaimLoot(host, loot).Status);
+        return Task.CompletedTask;
+    }
+
+    private static Task PickupCollectionProtocolAsync()
+    {
+        var payload = new PickupCollectedPayload(
+            NetEntityId.Create(77, 2), 0xABCDEF0123456789UL, 0x11223344U);
+        var encoded = BinaryPayloadCodec.EncodePickupCollected(payload);
+        Check.Equal(BinaryPayloadCodec.PickupCollectedSize, encoded.Length);
+        Check.Equal(payload, BinaryPayloadCodec.DecodePickupCollected(encoded));
+        encoded[20] = 1;
+        Check.Throws<ProtocolException>(
+            () => BinaryPayloadCodec.DecodePickupCollected(encoded));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodePickupCollected(
+            payload with { CollectionId = 0 }));
         return Task.CompletedTask;
     }
 

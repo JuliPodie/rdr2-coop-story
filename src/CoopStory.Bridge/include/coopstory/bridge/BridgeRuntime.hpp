@@ -462,8 +462,10 @@ private:
     std::uint64_t nextAppearanceRefreshMs_{};
     std::uint64_t nextMotionDiagnosticsMs_{};
     std::uint64_t nextMissionIsolationDiagnosticsMs_{};
-    // A short release hold prevents a one-frame control/UI transition from
-    // toggling guest spectator presentation repeatedly.
+    // A short entry debounce rejects incidental control suppression (such as
+    // the interaction frontend), while the release hold prevents one-frame
+    // control/UI transitions from toggling guest spectator repeatedly.
+    std::optional<std::uint64_t> spectatorClassifierCandidateSinceMs_{};
     std::uint64_t spectatorClassifierReleaseUntilMs_{};
     std::uint64_t nextRuntimeDiagnosticsMs_{};
     std::uint64_t runtimeDiagnosticTickCount_{};

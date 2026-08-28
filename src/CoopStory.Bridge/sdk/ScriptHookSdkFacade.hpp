@@ -60,6 +60,12 @@ public:
         std::size_t maximumEntities) noexcept override;
     [[nodiscard]] std::optional<DamageIntentPayload> SampleWorldDamageIntent(
         NetEntityId attackerId) noexcept override;
+    [[nodiscard]] std::vector<VanillaPickupCollection>
+    DrainVanillaPickupCollections() noexcept override;
+    [[nodiscard]] std::vector<CampaignCapabilityObservation>
+    DrainCampaignCapabilityObservations() noexcept override;
+    void ObserveVanillaPickupCollection() noexcept;
+    void ObserveScriptEvents() noexcept;
     [[nodiscard]] std::optional<float> HostGuestDistanceMeters()
         noexcept override;
     [[nodiscard]] MenuInputState ReadMenuInput() noexcept override;
@@ -716,6 +722,14 @@ private:
     std::uint64_t previousWorldMirrorDiagnosticsMs_{};
     std::uint64_t previousWorldSampleDiagnosticsMs_{};
     std::uint64_t previousWorldDamageIntentMs_{};
+    std::uint64_t previousPickupObservationMs_{};
+    std::uint64_t previousScriptEventObservationMs_{};
+    std::unordered_map<std::uint32_t, bool>
+        observedCampaignWeaponOwnership_{};
+    std::vector<CampaignCapabilityObservation>
+        pendingCampaignCapabilityObservations_{};
+    std::unordered_map<int, std::uint64_t> observedVanillaPickups_{};
+    std::vector<VanillaPickupCollection> pendingVanillaPickupCollections_{};
     std::uint32_t worldDamageShotSequence_{};
     bool worldMirrorGuestActive_{};
     MotionReplicationWireMode motionReplicationMode_{

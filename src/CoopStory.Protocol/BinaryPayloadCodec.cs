@@ -45,6 +45,30 @@ public static class BinaryPayloadCodec
     public const int RestraintStateSize = 28;
     public const int CampaignCapabilitySize = 24;
     public const int CampaignCapabilityAckSize = 16;
+    public const int PickupCollectedSize = 24;
+
+    public static byte[] EncodePickupCollected(PickupCollectedPayload payload)
+    {
+        ValidatePickupCollected(payload);
+        var bytes = new byte[PickupCollectedSize];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, payload.ActorEntityId.Value);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), payload.CollectionId);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16), payload.PickupHash);
+        return bytes;
+    }
+
+    public static PickupCollectedPayload DecodePickupCollected(ReadOnlySpan<byte> payload)
+    {
+        RequireLength(payload, PickupCollectedSize, nameof(PickupCollectedPayload));
+        if (BinaryPrimitives.ReadUInt32LittleEndian(payload[20..]) != 0)
+            throw new ProtocolException("Pickup collection reserved bytes must be zero.");
+        var result = new PickupCollectedPayload(
+            new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)),
+            BinaryPrimitives.ReadUInt64LittleEndian(payload[8..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[16..]));
+        ValidatePickupCollected(result);
+        return result;
+    }
 
     public static byte[] EncodeCampaignCapabilityAck(CampaignCapabilityAckPayload payload)
     {
@@ -2715,6 +2739,12 @@ public static class BinaryPayloadCodec
     {
         if (!Enum.IsDefined(payload.Kind) || payload.RecordHash == 0 || payload.HostEventId == 0)
             throw new ProtocolException("Campaign capability acknowledgement is invalid.");
+    }
+
+    private static void ValidatePickupCollected(PickupCollectedPayload payload)
+    {
+        if (!payload.ActorEntityId.IsValid || payload.CollectionId == 0 || payload.PickupHash == 0)
+            throw new ProtocolException("Pickup collection payload is invalid.");
     }
 
     private static bool IsFinite(Vector3 value) =>
