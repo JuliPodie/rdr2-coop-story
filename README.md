@@ -1,14 +1,39 @@
 # RDR2 Coop Story
 
-An archived, non-commercial research prototype that explored a two-player,
+An experimental, non-commercial private-tester build of a two-player,
 host-authoritative replication layer for Red Dead Redemption 2 PC Story Mode.
 
-> **Source foundation only — not a finished co-op campaign.**
+> **Private test build — not a finished co-op campaign.**
 >
 > I am no longer developing this project because the remaining work became too
 > complex for me to continue. I am sharing the foundation so the player
 > replication work can be studied, tested safely, or continued by someone who
 > understands the technical and legal risks.
+
+## Install the tester build — no compiling required
+
+This is for two private testers on Windows with legitimate RDR2 PC copies.
+Both players must use the exact same current tester ZIP listed in
+[releases/README.md](releases/README.md). The package is self-contained, so it
+does not require a separate .NET installation.
+
+1. Download the current tester ZIP, extract it to a normal folder, and run
+   `START_COOP.bat`. Do not run it inside the ZIP.
+2. In the launcher, select your `RDR2.exe` with **BROWSE**.
+3. If Script Hook is missing, click **GET SCRIPT HOOK**. It opens the original
+   author's page; download and extract it yourself, then select that extracted
+   folder with **BROWSE**. The launcher verifies it before installing anything.
+4. Choose **HOST** on one PC and **GUEST** on the other. The host enters a
+   private session password and shares their private IPv4 address plus that
+   password with the guest.
+5. Start RDR2 in **Story Mode only**, load safe local saves, and begin the
+   session from the launcher. Export diagnostics from both PCs after a problem.
+6. Use the launcher to uninstall the project-owned files before ever opening
+   Red Dead Online.
+
+The current tester profile enables AnimGraph replication and diagnostic
+controls. It is experimental: campaign scripts and saves are not fully shared,
+so test one feature group at a time and keep backup saves.
 
 ## What is included
 
@@ -16,7 +41,7 @@ host-authoritative replication layer for Red Dead Redemption 2 PC Story Mode.
   ownership, lobby, password flow, and redacted diagnostics;
 - a C++20 Story Mode bridge and Script Hook facade;
 - a separate .NET sidecar for authenticated TCP/UDP networking;
-- binary protocol 20, interpolation, entity and animation replication contracts;
+- binary protocol 23, interpolation, entity and animation replication contracts;
 - reconnect, world mirror, mission presentation, player action, mount, and
   diagnostics experiments;
 - C# and C++ self-tests;
@@ -34,7 +59,7 @@ This repository and its downloadable source archive intentionally exclude:
   files;
 - Rockstar Games executables, scripts, models, textures, audio, saves, or other
   assets;
-- prebuilt ASI binaries or a supported ready-to-install release;
+- third-party loader/runtime binaries or a turnkey public release;
 - files from other mods, public server components, matchmaking, or online tools.
 
 Every third-party prerequisite must be obtained independently from its original
@@ -49,7 +74,7 @@ author. Never upload those files to this repository or attach them to a release.
 | Script Hook RDR2 SDK | `1.0.1207.73` |
 | .NET SDK | `10.0.203` |
 | Native build | C++20, CMake 3.25+, MSVC x64 |
-| Last internal project build | `V31.10 Alpha`, protocol `20` |
+| Private tester build | protocol `23` |
 
 The Script Hook runtime and SDK are not vendored. The original author’s page is
 [dev-c.com/rdr2/scripthookrdr2](http://www.dev-c.com/rdr2/scripthookrdr2/).

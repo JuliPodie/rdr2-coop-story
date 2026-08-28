@@ -12,6 +12,8 @@ namespace CoopStory.Launcher;
 public sealed class MainForm : Form
 {
     private const string DiagnosticsFileName = "RDR2-Coop-Diagnostics.zip";
+    private const string OfficialScriptHookDownloadUrl =
+        "https://www.dev-c.com/rdr2/scripthookrdr2/";
 
     private readonly LauncherServices _services;
     private readonly ToolTip _toolTip = new();
@@ -742,14 +744,25 @@ public sealed class MainForm : Form
             "DETECT COMMON PATHS",
             RdrIcon.Search,
             (_, _) => DetectCommonPaths());
-        detect.Width = 210;
+        detect.Width = 185;
+        var getScriptHook = MakeButton(
+            "GET SCRIPT HOOK",
+            RdrIcon.Download,
+            OpenOfficialScriptHookDownload);
+        getScriptHook.Width = 180;
+        getScriptHook.AccessibleDescription =
+            "Checks the selected Script Hook folder and opens the official author download page when it is missing.";
+        _toolTip.SetToolTip(
+            getScriptHook,
+            "Opens the official Script Hook page. Download and extract it yourself, then use Browse to select its folder.");
         var save = MakeButton(
             "SAVE SETTINGS",
             RdrIcon.Shield,
             (_, _) => SaveSettingsWithFeedback());
-        save.Width = 196;
+        save.Width = 175;
         save.Accent = true;
         pathActions.Controls.Add(detect);
+        pathActions.Controls.Add(getScriptHook);
         pathActions.Controls.Add(save);
         layout.Controls.Add(pathActions, 0, 6);
 
@@ -1681,6 +1694,29 @@ public sealed class MainForm : Form
             _runtimePath.Text = dialog.SelectedPath;
             SaveSettingsSilently();
         }
+    }
+
+    private void OpenOfficialScriptHookDownload(object? sender, EventArgs eventArgs)
+    {
+        SafeUiAction(() =>
+        {
+            if (IsRuntimeFolderValid(_runtimePath.Text.Trim()))
+            {
+                SetStatus(
+                    "Script Hook is already selected and validated.",
+                    StatusKind.Success);
+                return;
+            }
+
+            _ = Process.Start(new ProcessStartInfo
+            {
+                FileName = OfficialScriptHookDownloadUrl,
+                UseShellExecute = true
+            });
+            SetStatus(
+                "Opened the official Script Hook page. Download and extract it, then select its folder with Browse.",
+                StatusKind.Neutral);
+        });
     }
 
     private void BrowseDiagnosticsFolder(object? sender, EventArgs eventArgs)

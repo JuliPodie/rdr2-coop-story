@@ -227,9 +227,7 @@ foreach ($required in @(
     $sidecarProject,
     $configSource,
     $readmeSource,
-    $v29TestSource,
-    $v30TestSource,
-    $v31TestSource,
+    $testGuideSource,
     $batSource
 )) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
@@ -266,7 +264,7 @@ if (($releaseRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
 }
 
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
-$packageName = 'RDR2-CoopStory-CutsceneMissionOwnershipV31.10-' + $stamp
+$packageName = 'RDR2-CoopStory-Tester-Protocol23-' + $stamp
 $packageRoot = Join-Path $releaseRoot $packageName
 $zipPath = Join-Path $releaseRoot ($packageName + '.zip')
 if ((Test-Path -LiteralPath $packageRoot) -or
@@ -277,8 +275,8 @@ $null = [IO.Directory]::CreateDirectory($packageRoot)
 
 $publishCommon = @(
     '-c', 'Release',
-    '--no-restore',
-    '--self-contained', 'false',
+    '-r', 'win-x64',
+    '--self-contained', 'true',
     '-p:DebugSymbols=false',
     '-p:DebugType=None',
     '-p:ContinuousIntegrationBuild=true',
@@ -289,6 +287,10 @@ $publishCommon = @(
 & $dotnet.Source publish $launcherProject @publishCommon -o $packageRoot
 if ($LASTEXITCODE -ne 0) {
     throw 'Launcher publication failed.'
+}
+if (-not (Test-Path -LiteralPath (
+    Join-Path $packageRoot 'CoopStory.Launcher.exe') -PathType Leaf)) {
+    throw 'Self-contained launcher publication did not produce CoopStory.Launcher.exe.'
 }
 
 $sidecarRoot = Join-Path $packageRoot 'sidecar'
@@ -350,10 +352,23 @@ foreach ($relativePath in $requiredPackageFiles) {
     }
 }
 
-# The publish is framework-dependent and intentionally tiny. An exact allowlist
-# prevents a renamed ScriptHook, trainer, loader or SDK archive from slipping
-# into the friend package under an otherwise harmless extension.
+# Capture the exact output from the two known self-contained publishes before
+# project documentation and bridge files are added. The archive check below
+# uses this list, while the forbidden-file check still rejects third-party
+# loaders, SDKs, trainers, source and debug artifacts.
+$publishedRuntimePaths = @(Get-ChildItem `
+    -LiteralPath $packageRoot `
+    -Recurse `
+    -Force `
+    -File | ForEach-Object {
+        $_.FullName.Substring($packageRoot.Length + 1)
+    })
+if ($publishedRuntimePaths.Count -eq 0) {
+    throw 'Self-contained publication produced no runtime files.'
+}
+
 $allowedPackagePaths = @(
+    $publishedRuntimePaths + @(
     'CoopStory.Launcher.deps.json',
     'CoopStory.Launcher.dll',
     'CoopStory.Launcher.exe',
@@ -370,6 +385,8 @@ $allowedPackagePaths = @(
     'sidecar\CoopStory.Sidecar.exe',
     'sidecar\CoopStory.Sidecar.runtimeconfig.json',
     'sidecar\sidecar.config.example.json'
+    )
+    | Sort-Object -Unique
 )
 $unexpectedPackageFiles = @(Get-ChildItem `
     -LiteralPath $packageRoot `
@@ -429,8 +446,8 @@ if ($forbidden.Count -gt 0) {
 $buildInfo = [ordered]@{
     package = $packageName
     createdUtc = [DateTime]::UtcNow.ToString('o')
-    protocol = 20
-    engineVersion = '31.10'
+    protocol = 23
+    engineVersion = 'tester-protocol23'
     entityGraph = '31.9-priority-hysteresis-plus-retained-cinematic-cast-and-optional-released-animscene-object-lane'
     missionSync = '31.10-host-owned-mission-plus-live-resume-anchor-unowned-weather-guard-and-handle-pinned-private-scene-quarantine'
     missionSpectator = '31.0-versioned-animscene-definition-prepare-commit-or-smoothed-proxy-camera-safe-fallback'
@@ -466,7 +483,7 @@ $buildInfo = [ordered]@{
     animSceneRuntimeCaptureEnabled = $true
     animSceneNativeCreateEnabled = $true
     animSceneHandlerInspector = '31.10-launcher-opt-in-exact-rva-prologue-validation-host-only-inline-capture-guest-native-create-only-and-full-rollback'
-    animSceneStoryVmProbeDefaultEnabled = $false
+    animSceneStoryVmProbeDefaultEnabled = $true
     launcherSessionFlow = '29.6-launcher-owned-4-to-64-character-password-host-join-pbkdf2-colored-role-lobby-and-ping'
     launcherHostSave = '29.4-local-host-save-selector-moved-to-settings'
     inGameMenuUx = '30.1-f8-closed-two-column-f9-and-cross-peer-f7-transient-user-marker'
@@ -490,7 +507,7 @@ $buildInfo = [ordered]@{
     bridgeSha256 = Get-Sha256 -Path (
         Join-Path $packageRoot 'CoopStoryBridge.asi')
     bridgeNativeBindings = $true
-    runtime = 'framework-dependent net10.0-windows x64'
+    runtime = 'self-contained net10.0-windows win-x64'
     scriptHookBundled = $false
     trainerBundled = $false
 }

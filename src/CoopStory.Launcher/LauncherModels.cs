@@ -78,7 +78,9 @@ public sealed record LauncherSettings
     public LauncherMotionReplicationMode MotionReplicationMode { get; init; } =
         LauncherMotionReplicationMode.AnimGraphReplica;
 
-    public bool AnimSceneStoryVmProbeEnabled { get; init; }
+    // Private tester builds default this diagnostic capture on. It remains
+    // opt-out in the launcher because it can expose build-specific faults.
+    public bool AnimSceneStoryVmProbeEnabled { get; init; } = true;
 
     public LauncherMode? LastMode { get; init; }
 }

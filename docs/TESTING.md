@@ -1,7 +1,7 @@
 # Testing guide
 
-This guide validates the current prototype. It does not certify a finished
-co-op campaign or authorize public distribution of binaries.
+This guide validates the current private tester build. It does not certify a
+finished co-op campaign or authorize use in Red Dead Online.
 
 ## Managed build and self-tests
 
@@ -16,7 +16,7 @@ dotnet run --project .\tests\CoopStory.Launcher.SelfTest -c Release
 Expected results for the archived source are:
 
 - solution build: zero errors;
-- protocol/sidecar self-test: `48/48`;
+- protocol/sidecar self-test: `49/49`;
 - launcher self-test: `28/28`.
 
 Test counts may change if the project is extended; a failure must be understood
@@ -92,6 +92,11 @@ Test one feature group at a time:
 6. mission objective and camera presentation without assuming shared script
    execution;
 7. AnimScene/MetaPed experiments only after the earlier layers are stable.
+
+The tester package defaults to `animgraph_replica` and enables the Story-VM
+diagnostic capture. Keep those settings for normal coverage. If either causes
+a repeatable failure, disable only that switch, repeat the case, and include
+both diagnostic exports with the report.
 
 Place diagnostic markers before and after a visible problem, continue running
 long enough to capture the post-event window, then export diagnostics from both
