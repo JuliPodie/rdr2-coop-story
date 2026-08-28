@@ -173,6 +173,24 @@ struct MissionCameraSample final {
     std::uint32_t flags{};
 };
 
+// A bounded, read-only line from the host's Story objective UI. It is used for
+// guest presentation only and is never interpreted as a script command.
+struct MissionObjectiveSample final {
+    std::string text{};
+};
+
+// Read-only observation of one catalog-admitted conversation. The facade
+// never creates, starts, pauses, restarts, skips or stops it; normal local
+// mission script ownership remains intact.
+struct MissionDialogueSample final {
+    std::uint32_t profileId{};
+    std::uint32_t rootId{};
+    std::uint16_t lineIndex{};
+    bool rootLoaded{};
+    bool rootPlaying{};
+    bool requiredRolesBound{};
+};
+
 // A catalog entry is intentionally a stable script hash rather than a save
 // offset.  `canStart` is evidence from the guest's own save; it is never
 // inferred from the host chapter or copied between machines. `wasCompleted`
@@ -253,6 +271,7 @@ struct MissionCompanionPresentation final {
     bool liveHostPosition{};
     Vec3 target{};
     float distanceMeters{};
+    std::string objectiveText{};
 };
 
 // Sanitized runtime-only measurements used by the structured diagnostics
@@ -329,6 +348,29 @@ public:
     SampleMissionCamera() noexcept {
         return std::nullopt;
     }
+    [[nodiscard]] virtual std::optional<MissionObjectiveSample>
+    SampleMissionObjective() noexcept {
+        return std::nullopt;
+    }
+    [[nodiscard]] virtual std::vector<MissionDialogueSample>
+    SampleMissionDialogue(std::uint32_t missionId) noexcept {
+        (void)missionId;
+        return {};
+    }
+
+    // Starts a bridge-owned, audio-only local conversation for a guest who is
+    // deliberately not running the host's mission VM. Implementations must
+    // use only catalogue-owned roots and must clean up only conversations and
+    // hidden proxy actors that they created themselves.
+    [[nodiscard]] virtual bool PresentHostMissionDialogue(
+        std::uint32_t missionId,
+        std::uint32_t rootId) noexcept {
+        (void)missionId;
+        (void)rootId;
+        return false;
+    }
+
+    virtual void ClearHostMissionDialoguePresentation() noexcept {}
     [[nodiscard]] virtual std::optional<AnimSceneReplicaStatePayload>
     SampleHostAnimScene(
         NetEntityId hostEntityId,
@@ -523,7 +565,12 @@ public:
     MaintainMissionAuthority(
         bool active,
         bool hostMissionActive,
-        bool hostPresentationActive) noexcept = 0;
+        bool hostPresentationActive,
+        // A narrow, protocol-authenticated exception for a guest that has
+        // confirmed the host's exact MissionData ID and is entering its own
+        // matching vanilla mission prompt. It never enables arbitrary Story
+        // scripts and expires in BridgeRuntime.
+        bool allowExpectedLocalMissionInstance = false) noexcept = 0;
     virtual void MaintainMissionSpectator(bool active) noexcept {
         (void)active;
     }

@@ -9,9 +9,11 @@
 #include <Windows.h>
 #include <bcrypt.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
@@ -1338,8 +1340,22 @@ bool IsKnownMessageType(const std::uint16_t value) noexcept {
     return value >= static_cast<std::uint16_t>(MessageType::Hello) &&
            value <=
                static_cast<std::uint16_t>(
-               MessageType::MissionProgression);
+               MessageType::MissionDialogueReady);
 }
+
+namespace {
+[[nodiscard]] bool IsValidMissionObjectiveText(
+    const std::string_view text) noexcept {
+    if (text.empty() || text.size() > kMaximumMissionObjectiveUtf8Bytes ||
+        text.front() == ' ' || text.back() == ' ') {
+        return false;
+    }
+    return std::all_of(
+        text.begin(), text.end(), [](const unsigned char value) {
+            return value >= 0x20U && value <= 0x7EU && value != '~';
+        });
+}
+}  // namespace
 
 std::vector<std::uint8_t> EncodeMissionProgression(
     const MissionProgressionPayload& payload) {
@@ -1349,15 +1365,18 @@ std::vector<std::uint8_t> EncodeMissionProgression(
         static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping);
     const bool completion =
         payload.phase == MissionProgressionPhase::Completion;
+    const bool applied =
+        payload.phase == MissionProgressionPhase::Applied;
     const bool appliesMapping = (payload.flags & static_cast<std::uint8_t>(
         MissionProgressionFlag::VerifiedCompletionMapping)) != 0U;
     if (payload.missionId == 0U || payload.missionEpoch == 0U ||
         payload.eventId == 0U || phase < static_cast<std::uint8_t>(MissionProgressionPhase::Offer) ||
-        phase > static_cast<std::uint8_t>(MissionProgressionPhase::Completion) ||
+        phase > static_cast<std::uint8_t>(MissionProgressionPhase::StartBarrierAborted) ||
         (payload.flags & ~allowed) != 0U ||
         (!completion && payload.completionRating != 0U) ||
         (!completion && payload.completionCashAward != 0) ||
         payload.completionCashAward < 0 ||
+        (applied && payload.flags != 0U) ||
         (appliesMapping && (!completion || payload.completionRating < 2U ||
                             payload.completionRating > 5U))) {
         throw std::invalid_argument("invalid mission progression payload");
@@ -1386,10 +1405,140 @@ std::optional<MissionProgressionPayload> DecodeMissionProgression(
         ReadLittleEndian<std::uint8_t>(bytes, offset),
         ReadLittleEndian<std::uint8_t>(bytes, offset)};
     const auto reserved8 = ReadLittleEndian<std::uint8_t>(bytes, offset);
-    const auto completionCashAward = ReadLittleEndian<std::int32_t>(bytes, offset);
+    payload.completionCashAward = ReadLittleEndian<std::int32_t>(bytes, offset);
     try { (void)EncodeMissionProgression(payload); } catch (...) { return std::nullopt; }
-    payload.completionCashAward = completionCashAward;
     return reserved8 == 0U ? std::optional<MissionProgressionPayload>{payload} : std::nullopt;
+}
+
+std::vector<std::uint8_t> EncodeMissionObjective(
+    const MissionObjectivePayload& payload) {
+    if (!payload.hostEntityId.IsValid() || payload.missionEpoch == 0U ||
+        payload.revision == 0U || payload.fingerprint == 0U ||
+        !IsValidMissionObjectiveText(payload.text) ||
+        payload.text.size() > std::numeric_limits<std::uint16_t>::max()) {
+        throw std::invalid_argument("invalid mission objective payload");
+    }
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(kMissionObjectiveHeaderSize + payload.text.size());
+    AppendLittleEndian(bytes, payload.hostEntityId.Value());
+    AppendLittleEndian(bytes, payload.missionEpoch);
+    AppendLittleEndian(bytes, payload.revision);
+    AppendLittleEndian(bytes, payload.fingerprint);
+    AppendLittleEndian(bytes, static_cast<std::uint16_t>(payload.text.size()));
+    AppendLittleEndian(bytes, std::uint16_t{0U});
+    bytes.insert(bytes.end(), payload.text.begin(), payload.text.end());
+    return bytes;
+}
+
+std::optional<MissionObjectivePayload> DecodeMissionObjective(
+    const std::span<const std::uint8_t> bytes) {
+    if (bytes.size() < kMissionObjectiveHeaderSize) return std::nullopt;
+    std::size_t offset{};
+    MissionObjectivePayload payload;
+    payload.hostEntityId = NetEntityId{
+        ReadLittleEndian<std::uint64_t>(bytes, offset)};
+    payload.missionEpoch = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.revision = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.fingerprint = ReadLittleEndian<std::uint64_t>(bytes, offset);
+    const auto textLength = ReadLittleEndian<std::uint16_t>(bytes, offset);
+    const auto reserved = ReadLittleEndian<std::uint16_t>(bytes, offset);
+    if (reserved != 0U || textLength == 0U ||
+        textLength > kMaximumMissionObjectiveUtf8Bytes ||
+        bytes.size() - offset != textLength) {
+        return std::nullopt;
+    }
+    payload.text.assign(
+        reinterpret_cast<const char*>(bytes.data() + offset), textLength);
+    try {
+        (void)EncodeMissionObjective(payload);
+    } catch (...) {
+        return std::nullopt;
+    }
+    return payload;
+}
+
+std::vector<std::uint8_t> EncodeMissionDialogueCue(
+    const MissionDialogueCuePayload& payload) {
+    if (!payload.hostEntityId.IsValid() || payload.missionEpoch == 0U ||
+        payload.checkpointGeneration == 0U || payload.dialogueSequence == 0U ||
+        payload.profileId == 0U || payload.rootId == 0U ||
+        payload.hostStartTick == 0U) {
+        throw std::invalid_argument("invalid mission dialogue cue payload");
+    }
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(kMissionDialogueCuePayloadSize);
+    AppendLittleEndian(bytes, payload.hostEntityId.Value());
+    AppendLittleEndian(bytes, payload.missionEpoch);
+    AppendLittleEndian(bytes, payload.checkpointGeneration);
+    AppendLittleEndian(bytes, payload.dialogueSequence);
+    AppendLittleEndian(bytes, payload.profileId);
+    AppendLittleEndian(bytes, payload.rootId);
+    AppendLittleEndian(bytes, payload.lineIndex);
+    AppendLittleEndian(bytes, std::uint16_t{0U});
+    AppendLittleEndian(bytes, payload.hostStartTick);
+    return bytes;
+}
+
+std::optional<MissionDialogueCuePayload> DecodeMissionDialogueCue(
+    const std::span<const std::uint8_t> bytes) {
+    if (bytes.size() != kMissionDialogueCuePayloadSize) return std::nullopt;
+    std::size_t offset{};
+    MissionDialogueCuePayload payload;
+    payload.hostEntityId = NetEntityId{ReadLittleEndian<std::uint64_t>(bytes, offset)};
+    payload.missionEpoch = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.checkpointGeneration = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.dialogueSequence = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.profileId = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.rootId = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.lineIndex = ReadLittleEndian<std::uint16_t>(bytes, offset);
+    const auto reserved = ReadLittleEndian<std::uint16_t>(bytes, offset);
+    payload.hostStartTick = ReadLittleEndian<std::uint64_t>(bytes, offset);
+    if (reserved != 0U) return std::nullopt;
+    try { (void)EncodeMissionDialogueCue(payload); } catch (...) { return std::nullopt; }
+    return payload;
+}
+
+std::vector<std::uint8_t> EncodeMissionDialogueReady(
+    const MissionDialogueReadyPayload& payload) {
+    const auto state = static_cast<std::uint8_t>(payload.state);
+    if (!payload.hostEntityId.IsValid() || payload.missionEpoch == 0U ||
+        payload.checkpointGeneration == 0U || payload.dialogueSequence == 0U ||
+        payload.profileId == 0U || payload.rootId == 0U || state <
+        static_cast<std::uint8_t>(MissionDialogueReadyState::Ready) || state >
+        static_cast<std::uint8_t>(MissionDialogueReadyState::ProfileUnavailable)) {
+        throw std::invalid_argument("invalid mission dialogue ready payload");
+    }
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(kMissionDialogueReadyPayloadSize);
+    AppendLittleEndian(bytes, payload.hostEntityId.Value());
+    AppendLittleEndian(bytes, payload.missionEpoch);
+    AppendLittleEndian(bytes, payload.checkpointGeneration);
+    AppendLittleEndian(bytes, payload.dialogueSequence);
+    AppendLittleEndian(bytes, payload.profileId);
+    AppendLittleEndian(bytes, payload.rootId);
+    AppendLittleEndian(bytes, payload.lineIndex);
+    AppendLittleEndian(bytes, state);
+    AppendLittleEndian(bytes, std::uint8_t{0U});
+    return bytes;
+}
+
+std::optional<MissionDialogueReadyPayload> DecodeMissionDialogueReady(
+    const std::span<const std::uint8_t> bytes) {
+    if (bytes.size() != kMissionDialogueReadyPayloadSize) return std::nullopt;
+    std::size_t offset{};
+    MissionDialogueReadyPayload payload;
+    payload.hostEntityId = NetEntityId{ReadLittleEndian<std::uint64_t>(bytes, offset)};
+    payload.missionEpoch = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.checkpointGeneration = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.dialogueSequence = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.profileId = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.rootId = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    payload.lineIndex = ReadLittleEndian<std::uint16_t>(bytes, offset);
+    payload.state = static_cast<MissionDialogueReadyState>(ReadLittleEndian<std::uint8_t>(bytes, offset));
+    const auto reserved = ReadLittleEndian<std::uint8_t>(bytes, offset);
+    if (reserved != 0U) return std::nullopt;
+    try { (void)EncodeMissionDialogueReady(payload); } catch (...) { return std::nullopt; }
+    return payload;
 }
 
 std::vector<std::uint8_t> EncodeCampaignCapability(

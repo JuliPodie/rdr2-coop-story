@@ -2236,11 +2236,12 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
                 return false;
             }
         }
-        // MissionData persists the actual completion and rating. Mark the
-        // guest's vanilla mission journal only after every companion reward
-        // has also succeeded, so a failed retry cannot advertise a completed
-        // mission whose guest state is still incomplete. The documented UI
-        // native is idempotent for an already-completed mission.
+        // MissionData completion/rating was verified before this reward loop.
+        // This separate native updates the guest's vanilla UI-log entry only
+        // after every explicit companion reward has succeeded. If a reward
+        // fails, a later replay can still finish it without acknowledging the
+        // transaction as durable. The documented UI native is idempotent for
+        // an already-completed mission.
         (void)::invoke<Any>(0xDE31D66D1E54C471ULL, missionId);
         Log("[MISSION_PROGRESSION] MissionData completion mapping " +
             std::string{definition->scriptName} + " result=" +
@@ -4831,6 +4832,170 @@ ScriptHookSdkFacade::SampleMissionCamera() noexcept {
             "[ERROR][MISSION_CAMERA][TX] failed to sample the rendered host camera");
     }
     return std::nullopt;
+}
+
+std::optional<MissionObjectiveSample>
+ScriptHookSdkFacade::SampleMissionObjective() noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        // _UILOG_GET_CACHED_OBJECTIVE (0x15A4461BEB788096) is a read-only
+        // UILOG native present in the newer native declaration supplied for
+        // validation. The bundled SDK predates that declaration, so retain it
+        // behind the same explicit unverified-binding flag as the other
+        // Story-facing calls. We copy a bounded printable value immediately;
+        // no game pointer crosses the facade or network boundary.
+        const auto raw = invoke<char*>(0x15A4461BEB788096ULL);
+        const auto text = CopyNativeAsciiString(
+            static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(raw)),
+            kMaximumMissionObjectiveUtf8Bytes);
+        if (!text.has_value()) {
+            return std::nullopt;
+        }
+        return MissionObjectiveSample{*text};
+#endif
+    } catch (...) {
+        Log("[ERROR][MISSION_OBJECTIVE] failed to read cached host objective");
+    }
+    return std::nullopt;
+}
+
+std::vector<MissionDialogueSample>
+ScriptHookSdkFacade::SampleMissionDialogue(const std::uint32_t missionId) noexcept {
+    std::vector<MissionDialogueSample> samples;
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        if (!FindCampaignMission(missionId).has_value()) {
+            return samples;
+        }
+        for (const auto& candidate : CampaignMissionDialogueRoots(missionId)) {
+            const auto root = const_cast<char*>(candidate.root.data());
+            const bool created = ::invoke<BOOL>(
+                0xD89504D9D7D5057DULL, root) != FALSE;
+            if (!created) continue;
+            const bool loaded = ::invoke<BOOL>(
+                0xDF0D54BE7A776737ULL, root) != FALSE;
+            const bool playing = ::invoke<BOOL>(
+                0x1ECC76792F661CF5ULL, root) != FALSE;
+            if (!loaded && !playing) continue;
+            // The mission script itself creates the root only after binding
+            // its own cast with ADD_PED_TO_CONVERSATION. A created, loaded
+            // root is therefore evidence of that local binding; this bridge
+            // never tries to discover handles or bind actors independently.
+            samples.push_back(MissionDialogueSample{
+                CampaignMissionDialogueProfileId(missionId),
+                static_cast<std::uint32_t>(GAMEPLAY::GET_HASH_KEY(root)),
+                static_cast<std::uint16_t>(std::clamp(
+                    ::invoke<int>(0x480357EE890C295AULL, root), 0, 65535)),
+                loaded, playing, created && loaded});
+        }
+#endif
+    } catch (...) {
+        Log("[ERROR][MISSION_DIALOGUE] read-only conversation probe failed");
+        samples.clear();
+    }
+    return samples;
+}
+
+bool ScriptHookSdkFacade::PresentHostMissionDialogue(
+    const std::uint32_t missionId,
+    const std::uint32_t rootId) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        const auto* definition = FindCampaignMissionDialogueRoot(
+            missionId, rootId);
+        if (definition == nullptr || definition->guestAudioRoles == 0U) {
+            return false;
+        }
+        const auto root = const_cast<char*>(definition->root.data());
+        // A line transition in the same root must not restart the scene.
+        // Rockstar owns line advancement after START_SCRIPT_CONVERSATION.
+        if (hostMissionDialogueRoot_ == definition->root &&
+            ::invoke<BOOL>(0x1ECC76792F661CF5ULL, root) != FALSE) {
+            return true;
+        }
+        ClearHostMissionDialoguePresentation();
+        const auto player = PLAYER::PLAYER_PED_ID();
+        if (player == 0 || ENTITY::DOES_ENTITY_EXIST(player) == FALSE) {
+            return false;
+        }
+        const auto makeHiddenVoiceProxy = [&](const char* voice,
+                                               const std::size_t index) {
+            const auto proxy = PED::CLONE_PED(player, 0.0F, FALSE, TRUE);
+            if (proxy == 0) return false;
+            ENTITY::SET_ENTITY_AS_MISSION_ENTITY(proxy, TRUE, TRUE);
+            ENTITY::SET_ENTITY_COLLISION(proxy, FALSE, FALSE);
+            ENTITY::SET_ENTITY_VISIBLE(proxy, FALSE);
+            ENTITY::SET_ENTITY_ALPHA(proxy, 0, FALSE);
+            ENTITY::FREEZE_ENTITY_POSITION(proxy, TRUE);
+            (void)::invoke<Any>(0x6C8065A3B780185BULL, proxy,
+                const_cast<char*>(voice));
+            hostMissionDialogueProxyPeds_[index] = proxy;
+            (void)::invoke<Any>(0x95D9F4BC443956E7ULL, root, proxy,
+                const_cast<char*>(voice));
+            return true;
+        };
+        if (::invoke<BOOL>(0xD2C91A0B572AAE56ULL, root) == FALSE) {
+            return false;
+        }
+        if ((definition->guestAudioRoles & static_cast<std::uint8_t>(
+                 CampaignMissionDialogueRole::Arthur)) != 0U) {
+            auto arthur = const_cast<char*>("ARTHUR");
+            (void)::invoke<Any>(0x6C8065A3B780185BULL, player, arthur);
+            (void)::invoke<Any>(0x95D9F4BC443956E7ULL, root, player, arthur);
+        }
+        std::size_t proxyIndex{};
+        if ((definition->guestAudioRoles & static_cast<std::uint8_t>(
+                 CampaignMissionDialogueRole::Hosea)) != 0U &&
+            !makeHiddenVoiceProxy("HOSEA", proxyIndex++)) {
+            ClearHostMissionDialoguePresentation();
+            return false;
+        }
+        if ((definition->guestAudioRoles & static_cast<std::uint8_t>(
+                 CampaignMissionDialogueRole::Dutch)) != 0U &&
+            !makeHiddenVoiceProxy("DUTCH", proxyIndex++)) {
+            ClearHostMissionDialoguePresentation();
+            return false;
+        }
+        (void)::invoke<Any>(0x6B17C62C9635D2DCULL, root, TRUE, TRUE, FALSE);
+        hostMissionDialogueRoot_ = definition->root;
+        const bool playing = ::invoke<BOOL>(
+            0x1ECC76792F661CF5ULL, root) != FALSE;
+        Log(playing
+                ? "[MISSION_DIALOGUE] host-only local audio presentation started"
+                : "[MISSION_DIALOGUE] host-only local audio presentation did not start");
+        if (!playing) ClearHostMissionDialoguePresentation();
+        return playing;
+#else
+        (void)missionId;
+        (void)rootId;
+#endif
+    } catch (...) {
+        ClearHostMissionDialoguePresentation();
+        Log("[MISSION_DIALOGUE] host-only local audio presentation failed closed");
+    }
+    return false;
+}
+
+void ScriptHookSdkFacade::ClearHostMissionDialoguePresentation() noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        if (!hostMissionDialogueRoot_.empty()) {
+            const auto root = const_cast<char*>(hostMissionDialogueRoot_.c_str());
+            (void)::invoke<Any>(0xD79DEEFB53455EBAULL, root, TRUE, TRUE);
+            hostMissionDialogueRoot_.clear();
+        }
+        for (auto& proxy : hostMissionDialogueProxyPeds_) {
+            if (proxy != 0 && ENTITY::DOES_ENTITY_EXIST(proxy) != FALSE) {
+                PED::DELETE_PED(&proxy);
+            }
+            proxy = 0;
+        }
+#endif
+    } catch (...) {
+        // Cleanup is best-effort; all proxy handles remain bridge-owned.
+        hostMissionDialogueRoot_.clear();
+        hostMissionDialogueProxyPeds_.fill(0);
+    }
 }
 
 std::optional<PlayerAnimationStatePayload>
@@ -14879,12 +15044,28 @@ GuestMissionIsolationStatus
 ScriptHookSdkFacade::MaintainMissionAuthority(
     const bool active,
     const bool hostMissionActive,
-    const bool hostPresentationActive) noexcept {
+    const bool hostPresentationActive,
+    const bool allowExpectedLocalMissionInstance) noexcept {
     GuestMissionIsolationStatus status;
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         if (active) {
             const auto now = TickMilliseconds();
+            // The start barrier is deliberately the sole path that lifts the
+            // guest prompt guard. It is keyed by an exact catalog mission and
+            // held only by BridgeRuntime while that mission remains active.
+            // Do not inspect or modify any Story script memory here.
+            if (allowExpectedLocalMissionInstance) {
+                if (missionFlagOverrideActive_) {
+                    GAMEPLAY::SET_MISSION_FLAG(
+                        missionFlagOverrideRestoreValue_ ? TRUE : FALSE);
+                    missionFlagOverrideActive_ = false;
+                }
+                guestMissionInteractionSuppressed_ = false;
+                status.localMissionDetected =
+                    GAMEPLAY::GET_MISSION_FLAG() != FALSE;
+                return status;
+            }
             const bool hostPresentationWasActive =
                 guestHostPresentationActive_;
             guestHostMissionActive_ = hostMissionActive;
@@ -15348,6 +15529,7 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
         (void)active;
         (void)hostMissionActive;
         (void)hostPresentationActive;
+        (void)allowExpectedLocalMissionInstance;
 #endif
     } catch (...) {
         Log(
@@ -17197,7 +17379,9 @@ void ScriptHookSdkFacade::MaintainMissionCompanionPresentation(
             255,
             false);
         DrawNativeText(
-            "SHARED STORY OBJECTIVE - complete the current task with the host",
+            state.objectiveText.empty()
+                ? "SHARED STORY OBJECTIVE - complete the current task with the host"
+                : state.objectiveText.c_str(),
             0.604F,
             0.887F,
             0.225F,

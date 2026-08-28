@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -80,6 +81,43 @@ struct CampaignMissionDefinition final {
     std::span<const CampaignMissionReward> rewards{};
 };
 
+// Dialogue is always played by each machine's own Story script.  The network
+// only conveys a cue after a locally-created scripted-conversation root has
+// been observed.  A profile exists for every catalogued Story mission so the
+// protocol can reject cross-mission cues, even where no source-reviewed root
+// has been admitted yet.  Roots are deliberately a small reviewed allow-list:
+// ScriptHook exposes no safe "enumerate active conversations" native.
+[[nodiscard]] constexpr std::uint32_t CampaignMissionDialogueProfileId(
+    const std::uint32_t missionId) noexcept {
+    return missionId;
+}
+
+struct CampaignMissionDialogueRoot final {
+    std::uint32_t missionId{};
+    std::string_view root{};
+    std::uint8_t guestAudioRoles{};
+};
+
+enum class CampaignMissionDialogueRole : std::uint8_t {
+    Arthur = 1U << 0U,
+    Hosea = 1U << 1U,
+    Dutch = 1U << 2U,
+};
+
+[[nodiscard]] constexpr std::uint8_t operator|(
+    const CampaignMissionDialogueRole left,
+    const CampaignMissionDialogueRole right) noexcept {
+    return static_cast<std::uint8_t>(left) | static_cast<std::uint8_t>(right);
+}
+
+inline constexpr std::uint8_t kCampaignDialogueArthurHosea =
+    static_cast<std::uint8_t>(CampaignMissionDialogueRole::Arthur) |
+    static_cast<std::uint8_t>(CampaignMissionDialogueRole::Hosea);
+inline constexpr std::uint8_t kCampaignDialogueArthurDutchHosea =
+    static_cast<std::uint8_t>(CampaignMissionDialogueRole::Arthur) |
+    static_cast<std::uint8_t>(CampaignMissionDialogueRole::Dutch) |
+    static_cast<std::uint8_t>(CampaignMissionDialogueRole::Hosea);
+
 inline constexpr std::uint32_t kFud1MissionId = CampaignMissionId("FUD1");
 inline constexpr std::uint32_t kHunt1MissionId = CampaignMissionId("HNT1");
 
@@ -134,11 +172,9 @@ inline constexpr CampaignMissionReward kAb21MissionRewards[]{
 // Mission reward pages are cross-checked against the canonical runtime IDs
 // below. These are durable weapon awards, not optional battlefield pickups:
 // SEN1 / The First Shall Be the Last awards the Tomahawk; DST1 / Paying a
-// Social Call awards the Double-Barreled Shotgun and Throwing Knife; IND3 / A
-// Fine Night of Debauchery awards the Semi-Auto Shotgun. Their fixed cash
-// rewards are carried by the mission-scoped cash-delta field instead of being
-// duplicated here. The Reutlinger watch is deliberately absent until its
-// exact RDR2 inventory record is identified and verified.
+// Social Call awards the Double-Barreled Shotgun and Throwing Knife. Their
+// fixed cash rewards are carried by the mission-scoped cash-delta field
+// instead of being duplicated here.
 inline constexpr CampaignMissionReward kSen1MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_THROWN_TOMAHAWK"), 1U},
@@ -150,8 +186,16 @@ inline constexpr CampaignMissionReward kDst1MissionRewards[]{
      CampaignMissionId("WEAPON_THROWN_THROWING_KNIVES"), 1U},
 };
 inline constexpr CampaignMissionReward kInd3MissionRewards[]{
-    {CampaignMissionRewardBinding::WeaponOwnership,
-     CampaignMissionId("WEAPON_SHOTGUN_SEMIAUTO"), 12U},
+    // IND3 / A Fine Night of Debauchery makes these weapons purchasable; it
+    // does not grant a free Semi-Auto Shotgun. The Reutlinger watch is an
+    // explicit inventory reward (not a document) and industry3's mission
+    // path grants this exact provision record when it is absent.
+    {CampaignMissionRewardBinding::WeaponShopEligibility,
+     CampaignMissionId("WEAPON_SHOTGUN_SEMIAUTO"), 0U},
+    {CampaignMissionRewardBinding::WeaponShopEligibility,
+     CampaignMissionId("WEAPON_REVOLVER_DOUBLEACTION_GAMBLER"), 0U},
+    {CampaignMissionRewardBinding::InventoryItem,
+     CampaignMissionId("PROVISION_POCKET_WATCH_REUTLINGE"), 1U},
 };
 // MUD4 / The Sheep and the Goats makes the standard Rolling Block Rifle part
 // of Story progression.
@@ -178,6 +222,48 @@ inline constexpr CampaignMissionReward kGry1MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponShopEligibility,
      CampaignMissionId("WEAPON_REPEATER_EVANS"), 0U},
 };
+// UTP2 / An American Pastoral Scene grants the Lancaster Repeater directly.
+// MUD6 / Pouring Forth Oil makes the Pump-Action Shotgun purchasable; GNG3 /
+// Visiting Hours does the same for the Repeating Shotgun. These are distinct
+// entitlement cases and must not be represented as free weapon grants.
+inline constexpr CampaignMissionReward kUtp2MissionRewards[]{
+    {CampaignMissionRewardBinding::WeaponOwnership,
+     CampaignMissionId("WEAPON_REPEATER_LANCASTER"), 60U},
+};
+inline constexpr CampaignMissionReward kMud6MissionRewards[]{
+    {CampaignMissionRewardBinding::WeaponShopEligibility,
+     CampaignMissionId("WEAPON_SHOTGUN_PUMP"), 0U},
+};
+inline constexpr CampaignMissionReward kGng3MissionRewards[]{
+    {CampaignMissionRewardBinding::WeaponShopEligibility,
+     CampaignMissionId("WEAPON_SHOTGUN_REPEATING"), 0U},
+};
+// DST5 / Goodbye, Dear Friend places a permanent Carcano pickup for Arthur
+// and makes the Litchfield Repeater purchasable. Mary's keepsakes are omitted
+// until their exact persistent inventory IDs (rather than mission prop IDs)
+// are verified.
+inline constexpr CampaignMissionReward kDst5MissionRewards[]{
+    {CampaignMissionRewardBinding::WeaponOwnership,
+     CampaignMissionId("WEAPON_SNIPERRIFLE_CARCANO"), 60U},
+    {CampaignMissionRewardBinding::WeaponShopEligibility,
+     CampaignMissionId("WEAPON_REPEATER_LITCHFIELD"), 0U},
+};
+
+// Source-reviewed conversation roots.  These were traced to direct scripted
+// conversation helper calls in the corresponding Story scripts.  More roots
+// may be admitted only after the exact game build has been reviewed and a
+// two-PC capture confirms that they have the same local cast and line order.
+inline constexpr std::array<CampaignMissionDialogueRoot, 8U>
+    kCampaignMissionDialogueRoots{{
+        {kHunt1MissionId, "RH1_TRACK_CHAT", kCampaignDialogueArthurHosea},
+        {kHunt1MissionId, "RH1_TRK_FND1", kCampaignDialogueArthurHosea},
+        {kHunt1MissionId, "RH1_TRK_FND2", kCampaignDialogueArthurHosea},
+        {kHunt1MissionId, "RH1_TRK_FND3", kCampaignDialogueArthurHosea},
+        {kFud1MissionId, "FUD1_FISHTALK1", kCampaignDialogueArthurDutchHosea},
+        {kFud1MissionId, "FUD1_FISHTALK2", kCampaignDialogueArthurDutchHosea},
+        {kFud1MissionId, "FUD1_FISHTALK3", kCampaignDialogueArthurDutchHosea},
+        {kFud1MissionId, "FUD1_FISHTALK4", kCampaignDialogueArthurDutchHosea},
+    }};
 
 // Canonical Story registry transcribed from init_all_sp's func_282 entries.
 // Unknown/non-registry scripts remain companion-only.
@@ -196,9 +282,9 @@ inline constexpr CampaignMissionDefinition kCampaignMissionCatalog[]{
     COOPSTORY_STORY_MISSION("MRY3", "mary3", "We Loved Once and True III"),
     COOPSTORY_STORY_MISSION("SAL1", "saloon1", "A Quiet Time"),
     COOPSTORY_STORY_MISSION("UTP1", "utopia1", "Blessed Are the Meek?"),
-    COOPSTORY_STORY_MISSION("UTP2", "utopia2", "American Pastoral Scene"),
+    {CampaignMissionId("UTP2"), "UTP2", "utopia2", "American Pastoral Scene", CampaignCompletionBinding::MissionDataNormalComplete, kUtp2MissionRewards},
     {CampaignMissionId("SEN1"), "SEN1", "sean1", "The First Shall Be Last", CampaignCompletionBinding::MissionDataNormalComplete, kSen1MissionRewards},
-    COOPSTORY_STORY_MISSION("MUD6", "mudtown3b", "Pouring Forth Oil"),
+    {CampaignMissionId("MUD6"), "MUD6", "mudtown3b", "Pouring Forth Oil", CampaignCompletionBinding::MissionDataNormalComplete, kMud6MissionRewards},
     COOPSTORY_STORY_MISSION("BOU1", "bounty1", "Good, Honest, Snake Oil"),
     COOPSTORY_STORY_MISSION("RABI1", "rcm_abigail11", "A Fisher of Men"),
     COOPSTORY_STORY_MISSION("REV1", "reverend1", "Who Is Not without Sin"),
@@ -219,7 +305,7 @@ inline constexpr CampaignMissionDefinition kCampaignMissionCatalog[]{
     {CampaignMissionId("DST1"), "DST1", "odriscolls1", "Paying a Social Call", CampaignCompletionBinding::MissionDataNormalComplete, kDst1MissionRewards},
     COOPSTORY_STORY_MISSION("DST3", "odriscolls3", "Blessed Are the Peacemakers"),
     COOPSTORY_STORY_MISSION("ODR4", "odriscolls4", "Horsemen, Apocalypses"),
-    COOPSTORY_STORY_MISSION("DST5", "odriscolls5", "Goodbye, Dear Friend"),
+    {CampaignMissionId("DST5"), "DST5", "odriscolls5", "Goodbye, Dear Friend", CampaignCompletionBinding::MissionDataNormalComplete, kDst5MissionRewards},
     COOPSTORY_STORY_MISSION("IND1", "industry1", "The Gilded Cage"),
     {CampaignMissionId("IND3"), "IND3", "industry3", "A Fine Night of Debauchery", CampaignCompletionBinding::MissionDataNormalComplete, kInd3MissionRewards},
     COOPSTORY_STORY_MISSION("NBD1", "saint_denis1", "A Fine Night of Debauchery"),
@@ -232,7 +318,7 @@ inline constexpr CampaignMissionDefinition kCampaignMissionCatalog[]{
     COOPSTORY_STORY_MISSION("SMG2", "smuggler2", "The Fine Art of Conversation"),
     COOPSTORY_STORY_MISSION("GNG1", "gang1", "Fleeting Joy"),
     COOPSTORY_STORY_MISSION("GNG2", "gang2", "Icarus and Friends"),
-    COOPSTORY_STORY_MISSION("GNG3", "gang3", "Visiting Hours"),
+    {CampaignMissionId("GNG3"), "GNG3", "gang3", "Visiting Hours", CampaignCompletionBinding::MissionDataNormalComplete, kGng3MissionRewards},
     COOPSTORY_STORY_MISSION("CRN1", "cornwall1", "An Honest Mistake"),
     COOPSTORY_STORY_MISSION("TRN1", "train_robbery1", "Just a Social Call"),
     COOPSTORY_STORY_MISSION("TRN2", "train_robbery2", "The Delights of Van Horn"),
@@ -288,6 +374,52 @@ CampaignMissionRewards(const std::uint32_t missionId) noexcept {
     const auto definition = FindCampaignMission(missionId);
     return definition.has_value() ? definition->rewards
                                   : std::span<const CampaignMissionReward>{};
+}
+
+// Every catalogued mission has a dialogue profile.  A profile without roots
+// intentionally falls back to that game's normal local mission dialogue; it
+// never causes a peer to manufacture, restart, pause, or skip a conversation.
+[[nodiscard]] constexpr bool HasCampaignMissionDialogueProfile(
+    const std::uint32_t missionId,
+    const std::uint32_t profileId) noexcept {
+    return profileId == CampaignMissionDialogueProfileId(missionId) &&
+        FindCampaignMission(missionId).has_value();
+}
+
+[[nodiscard]] constexpr std::span<const CampaignMissionDialogueRoot>
+CampaignMissionDialogueRoots(const std::uint32_t missionId) noexcept {
+    for (std::size_t first{}; first < kCampaignMissionDialogueRoots.size();
+         ++first) {
+        if (kCampaignMissionDialogueRoots[first].missionId != missionId) {
+            continue;
+        }
+        auto end = first + 1U;
+        while (end < kCampaignMissionDialogueRoots.size() &&
+               kCampaignMissionDialogueRoots[end].missionId == missionId) {
+            ++end;
+        }
+        return {kCampaignMissionDialogueRoots.data() + first, end - first};
+    }
+    return {};
+}
+
+[[nodiscard]] constexpr bool IsCampaignMissionDialogueRoot(
+    const std::uint32_t missionId,
+    const std::uint32_t rootId) noexcept {
+    for (const auto& root : CampaignMissionDialogueRoots(missionId)) {
+        if (CampaignMissionId(root.root) == rootId) return true;
+    }
+    return false;
+}
+
+[[nodiscard]] constexpr const CampaignMissionDialogueRoot*
+FindCampaignMissionDialogueRoot(
+    const std::uint32_t missionId,
+    const std::uint32_t rootId) noexcept {
+    for (const auto& root : CampaignMissionDialogueRoots(missionId)) {
+        if (CampaignMissionId(root.root) == rootId) return &root;
+    }
+    return nullptr;
 }
 
 }  // namespace coopstory::bridge

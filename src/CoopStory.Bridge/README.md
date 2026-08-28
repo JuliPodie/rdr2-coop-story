@@ -56,17 +56,24 @@ passed only through the current-user IPC pipe and the Windows clipboard. `F10`
 hides or restores the top status bar, while `F9` opens the diagnostic command
 menu. The invite secret is never written to bridge logs.
 The host is the sole Story-mission authority. The guest receives the host's
-mission epoch, phase, safe anchor and companion objective marker without
-starting, unlocking, or overwriting a Story mission in the guest save. If a
-guest starts a private Story mission (for example, Chapter 3 while the host is
-in Chapter 2), it is quarantined and the native HUD tells the guest to exit it
-before following the host again. A downed pair never auto-retries: revive takes
+mission epoch, phase, safe anchor and companion objective marker. Protocol 30
+can briefly permit the guest's own vanilla prompt only when the host is already
+in the exact catalog MissionData entry and the guest independently proved that
+same entry startable: guest activation and host release are both explicit. A
+wrong private Story mission (for example, Chapter 3 while the host is in
+Chapter 2), a refusal, or a timeout is quarantined and the native HUD tells the
+guest to exit it before following the host again. The guest prompt stays
+guarded for a 250 ms verified-idle interval after the barrier arrives, so a
+private mission that was already entering is rejected rather than adopted.
+This experimental barrier does not yet make Rockstar's mission VM, checkpoint
+script state, or dialogue deterministic. A downed pair never auto-retries: revive takes
 priority, and only the host can explicitly choose **Retry checkpoint** from the
 diagnostic menu. The actual RDR2 checkpoint-retry native remains unverified and
 therefore fail-closed. The simulator exercises these bridge-side authority and
 isolation paths without launching the game.
 
-Protocol 27 adds a deny-by-default per-mission progression handshake. When an
+Protocol 30 adds a deny-by-default per-mission progression handshake and
+matching-instance start barrier. When an
 allow-listed Story mission becomes active, the host sends its exact MissionData
 hash. The guest accepts only an exact valid, required, incomplete and unrated
 Story MissionData record while RDR2 permits mission start; the host then binds

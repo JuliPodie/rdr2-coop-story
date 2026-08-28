@@ -49,7 +49,24 @@ public enum MissionProgressionPhase : byte
 {
     Offer = 1,
     Eligibility = 2,
-    Completion = 3
+    Completion = 3,
+    // Guest acknowledgement for a successfully persisted completion. This
+    // lets the host retransmit a best-effort Completion frame until the save
+    // transaction is known to be durable, without duplicating rewards.
+    Applied = 4,
+    // Host opens a short, exact-MissionData window in which the guest may use
+    // their own vanilla prompt to enter the matching Story instance.
+    StartBarrierOpen = 5,
+    // The guest observed that exact MissionData entry become active locally.
+    GuestInstanceStarted = 6,
+    // Host acknowledged the matching guest instance. This is an authority
+    // barrier, not a request to launch arbitrary game scripts.
+    StartBarrierReleased = 7,
+    // Guest could not enter the offered instance (or entered a different one).
+    GuestInstanceRejected = 8,
+    // Host closed the window after rejection or timeout. The guest returns to
+    // normal companion-only mission isolation.
+    StartBarrierAborted = 9
 }
 
 [Flags]
@@ -68,6 +85,47 @@ public readonly record struct MissionProgressionPayload(
     MissionProgressionFlags Flags,
     byte CompletionRating = 0,
     int CompletionCashAward = 0);
+
+// Host-owned current Story objective text. It is presentation only: the guest
+// never sends it back and cannot use it to mutate a mission script.
+public readonly record struct MissionObjectivePayload(
+    NetEntityId HostEntityId,
+    uint MissionEpoch,
+    uint Revision,
+    ulong Fingerprint,
+    string Text);
+
+// Only catalog-owned numeric IDs travel on the wire. A peer can never name an
+// arbitrary Rockstar conversation or request a synthetic line.
+public readonly record struct MissionDialogueCuePayload(
+    NetEntityId HostEntityId,
+    uint MissionEpoch,
+    uint CheckpointGeneration,
+    uint DialogueSequence,
+    uint ProfileId,
+    uint RootId,
+    ushort LineIndex,
+    ulong HostStartTick);
+
+public enum MissionDialogueReadyState : byte
+{
+    Ready = 1,
+    RootNotLoaded = 2,
+    RootNotPlaying = 3,
+    MissionMismatch = 4,
+    StaleCue = 5,
+    ProfileUnavailable = 6
+}
+
+public readonly record struct MissionDialogueReadyPayload(
+    NetEntityId HostEntityId,
+    uint MissionEpoch,
+    uint CheckpointGeneration,
+    uint DialogueSequence,
+    uint ProfileId,
+    uint RootId,
+    ushort LineIndex,
+    MissionDialogueReadyState State);
 
 // Positive native collection evidence only. No money, items, or private
 // inventory is allowed on this channel.

@@ -264,7 +264,7 @@ if (($releaseRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
 }
 
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
-$packageName = 'RDR2-CoopStory-Tester-Protocol23-' + $stamp
+$packageName = 'RDR2-CoopStory-Tester-Protocol30-' + $stamp
 $packageRoot = Join-Path $releaseRoot $packageName
 $zipPath = Join-Path $releaseRoot ($packageName + '.zip')
 if ((Test-Path -LiteralPath $packageRoot) -or
@@ -445,8 +445,8 @@ if ($forbidden.Count -gt 0) {
 $buildInfo = [ordered]@{
     package = $packageName
     createdUtc = [DateTime]::UtcNow.ToString('o')
-    protocol = 23
-    engineVersion = 'tester-protocol23'
+    protocol = 30
+    engineVersion = 'tester-protocol30'
     entityGraph = '31.9-priority-hysteresis-plus-retained-cinematic-cast-and-optional-released-animscene-object-lane'
     missionSync = '31.10-host-owned-mission-plus-live-resume-anchor-unowned-weather-guard-and-handle-pinned-private-scene-quarantine'
     missionSpectator = '31.0-versioned-animscene-definition-prepare-commit-or-smoothed-proxy-camera-safe-fallback'
@@ -476,7 +476,7 @@ $buildInfo = [ordered]@{
     lassoReplication = '31.2-sender-confirmed-physical-task-no-receiver-begin-autothrow-and-authoritative-victim-only-restraint-fallback'
     remoteEquipment = '29.5-periodic-held-weapon-visual-reassertion-plus-lasso-utility-validation-bypass'
     exactMetaPedOutfitReplication = '29.0-ordered-complete-story-shop-component-set-model-gated-and-fingerprinted'
-    exactAnimSceneDialogueAudioReplication = '31.10-host-only-seven-handler-capture-plus-guest-create-bind-all-required-before-load-verify-commit-and-retained-fallback-cast'
+    exactAnimSceneDialogueAudioReplication = '30.0-experimental-host-cue-ready-with-companion-only-local-presentation-and-vanilla-fallback'
     animSceneDefinitionTransport = '20.0-canonical-sha256-128-resource-playback-create-flags-and-up-to-48-stable-ped-horse-object-role-bindings'
     animSceneDefinitionHandshake = '20.0-single-critical-fifo-noninvasive-host-story-scene-preload-cast-binding-and-stage-diagnostics'
     animSceneRuntimeCaptureEnabled = $true

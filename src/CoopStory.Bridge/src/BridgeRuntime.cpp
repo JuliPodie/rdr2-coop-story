@@ -12,6 +12,7 @@
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace coopstory::bridge {
@@ -21,6 +22,27 @@ constexpr std::uint64_t kRemotePlayerFreshnessMilliseconds = 1'000U;
 constexpr std::uint64_t kRemotePlayerDespawnTimeoutMilliseconds = 5'000U;
 constexpr std::uint64_t kWorldStateIntervalMilliseconds = 500U;
 constexpr std::uint64_t kEquipmentRefreshMilliseconds = 1'000U;
+constexpr std::uint64_t kMissionProgressionCompletionRetryMilliseconds = 1'000U;
+constexpr std::uint64_t kMissionObjectiveSampleMilliseconds = 250U;
+// A guest must use their own verified vanilla prompt in this window. The
+// barrier is deliberately short enough that a stale packet cannot leave their
+// Story VM unguarded, but long enough to cover one normal conversation start.
+constexpr std::uint64_t kMissionStartBarrierMilliseconds = 45'000U;
+constexpr std::uint64_t kMissionStartBarrierRetryMilliseconds = 1'000U;
+// Keep the guest's nearby Story-prompt guard asserted briefly after the
+// host's exact-ID barrier arrives. This lets us reject a local mission that
+// was already being entered, instead of treating it as newly authorized.
+constexpr std::uint64_t kMissionStartBarrierPromptArmMilliseconds = 250U;
+
+[[nodiscard]] std::uint64_t MissionObjectiveFingerprint(
+    const std::string_view text) noexcept {
+    std::uint64_t value = 1469598103934665603ULL;
+    for (const auto character : text) {
+        value ^= static_cast<std::uint8_t>(character);
+        value *= 1099511628211ULL;
+    }
+    return value == 0U ? 1U : value;
+}
 constexpr std::uint64_t kAppearanceRefreshMilliseconds = 2'000U;
 // Story Mode temporarily streams a personal horse out for several seconds
 // around doors, dense towns and cutscene transitions. A sub-second absence
@@ -602,6 +624,8 @@ bool BridgeRuntime::Start(
     lastWorldDamageIntentMs_ = 0U;
     worldDamageIntentSequences_.Reset();
     remoteMissionSequences_.Reset();
+    remoteMissionDialogueCueSequences_.Reset();
+    remoteMissionDialogueReadySequences_.Reset();
     remoteMissionCameraSequences_.Reset();
     remoteMissionCinematicSequences_.Reset();
     remoteMissionCinematicActionSequences_.Reset();
@@ -616,14 +640,39 @@ bool BridgeRuntime::Start(
     localPlayerActionSequence_ = 0U;
     localPlayerActionId_ = 0U;
     localMissionState_.reset();
+    facade_.ClearHostMissionDialoguePresentation();
     remoteMissionState_.reset();
+    localMissionObjective_.reset();
+    remoteMissionObjective_.reset();
+    localMissionDialogueCue_.reset();
+    remoteMissionDialogueCue_.reset();
+    pendingHostMissionDialogueCue_.reset();
+    remoteMissionDialogueReady_.reset();
+    localMissionDialogueSequence_ = 0U;
+    lastMissionDialogueCueSentMs_ = 0U;
+    pendingHostMissionDialogueDueMs_ = 0U;
+    localMissionObjectiveRevision_ = 0U;
+    nextMissionObjectiveSampleMs_ = 0U;
     localMissionProgressionOffer_.reset();
+    localMissionProgressionCompletion_.reset();
     localMissionProgressionStartingCash_.reset();
     remoteMissionProgressionOffer_.reset();
+    localMissionStartBarrier_.reset();
+    remoteMissionStartBarrier_.reset();
+    localMissionStartBarrierDeadlineMs_ = 0U;
+    remoteMissionStartBarrierDeadlineMs_ = 0U;
+    remoteMissionStartBarrierPromptArmedAtMs_ = 0U;
+    localMissionStartBarrierGuestStarted_ = false;
+    remoteMissionStartBarrierGuestStarted_ = false;
+    remoteMissionStartBarrierReleased_ = false;
+    remoteMissionStartBarrierRejected_ = false;
+    nextGuestMissionInstanceStartedRetryMs_ = 0U;
     remoteMissionProgressionEligible_ = false;
     remoteMissionProgressionAppliedEventId_.reset();
     localProgressionMissionId_ = 0U;
     guestMissionProgressionEligible_ = false;
+    guestMissionProgressionCompletionAcknowledged_ = false;
+    nextMissionProgressionCompletionRetryMs_ = 0U;
     localMissionCinematicState_.reset();
     remoteMissionCinematicState_.reset();
     remoteMissionCameraState_.reset();
@@ -961,6 +1010,8 @@ void BridgeRuntime::SendHello(const bool reconnect) {
     lastWorldDamageIntentMs_ = 0U;
     worldDamageIntentSequences_.Reset();
     remoteMissionSequences_.Reset();
+    remoteMissionDialogueCueSequences_.Reset();
+    remoteMissionDialogueReadySequences_.Reset();
     remoteMissionCameraSequences_.Reset();
     remoteMissionCinematicSequences_.Reset();
     remoteMissionCinematicActionSequences_.Reset();
@@ -970,7 +1021,15 @@ void BridgeRuntime::SendHello(const bool reconnect) {
     localPlayerActionSequence_ = 0U;
     localPlayerActionId_ = 0U;
     localMissionState_.reset();
+    facade_.ClearHostMissionDialoguePresentation();
     remoteMissionState_.reset();
+    localMissionDialogueCue_.reset();
+    remoteMissionDialogueCue_.reset();
+    pendingHostMissionDialogueCue_.reset();
+    remoteMissionDialogueReady_.reset();
+    localMissionDialogueSequence_ = 0U;
+    lastMissionDialogueCueSentMs_ = 0U;
+    pendingHostMissionDialogueDueMs_ = 0U;
     localMissionCinematicState_.reset();
     remoteMissionCinematicState_.reset();
     remoteMissionCameraState_.reset();
@@ -1901,6 +1960,18 @@ void BridgeRuntime::Tick() {
                        PlayerStateFlag::InMission)) != 0U;
     const bool guestMissionIsolationEnabled =
         guestMissionIsolationLeaseActive_;
+    // This is intentionally narrower than the lease: only a host-issued,
+    // exact-ID start barrier can let a guest reach their own vanilla mission
+    // prompt. The regular guard resumes automatically on timeout, rejection,
+    // or after that exact local MissionData entry ends.
+    const bool guestMatchingMissionStartPermitted =
+        localSlot_ == PlayerSlot::Guest &&
+        remoteMissionStartBarrier_.has_value() &&
+        !remoteMissionStartBarrierRejected_ &&
+        remoteMissionStartBarrierDeadlineMs_ != 0U &&
+        remoteMissionStartBarrierPromptArmedAtMs_ != 0U &&
+        now >= remoteMissionStartBarrierPromptArmedAtMs_ &&
+        now <= remoteMissionStartBarrierDeadlineMs_;
     const bool hostPresentationActive =
         (remoteMissionCinematicState_.has_value() &&
          IsCinematicPresentationPhase(
@@ -1915,7 +1986,8 @@ void BridgeRuntime::Tick() {
     const auto missionIsolation = facade_.MaintainMissionAuthority(
         guestMissionIsolationEnabled,
         hostMissionActive,
-        hostPresentationActive);
+        hostPresentationActive,
+        guestMatchingMissionStartPermitted);
     guestMissionQuarantineActive_ =
         guestMissionIsolationEnabled &&
         missionIsolation.quarantineActive;
@@ -1934,7 +2006,8 @@ void BridgeRuntime::Tick() {
     }
     // The guest's process-local Story state is never network authority. Do not
     // advertise an accidental local mission/camera transition to the host.
-    if (sample.has_value() && guestMissionIsolationEnabled) {
+    if (sample.has_value() && guestMissionIsolationEnabled &&
+        !guestMatchingMissionStartPermitted) {
         sample->missionActive = false;
         sample->cutsceneActive = false;
     }
@@ -2353,6 +2426,8 @@ void BridgeRuntime::Tick() {
             now,
             checkpointRespawnConfirmed);
         TickMissionProgression(*sample, now);
+        TickMissionObjective(*sample, now);
+        TickMissionDialogue(localSlot, now);
         TickMissionCinematic(sample, localSlot, now);
         // TickMissionAuthority may have entered or left a host cutscene in
         // this same frame. Re-evaluate after publishing the new phase so the
@@ -2382,8 +2457,13 @@ void BridgeRuntime::Tick() {
                   (!remoteMissionCinematicState_.has_value() &&
                    (remoteMissionState_->phase == MissionPhase::Cutscene ||
                     remoteMissionState_->phase == MissionPhase::Loading))));
+            // During the authenticated matching-instance barrier the guest
+            // must retain its own vanilla conversation/camera controls long
+            // enough to enter the exact local mission. Outside that narrow
+            // window host presentation remains authoritative as before.
             const bool spectatorRequired =
-                hostRequiresSpectator ||
+                (!guestMatchingMissionStartPermitted &&
+                 hostRequiresSpectator) ||
                 guestMissionQuarantineActive_;
             if (spectatorRequired != cutsceneSpectator_) {
                 cutsceneSpectator_ = spectatorRequired;
@@ -3617,7 +3697,15 @@ void BridgeRuntime::TickMissionAuthority(
             static_cast<std::uint8_t>(
                 completionFlags != 0U ? completionRating : 0U),
             completionFlags != 0U ? completionCashAward : 0});
+        const auto completionPayload = DecodeMissionProgression(
+            completion.payload);
         SendBestEffort(std::move(completion));
+        if (completionFlags != 0U) {
+            localMissionProgressionCompletion_ = completionPayload;
+            guestMissionProgressionCompletionAcknowledged_ = false;
+            nextMissionProgressionCompletionRetryMs_ =
+                nowMs + kMissionProgressionCompletionRetryMilliseconds;
+        }
         const auto definition = FindCampaignMission(offer.missionId);
         const auto name = definition.has_value() ? definition->scriptName : "unknown";
         facade_.Log(completionFlags != 0U
@@ -3658,6 +3746,20 @@ void BridgeRuntime::TickMissionProgression(
     if (!localSlot_.has_value() || !transport_.IsConnected()) return;
 
     if (*localSlot_ == PlayerSlot::Host) {
+        if (localMissionProgressionCompletion_.has_value() &&
+            !guestMissionProgressionCompletionAcknowledged_ &&
+            nowMs >= nextMissionProgressionCompletionRetryMs_) {
+            Frame retry;
+            retry.header.type = MessageType::MissionProgression;
+            retry.header.sequence = sequencer_.Next();
+            retry.header.tick = nowMs;
+            retry.payload = EncodeMissionProgression(
+                *localMissionProgressionCompletion_);
+            SendBestEffort(std::move(retry));
+            nextMissionProgressionCompletionRetryMs_ =
+                nowMs + kMissionProgressionCompletionRetryMilliseconds;
+            facade_.Log("[MISSION_PROGRESSION] completion retransmitted awaiting guest acknowledgement");
+        }
         for (const auto& definition : kCampaignMissionCatalog) {
             const auto probe = facade_.ProbeCampaignMission(definition.missionId);
             if (!sample.missionActive || !probe.has_value() || !probe->active ||
@@ -3682,17 +3784,138 @@ void BridgeRuntime::TickMissionProgression(
                 localMissionProgressionStartingCash_ =
                     facade_.QueryLocalCashBalance();
                 guestMissionProgressionEligible_ = false;
+                localMissionStartBarrier_.reset();
+                localMissionStartBarrierDeadlineMs_ = 0U;
+                localMissionStartBarrierGuestStarted_ = false;
+                localMissionProgressionCompletion_.reset();
+                guestMissionProgressionCompletionAcknowledged_ = false;
+                nextMissionProgressionCompletionRetryMs_ = 0U;
                 facade_.Log("[MISSION_PROGRESSION] " +
                     std::string{definition.scriptName} +
                     " offer sent; awaiting guest startability confirmation");
             }
+            if (guestMissionProgressionEligible_ &&
+                localMissionProgressionOffer_.has_value() &&
+                !localMissionStartBarrier_.has_value()) {
+                MissionProgressionPayload barrier{
+                    localMissionProgressionOffer_->missionId,
+                    localMissionProgressionOffer_->missionEpoch,
+                    localMissionProgressionOffer_->eventId,
+                    MissionProgressionPhase::StartBarrierOpen, 0U};
+                Frame frame;
+                frame.header.type = MessageType::MissionProgression;
+                frame.header.sequence = sequencer_.Next();
+                frame.header.tick = nowMs;
+                frame.payload = EncodeMissionProgression(barrier);
+                SendBestEffort(std::move(frame));
+                localMissionStartBarrier_ = barrier;
+                localMissionStartBarrierDeadlineMs_ =
+                    nowMs + kMissionStartBarrierMilliseconds;
+                localMissionStartBarrierGuestStarted_ = false;
+                facade_.Log("[MISSION_START_BARRIER] host mission active; exact guest start window opened for " +
+                    std::string{definition.scriptName});
+            }
             break;
+        }
+        if (localMissionStartBarrier_.has_value() &&
+            !localMissionStartBarrierGuestStarted_ &&
+            localMissionStartBarrierDeadlineMs_ != 0U &&
+            nowMs > localMissionStartBarrierDeadlineMs_) {
+            const auto& barrier = *localMissionStartBarrier_;
+            Frame abort;
+            abort.header.type = MessageType::MissionProgression;
+            abort.header.sequence = sequencer_.Next();
+            abort.header.tick = nowMs;
+            abort.payload = EncodeMissionProgression(MissionProgressionPayload{
+                barrier.missionId, barrier.missionEpoch, barrier.eventId,
+                MissionProgressionPhase::StartBarrierAborted, 0U});
+            SendBestEffort(std::move(abort));
+            localMissionStartBarrier_.reset();
+            localMissionStartBarrierDeadlineMs_ = 0U;
+            facade_.Log("[MISSION_START_BARRIER] guest did not enter the exact mission before timeout; companion-only retained");
         }
         return;
     }
 
-    // A guest never originates an offer or completion. Their confirmation is
-    // calculated from their own save's current startability evidence.
+    // The guest never launches a script for the host. It may only report the
+    // exact MissionData entry that its own vanilla Story prompt activated.
+    if (!remoteMissionStartBarrier_.has_value() ||
+        remoteMissionStartBarrierRejected_) {
+        return;
+    }
+    const auto sendRejection = [&](const char* reason) {
+        if (remoteMissionStartBarrierRejected_) return;
+        const auto& barrier = *remoteMissionStartBarrier_;
+        Frame rejection;
+        rejection.header.type = MessageType::MissionProgression;
+        rejection.header.sequence = sequencer_.Next();
+        rejection.header.tick = nowMs;
+        rejection.payload = EncodeMissionProgression(MissionProgressionPayload{
+            barrier.missionId, barrier.missionEpoch, barrier.eventId,
+            MissionProgressionPhase::GuestInstanceRejected, 0U});
+        SendBestEffort(std::move(rejection));
+        remoteMissionStartBarrierRejected_ = true;
+        facade_.Log(std::string{"[MISSION_START_BARRIER] guest rejected matching mission instance: "} + reason);
+    };
+    if (remoteMissionStartBarrierDeadlineMs_ == 0U ||
+        nowMs > remoteMissionStartBarrierDeadlineMs_) {
+        sendRejection("start window expired");
+        return;
+    }
+    const auto& barrier = *remoteMissionStartBarrier_;
+    const auto exactProbe = facade_.ProbeCampaignMission(barrier.missionId);
+    const bool exactInstanceActive = exactProbe.has_value() &&
+        exactProbe->missionId == barrier.missionId && exactProbe->active;
+    if (nowMs < remoteMissionStartBarrierPromptArmedAtMs_) {
+        if (exactInstanceActive) {
+            sendRejection("matching local mission was already entering before the host barrier armed");
+        }
+        return;
+    }
+    if (!exactInstanceActive) {
+        if (remoteMissionStartBarrierGuestStarted_ &&
+            remoteMissionStartBarrierReleased_) {
+            remoteMissionStartBarrier_.reset();
+            remoteMissionStartBarrierDeadlineMs_ = 0U;
+            remoteMissionStartBarrierPromptArmedAtMs_ = 0U;
+            remoteMissionStartBarrierGuestStarted_ = false;
+            remoteMissionStartBarrierReleased_ = false;
+            nextGuestMissionInstanceStartedRetryMs_ = 0U;
+            facade_.Log("[MISSION_START_BARRIER] matching guest mission ended; normal guest mission isolation restored");
+            return;
+        }
+        // The facade has no generic "start this exact MissionData" native.
+        // Detect a different known Story mission immediately and restore the
+        // normal quarantine on the next tick instead of accepting it.
+        for (const auto& definition : kCampaignMissionCatalog) {
+            if (definition.missionId == barrier.missionId) continue;
+            const auto other = facade_.ProbeCampaignMission(definition.missionId);
+            if (other.has_value() && other->missionId == definition.missionId &&
+                other->active) {
+                sendRejection("a different local mission became active");
+                return;
+            }
+        }
+        return;
+    }
+    if (!remoteMissionStartBarrierGuestStarted_ ||
+        nowMs >= nextGuestMissionInstanceStartedRetryMs_) {
+        Frame started;
+        started.header.type = MessageType::MissionProgression;
+        started.header.sequence = sequencer_.Next();
+        started.header.tick = nowMs;
+        started.payload = EncodeMissionProgression(MissionProgressionPayload{
+            barrier.missionId, barrier.missionEpoch, barrier.eventId,
+            MissionProgressionPhase::GuestInstanceStarted, 0U});
+        SendBestEffort(std::move(started));
+        remoteMissionStartBarrierGuestStarted_ = true;
+        nextGuestMissionInstanceStartedRetryMs_ =
+            nowMs + kMissionStartBarrierRetryMilliseconds;
+        facade_.Log("[MISSION_START_BARRIER] guest entered exact local MissionData instance; awaiting host release");
+    }
+    // Once the exact instance is observed, keep the narrow permission for its
+    // lifetime. The next inactive probe above restores ordinary isolation.
+    remoteMissionStartBarrierDeadlineMs_ = ~std::uint64_t{0U};
     (void)sample;
 }
 
@@ -3704,6 +3927,17 @@ void BridgeRuntime::HandleRemoteMissionProgression(
     constexpr auto kVerifiedMapping = static_cast<std::uint8_t>(
         MissionProgressionFlag::VerifiedCompletionMapping);
     if (*localSlot_ == PlayerSlot::Guest) {
+        const auto sendAppliedAcknowledgement = [&]() {
+            Frame acknowledgement;
+            acknowledgement.header.type = MessageType::MissionProgression;
+            acknowledgement.header.sequence = sequencer_.Next();
+            acknowledgement.header.tick = facade_.TickMilliseconds();
+            acknowledgement.payload = EncodeMissionProgression(
+                MissionProgressionPayload{
+                    payload.missionId, payload.missionEpoch, payload.eventId,
+                    MissionProgressionPhase::Applied, 0U});
+            SendBestEffort(std::move(acknowledgement));
+        };
         if (payload.phase == MissionProgressionPhase::Offer) {
             const auto probe = facade_.ProbeCampaignMission(payload.missionId);
             const bool eligible = probe.has_value() &&
@@ -3724,6 +3958,63 @@ void BridgeRuntime::HandleRemoteMissionProgression(
             facade_.Log(eligible
                 ? "[MISSION_PROGRESSION] guest confirmed matching mission is startable"
                 : "[MISSION_PROGRESSION] guest rejected progression: matching mission is not startable in this save");
+        } else if (payload.phase == MissionProgressionPhase::StartBarrierOpen) {
+            const bool matchedOffer = remoteMissionProgressionOffer_.has_value() &&
+                remoteMissionProgressionOffer_->missionId == payload.missionId &&
+                remoteMissionProgressionOffer_->missionEpoch == payload.missionEpoch &&
+                remoteMissionProgressionOffer_->eventId == payload.eventId;
+            const auto probe = facade_.ProbeCampaignMission(payload.missionId);
+            const bool stillStartable = probe.has_value() &&
+                probe->missionId == payload.missionId && probe->canStart &&
+                !probe->active;
+            if (!matchedOffer || !remoteMissionProgressionEligible_ ||
+                !stillStartable) {
+                Frame rejection;
+                rejection.header.type = MessageType::MissionProgression;
+                rejection.header.sequence = sequencer_.Next();
+                rejection.header.tick = facade_.TickMilliseconds();
+                rejection.payload = EncodeMissionProgression(
+                    MissionProgressionPayload{
+                        payload.missionId, payload.missionEpoch, payload.eventId,
+                        MissionProgressionPhase::GuestInstanceRejected, 0U});
+                SendBestEffort(std::move(rejection));
+                facade_.Log("[MISSION_START_BARRIER] refused host start window: exact mission is no longer locally startable");
+            } else {
+                remoteMissionStartBarrier_ = payload;
+                const auto nowMs = facade_.TickMilliseconds();
+                remoteMissionStartBarrierDeadlineMs_ = nowMs +
+                    kMissionStartBarrierMilliseconds;
+                remoteMissionStartBarrierPromptArmedAtMs_ = nowMs +
+                    kMissionStartBarrierPromptArmMilliseconds;
+                remoteMissionStartBarrierGuestStarted_ = false;
+                remoteMissionStartBarrierReleased_ = false;
+                remoteMissionStartBarrierRejected_ = false;
+                nextGuestMissionInstanceStartedRetryMs_ = 0U;
+                facade_.Log("[MISSION_START_BARRIER] exact guest mission start window received; verifying idle state before opening the matching vanilla prompt");
+            }
+        } else if (payload.phase == MissionProgressionPhase::StartBarrierReleased) {
+            const bool matched = remoteMissionStartBarrier_.has_value() &&
+                remoteMissionStartBarrier_->missionId == payload.missionId &&
+                remoteMissionStartBarrier_->missionEpoch == payload.missionEpoch &&
+                remoteMissionStartBarrier_->eventId == payload.eventId;
+            if (matched && remoteMissionStartBarrierGuestStarted_) {
+                remoteMissionStartBarrierReleased_ = true;
+                facade_.Log("[MISSION_START_BARRIER] host acknowledged matching guest mission instance");
+            }
+        } else if (payload.phase == MissionProgressionPhase::StartBarrierAborted) {
+            const bool matched = remoteMissionStartBarrier_.has_value() &&
+                remoteMissionStartBarrier_->missionId == payload.missionId &&
+                remoteMissionStartBarrier_->missionEpoch == payload.missionEpoch &&
+                remoteMissionStartBarrier_->eventId == payload.eventId;
+            if (matched) {
+                remoteMissionStartBarrier_.reset();
+                remoteMissionStartBarrierDeadlineMs_ = 0U;
+                remoteMissionStartBarrierPromptArmedAtMs_ = 0U;
+                remoteMissionStartBarrierGuestStarted_ = false;
+                remoteMissionStartBarrierReleased_ = false;
+                remoteMissionStartBarrierRejected_ = true;
+                facade_.Log("[MISSION_START_BARRIER] host closed start window; companion-only mission isolation restored");
+            }
         } else if (payload.phase == MissionProgressionPhase::Completion) {
             const bool matched = remoteMissionProgressionOffer_.has_value() &&
                 remoteMissionProgressionOffer_->missionId == payload.missionId &&
@@ -3736,6 +4027,9 @@ void BridgeRuntime::HandleRemoteMissionProgression(
                        *remoteMissionProgressionAppliedEventId_ ==
                            payload.eventId) {
                 facade_.Log("[MISSION_PROGRESSION] duplicate completion ignored after successful guest mapping");
+                // The host may have missed the first acknowledgement. Repeat
+                // it for every idempotent completion replay.
+                sendAppliedAcknowledgement();
             } else if (!facade_.ApplyCampaignMissionCompletion(
                            payload.missionId, payload.eventId,
                            payload.completionRating)) {
@@ -3750,6 +4044,7 @@ void BridgeRuntime::HandleRemoteMissionProgression(
             } else {
                 remoteMissionProgressionAppliedEventId_ = payload.eventId;
                 facade_.Log("[MISSION_PROGRESSION] verified guest completion mapping applied exactly once");
+                sendAppliedAcknowledgement();
             }
         }
         return;
@@ -3763,7 +4058,323 @@ void BridgeRuntime::HandleRemoteMissionProgression(
         facade_.Log(guestMissionProgressionEligible_
             ? "[MISSION_PROGRESSION] host accepted guest mission eligibility"
             : "[MISSION_PROGRESSION] host retained companion-only mode for this guest save");
+    } else if (payload.phase == MissionProgressionPhase::GuestInstanceStarted &&
+        localMissionStartBarrier_.has_value() &&
+        payload.missionId == localMissionStartBarrier_->missionId &&
+        payload.missionEpoch == localMissionStartBarrier_->missionEpoch &&
+        payload.eventId == localMissionStartBarrier_->eventId) {
+        localMissionStartBarrierGuestStarted_ = true;
+        Frame release;
+        release.header.type = MessageType::MissionProgression;
+        release.header.sequence = sequencer_.Next();
+        release.header.tick = facade_.TickMilliseconds();
+        release.payload = EncodeMissionProgression(MissionProgressionPayload{
+            payload.missionId, payload.missionEpoch, payload.eventId,
+            MissionProgressionPhase::StartBarrierReleased, 0U});
+        SendBestEffort(std::move(release));
+        facade_.Log("[MISSION_START_BARRIER] host released matching guest mission instance; objective/checkpoint authority remains host-owned");
+    } else if (payload.phase == MissionProgressionPhase::GuestInstanceRejected &&
+        localMissionStartBarrier_.has_value() &&
+        payload.missionId == localMissionStartBarrier_->missionId &&
+        payload.missionEpoch == localMissionStartBarrier_->missionEpoch &&
+        payload.eventId == localMissionStartBarrier_->eventId) {
+        Frame abort;
+        abort.header.type = MessageType::MissionProgression;
+        abort.header.sequence = sequencer_.Next();
+        abort.header.tick = facade_.TickMilliseconds();
+        abort.payload = EncodeMissionProgression(MissionProgressionPayload{
+            payload.missionId, payload.missionEpoch, payload.eventId,
+            MissionProgressionPhase::StartBarrierAborted, 0U});
+        SendBestEffort(std::move(abort));
+        localMissionStartBarrier_.reset();
+        localMissionStartBarrierDeadlineMs_ = 0U;
+        localMissionStartBarrierGuestStarted_ = false;
+        facade_.Log("[MISSION_START_BARRIER] guest rejected matching mission instance; companion-only retained");
+    } else if (payload.phase == MissionProgressionPhase::Applied &&
+        localMissionProgressionCompletion_.has_value() &&
+        payload.missionId == localMissionProgressionCompletion_->missionId &&
+        payload.missionEpoch == localMissionProgressionCompletion_->missionEpoch &&
+        payload.eventId == localMissionProgressionCompletion_->eventId) {
+        guestMissionProgressionCompletionAcknowledged_ = true;
+        facade_.Log("[MISSION_PROGRESSION] guest acknowledged durable completion mapping");
     }
+}
+
+void BridgeRuntime::TickMissionObjective(
+    const LocalPlayerSample& sample,
+    const std::uint64_t nowMs) {
+    if (localSlot_ != PlayerSlot::Host || !transport_.IsConnected() ||
+        !localEntityId_.IsValid() || !sample.missionActive ||
+        nowMs < nextMissionObjectiveSampleMs_) {
+        return;
+    }
+    nextMissionObjectiveSampleMs_ = nowMs +
+        kMissionObjectiveSampleMilliseconds;
+    const auto objective = facade_.SampleMissionObjective();
+    if (!objective.has_value() || objective->text.empty()) {
+        return;
+    }
+    const auto fingerprint = MissionObjectiveFingerprint(objective->text);
+    if (localMissionObjective_.has_value() &&
+        localMissionObjective_->missionEpoch == localMissionEpoch_ &&
+        localMissionObjective_->fingerprint == fingerprint) {
+        return;
+    }
+    localMissionObjectiveRevision_ =
+        AdvanceNonZero(localMissionObjectiveRevision_);
+    MissionObjectivePayload payload{
+        localEntityId_, localMissionEpoch_, localMissionObjectiveRevision_,
+        fingerprint, objective->text};
+    try {
+        Frame frame;
+        frame.header.type = MessageType::MissionObjective;
+        frame.header.sequence = sequencer_.Next();
+        frame.header.tick = nowMs;
+        frame.payload = EncodeMissionObjective(payload);
+        SendBestEffort(std::move(frame));
+        localMissionObjective_ = std::move(payload);
+        facade_.Log("[MISSION_OBJECTIVE] host objective published");
+    } catch (const std::exception&) {
+        facade_.Log("[MISSION_OBJECTIVE] rejected invalid native objective text");
+    }
+}
+
+void BridgeRuntime::HandleRemoteMissionObjective(
+    const Frame& frame,
+    const MissionObjectivePayload& objective) {
+    if (localSlot_ != PlayerSlot::Guest ||
+        !remoteMissionState_.has_value() ||
+        objective.hostEntityId != remoteMissionState_->hostEntityId ||
+        objective.missionEpoch != remoteMissionState_->missionEpoch) {
+        facade_.Log("[MISSION_OBJECTIVE] rejected objective outside active host mission authority");
+        return;
+    }
+    if (remoteMissionObjective_.has_value() &&
+        objective.missionEpoch == remoteMissionObjective_->missionEpoch &&
+        objective.revision <= remoteMissionObjective_->revision) {
+        return;
+    }
+    remoteMissionObjective_ = objective;
+    facade_.Log("[MISSION_OBJECTIVE] accepted host objective, sender-tick=" +
+        std::to_string(frame.header.tick));
+}
+
+void BridgeRuntime::TickMissionDialogue(
+    const PlayerSlot localSlot,
+    const std::uint64_t nowMs) {
+    if (localSlot == PlayerSlot::Guest) {
+        if (!pendingHostMissionDialogueCue_.has_value() ||
+            nowMs < pendingHostMissionDialogueDueMs_) {
+            return;
+        }
+        const auto cue = *pendingHostMissionDialogueCue_;
+        pendingHostMissionDialogueCue_.reset();
+        pendingHostMissionDialogueDueMs_ = 0U;
+        const auto missionId = remoteMissionProgressionOffer_.has_value()
+            ? remoteMissionProgressionOffer_->missionId
+            : 0U;
+        const auto state = facade_.PresentHostMissionDialogue(
+            missionId, cue.rootId)
+            ? MissionDialogueReadyState::Ready
+            : MissionDialogueReadyState::ProfileUnavailable;
+        SendMissionDialogueReady(cue, state);
+        return;
+    }
+    if (localSlot != PlayerSlot::Host || !localMissionState_.has_value() ||
+        localMissionState_->phase != MissionPhase::Active ||
+        (localMissionState_->flags & static_cast<std::uint16_t>(
+            MissionStateFlag::MissionActive)) == 0U) {
+        return;
+    }
+    if (!localMissionProgressionOffer_.has_value() ||
+        localMissionProgressionOffer_->missionEpoch !=
+            localMissionState_->missionEpoch) {
+        return;
+    }
+    const auto missionId = localMissionProgressionOffer_->missionId;
+    for (const auto& sample : facade_.SampleMissionDialogue(missionId)) {
+        if (sample.profileId == 0U || sample.rootId == 0U ||
+            !sample.rootLoaded || !sample.rootPlaying ||
+            !sample.requiredRolesBound ||
+            !HasCampaignMissionDialogueProfile(missionId, sample.profileId) ||
+            !IsCampaignMissionDialogueRoot(missionId, sample.rootId)) {
+            continue;
+        }
+        const bool isCurrentCue = localMissionDialogueCue_.has_value() &&
+            localMissionDialogueCue_->missionEpoch ==
+                localMissionState_->missionEpoch &&
+            localMissionDialogueCue_->checkpointGeneration ==
+                localMissionState_->checkpointGeneration &&
+            localMissionDialogueCue_->profileId == sample.profileId &&
+            localMissionDialogueCue_->rootId == sample.rootId &&
+            localMissionDialogueCue_->lineIndex == sample.lineIndex;
+        if (isCurrentCue) {
+            const bool guestReady = remoteMissionDialogueReady_.has_value() &&
+                remoteMissionDialogueReady_->dialogueSequence ==
+                    localMissionDialogueCue_->dialogueSequence &&
+                remoteMissionDialogueReady_->state ==
+                    MissionDialogueReadyState::Ready;
+            if (guestReady || nowMs < lastMissionDialogueCueSentMs_ + 1'000U) {
+                continue;
+            }
+            try {
+                Frame retry;
+                retry.header.type = MessageType::MissionDialogueCue;
+                retry.header.sequence = sequencer_.Next();
+                retry.header.tick = nowMs;
+                retry.payload = EncodeMissionDialogueCue(*localMissionDialogueCue_);
+                SendBestEffort(std::move(retry));
+                lastMissionDialogueCueSentMs_ = nowMs;
+                facade_.Log("[MISSION_DIALOGUE] host cue retransmitted while guest presentation is unavailable");
+            } catch (const std::exception&) {
+                facade_.Log("[MISSION_DIALOGUE] host cue retransmission rejected");
+            }
+            return;
+        }
+        MissionDialogueCuePayload cue{
+            localEntityId_, localMissionState_->missionEpoch,
+            localMissionState_->checkpointGeneration,
+            AdvanceNonZero(localMissionDialogueSequence_), sample.profileId,
+            sample.rootId, sample.lineIndex, nowMs + 150U};
+        try {
+            Frame frame;
+            frame.header.type = MessageType::MissionDialogueCue;
+            frame.header.sequence = sequencer_.Next();
+            frame.header.tick = nowMs;
+            frame.payload = EncodeMissionDialogueCue(cue);
+            SendBestEffort(std::move(frame));
+            localMissionDialogueCue_ = cue;
+            lastMissionDialogueCueSentMs_ = nowMs;
+            facade_.Log("[MISSION_DIALOGUE] host cue published");
+            if (diagnostics_) {
+                notificationText_ =
+                    "DIALOGUE CUE p" + std::to_string(cue.profileId) +
+                    " r" + std::to_string(cue.rootId) +
+                    " line " + std::to_string(cue.lineIndex);
+                notificationUntilMs_ = nowMs + 2'500U;
+            }
+        } catch (const std::exception&) {
+            facade_.Log("[MISSION_DIALOGUE] invalid host dialogue observation rejected");
+        }
+        // One cue per tick bounds bandwidth and preserves causal ordering.
+        return;
+    }
+}
+
+void BridgeRuntime::HandleRemoteMissionDialogueCue(
+    const Frame& frame,
+    const MissionDialogueCuePayload& cue) {
+    if (localSlot_ != PlayerSlot::Guest || !remoteMissionState_.has_value() ||
+        !remoteMissionProgressionOffer_.has_value() ||
+        cue.hostEntityId != remoteMissionState_->hostEntityId ||
+        cue.missionEpoch != remoteMissionState_->missionEpoch ||
+        cue.checkpointGeneration != remoteMissionState_->checkpointGeneration ||
+        remoteMissionState_->phase != MissionPhase::Active) {
+        facade_.Log("[MISSION_DIALOGUE] rejected cue outside active host mission");
+        return;
+    }
+    const auto missionId = remoteMissionProgressionOffer_->missionId;
+    if (remoteMissionProgressionOffer_->missionEpoch != cue.missionEpoch ||
+        !HasCampaignMissionDialogueProfile(missionId, cue.profileId) ||
+        !IsCampaignMissionDialogueRoot(missionId, cue.rootId)) {
+        facade_.Log("[MISSION_DIALOGUE] rejected cue for a different mission profile");
+        return;
+    }
+    if (remoteMissionDialogueCue_.has_value() &&
+        cue.dialogueSequence < remoteMissionDialogueCue_->dialogueSequence) {
+        facade_.Log("[MISSION_DIALOGUE] rejected stale cue");
+        return;
+    }
+    if (remoteMissionDialogueCue_.has_value() &&
+        cue.dialogueSequence == remoteMissionDialogueCue_->dialogueSequence &&
+        remoteMissionDialogueReady_.has_value() &&
+        remoteMissionDialogueReady_->dialogueSequence == cue.dialogueSequence &&
+        remoteMissionDialogueReady_->state == MissionDialogueReadyState::Ready) {
+        return;
+    }
+    remoteMissionDialogueCue_ = cue;
+    MissionDialogueReadyState state = MissionDialogueReadyState::ProfileUnavailable;
+    if (!remoteMissionStartBarrierReleased_) {
+        // Host and guest clocks have independent origins. Preserve the
+        // host's intentional lead time as a bounded local delay measured
+        // from the received host frame, rather than treating its raw tick as
+        // an absolute guest timestamp.
+        const auto leadMs = cue.hostStartTick > frame.header.tick
+            ? std::min<std::uint64_t>(cue.hostStartTick - frame.header.tick,
+                  500U)
+            : 0U;
+        pendingHostMissionDialogueCue_ = cue;
+        pendingHostMissionDialogueDueMs_ =
+            facade_.TickMilliseconds() + leadMs;
+        facade_.Log("[MISSION_DIALOGUE] companion-only guest queued local audio presentation");
+        return;
+    } else {
+        for (const auto& sample : facade_.SampleMissionDialogue(missionId)) {
+            if (sample.profileId != cue.profileId || sample.rootId != cue.rootId) {
+                continue;
+            }
+            state = !sample.rootLoaded
+                        ? MissionDialogueReadyState::RootNotLoaded
+                        : !sample.requiredRolesBound
+                              ? MissionDialogueReadyState::ProfileUnavailable
+                              : !sample.rootPlaying
+                                    ? MissionDialogueReadyState::RootNotPlaying
+                                    : sample.lineIndex != cue.lineIndex
+                                          ? MissionDialogueReadyState::StaleCue
+                                          : MissionDialogueReadyState::Ready;
+            break;
+        }
+    }
+    SendMissionDialogueReady(cue, state);
+    (void)frame;
+}
+
+void BridgeRuntime::SendMissionDialogueReady(
+    const MissionDialogueCuePayload& cue,
+    const MissionDialogueReadyState state) {
+    MissionDialogueReadyPayload ready{
+        cue.hostEntityId, cue.missionEpoch, cue.checkpointGeneration,
+        cue.dialogueSequence, cue.profileId, cue.rootId, cue.lineIndex, state};
+    try {
+        Frame response;
+        response.header.type = MessageType::MissionDialogueReady;
+        response.header.sequence = sequencer_.Next();
+        response.header.tick = facade_.TickMilliseconds();
+        response.payload = EncodeMissionDialogueReady(ready);
+        SendBestEffort(std::move(response));
+        facade_.Log(state == MissionDialogueReadyState::Ready
+                        ? "[MISSION_DIALOGUE] guest local conversation ready; vanilla playback retained"
+                        : "[MISSION_DIALOGUE] guest unavailable; vanilla dialogue fallback retained");
+        if (diagnostics_) {
+            notificationText_ = state == MissionDialogueReadyState::Ready
+                                    ? "DIALOGUE READY: local vanilla line matched"
+                                    : "DIALOGUE FALLBACK: local root/line not ready";
+            notificationUntilMs_ = facade_.TickMilliseconds() + 2'500U;
+        }
+    } catch (const std::exception&) {
+        facade_.Log("[MISSION_DIALOGUE] rejected invalid guest readiness");
+    }
+}
+
+void BridgeRuntime::HandleRemoteMissionDialogueReady(
+    const Frame& frame,
+    const MissionDialogueReadyPayload& ready) {
+    if (localSlot_ != PlayerSlot::Host || !localMissionDialogueCue_.has_value() ||
+        ready.hostEntityId != localEntityId_ ||
+        ready.missionEpoch != localMissionDialogueCue_->missionEpoch ||
+        ready.checkpointGeneration != localMissionDialogueCue_->checkpointGeneration ||
+        ready.dialogueSequence != localMissionDialogueCue_->dialogueSequence ||
+        ready.profileId != localMissionDialogueCue_->profileId ||
+        ready.rootId != localMissionDialogueCue_->rootId ||
+        ready.lineIndex != localMissionDialogueCue_->lineIndex) {
+        facade_.Log("[MISSION_DIALOGUE] rejected readiness for a non-current cue");
+        return;
+    }
+    remoteMissionDialogueReady_ = ready;
+    facade_.Log(ready.state == MissionDialogueReadyState::Ready
+                    ? "[MISSION_DIALOGUE] guest confirmed matching vanilla dialogue"
+                    : "[MISSION_DIALOGUE] guest not ready; segment remains vanilla fallback");
+    (void)frame;
 }
 
 void BridgeRuntime::TickMissionLoadingAuthority(
@@ -3875,7 +4486,20 @@ void BridgeRuntime::HandleRemoteMissionState(
         (!remoteMissionState_.has_value() ||
          !isPresentationUnsafe(remoteMissionState_->phase));
     remoteMissionState_ = state;
+    if (checkpointChanged || state.phase != MissionPhase::Active) {
+        // The facade owns only the companion-only conversation and its hidden
+        // proxy actors. Never leave that audio scene alive across a retry,
+        // cutscene/loading transition, mission end, or disconnect replay.
+        facade_.ClearHostMissionDialoguePresentation();
+        pendingHostMissionDialogueCue_.reset();
+        pendingHostMissionDialogueDueMs_ = 0U;
+    }
     if (checkpointChanged) {
+        remoteMissionDialogueCue_.reset();
+        pendingHostMissionDialogueCue_.reset();
+        remoteMissionDialogueReady_.reset();
+        remoteMissionDialogueCueSequences_.Reset();
+        remoteMissionDialogueReadySequences_.Reset();
         remoteMissionCameraState_.reset();
         remoteMissionCameraReceivedAtMs_.reset();
         remoteMissionCameraSequences_.Reset();
@@ -5882,7 +6506,12 @@ void BridgeRuntime::MaintainMissionPresentation(
             true,
             liveHostPosition,
             target,
-            distance});
+            distance,
+            remoteMissionObjective_.has_value() &&
+                    remoteMissionObjective_->missionEpoch ==
+                        remoteMissionState_->missionEpoch
+                ? remoteMissionObjective_->text
+                : std::string{}});
 }
 
 void BridgeRuntime::EmitRuntimeDiagnostics(
@@ -7883,6 +8512,47 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
             HandleRemoteMissionProgression(*progression);
             break;
         }
+        case MessageType::MissionObjective: {
+            const auto objective = DecodeMissionObjective(frame.payload);
+            if (!objective.has_value()) {
+                facade_.Log("[MISSION_OBJECTIVE] rejected malformed objective payload");
+                break;
+            }
+            HandleRemoteMissionObjective(frame, *objective);
+            break;
+        }
+        case MessageType::MissionDialogueCue: {
+            const auto cue = DecodeMissionDialogueCue(frame.payload);
+            if (!cue.has_value()) {
+                facade_.Log("[MISSION_DIALOGUE] rejected malformed cue payload");
+                break;
+            }
+            const auto disposition =
+                remoteMissionDialogueCueSequences_.Observe(frame.header.sequence);
+            if (disposition == SequenceDisposition::Stale ||
+                disposition == SequenceDisposition::Duplicate) {
+                facade_.Log("[MISSION_DIALOGUE] rejected stale cue frame");
+                break;
+            }
+            HandleRemoteMissionDialogueCue(frame, *cue);
+            break;
+        }
+        case MessageType::MissionDialogueReady: {
+            const auto ready = DecodeMissionDialogueReady(frame.payload);
+            if (!ready.has_value()) {
+                facade_.Log("[MISSION_DIALOGUE] rejected malformed readiness payload");
+                break;
+            }
+            const auto disposition =
+                remoteMissionDialogueReadySequences_.Observe(frame.header.sequence);
+            if (disposition == SequenceDisposition::Stale ||
+                disposition == SequenceDisposition::Duplicate) {
+                facade_.Log("[MISSION_DIALOGUE] rejected stale readiness frame");
+                break;
+            }
+            HandleRemoteMissionDialogueReady(frame, *ready);
+            break;
+        }
         case MessageType::PlayerMountState: {
             const auto mount =
                 DecodePlayerMountState(frame.payload);
@@ -7970,6 +8640,30 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
                         }
                         break;
                     case CommandOpcode::RetryCheckpoint:
+                        // A host retry is meaningful on the guest only after
+                        // the exact matching MissionData instance crossed the
+                        // start barrier. Never send a generic checkpoint
+                        // reload into a companion-only/free-roam guest: that
+                        // would act on a private Story VM and defeat the
+                        // host-authority invariant.
+                        if (*localSlot_ != PlayerSlot::Guest ||
+                            !remoteMissionStartBarrier_.has_value() ||
+                            !remoteMissionStartBarrierReleased_ ||
+                            remoteMissionStartBarrierRejected_) {
+                            facade_.Log("[MISSION_RETRY] ignored host retry outside a released matching mission instance");
+                            applyWithFacade = false;
+                            break;
+                        }
+                        if (const auto probe = facade_.ProbeCampaignMission(
+                                remoteMissionStartBarrier_->missionId);
+                            !probe.has_value() ||
+                            probe->missionId !=
+                                remoteMissionStartBarrier_->missionId ||
+                            !probe->active) {
+                            facade_.Log("[MISSION_RETRY] ignored host retry because the exact guest MissionData instance is inactive");
+                            applyWithFacade = false;
+                            break;
+                        }
                         facade_.RequestCheckpointRetry();
                         break;
                     case CommandOpcode::ToggleDiagnostics:
@@ -8396,6 +9090,9 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
         }
         localMissionProgressionOffer_.reset();
         localMissionProgressionStartingCash_.reset();
+        localMissionStartBarrier_.reset();
+        localMissionStartBarrierDeadlineMs_ = 0U;
+        localMissionStartBarrierGuestStarted_ = false;
         guestMissionProgressionEligible_ = false;
         localProgressionMissionId_ = 0U;
         facade_.Log("[MISSION_PROGRESSION] armed progression cleared; companion-only mode retained");
@@ -8403,42 +9100,14 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
     }
     if (command == BridgeCommand::ArmHunt1MissionProgression ||
         command == BridgeCommand::ArmFud1MissionProgression) {
-        const auto missionId = command == BridgeCommand::ArmHunt1MissionProgression
-            ? kHunt1MissionId
-            : kFud1MissionId;
-        const auto definition = FindCampaignMission(missionId);
-        if (!definition.has_value()) return;
-        const auto missionName = definition->scriptName;
         if (localSlot_ != PlayerSlot::Host || !transport_.IsConnected() ||
             !localMissionInitialized_) {
-            facade_.Log("[MISSION_PROGRESSION] " + std::string{missionName} +
-                " preflight rejected: host session is not ready");
+            facade_.Log("[MISSION_PROGRESSION] automatic campaign flow is waiting for a ready host session");
             return;
         }
-        const auto probe = facade_.ProbeCampaignMission(missionId);
-        if (!probe.has_value() || probe->missionId != missionId ||
-            probe->active || !probe->canStart) {
-            facade_.Log("[MISSION_PROGRESSION] " + std::string{missionName} +
-                " preflight rejected: stand at the available mission giver before arming");
-            return;
-        }
-        const auto plannedEpoch = AdvanceNonZero(localMissionEpoch_);
-        const auto eventId =
-            (static_cast<std::uint64_t>(plannedEpoch) << 32U) | 1U;
-        MissionProgressionPayload offer{
-            missionId, plannedEpoch, eventId,
-            MissionProgressionPhase::Offer, 0U};
-        Frame frame;
-        frame.header.type = MessageType::MissionProgression;
-        frame.header.sequence = sequencer_.Next();
-        frame.header.tick = facade_.TickMilliseconds();
-        frame.payload = EncodeMissionProgression(offer);
-        SendBestEffort(std::move(frame));
-        localMissionProgressionOffer_ = offer;
-        localMissionProgressionStartingCash_ = facade_.QueryLocalCashBalance();
-        guestMissionProgressionEligible_ = false;
-        facade_.Log("[MISSION_PROGRESSION] " + std::string{missionName} +
-            " preflight sent; wait for guest eligibility before starting the mission");
+        facade_.Log(command == BridgeCommand::ArmHunt1MissionProgression
+            ? "[MISSION_PROGRESSION] automatic all-campaign detection is enabled; start any available Story mission"
+            : "[MISSION_DIALOGUE] experimental host cues publish only for source-mapped roots; all other lines retain vanilla local audio");
         return;
     }
     if (command == BridgeCommand::SkipCutscene) {
@@ -9128,6 +9797,7 @@ void BridgeRuntime::Stop(const std::string_view reason) noexcept {
     if (!active_) {
         return;
     }
+    facade_.ClearHostMissionDialoguePresentation();
     try {
         if (localSlot_ == PlayerSlot::Host &&
             localMissionCinematicState_.has_value() &&

@@ -116,9 +116,9 @@ std::string_view MenuController::Label(const BridgeCommand command) noexcept {
         case BridgeCommand::EnablePoisonThrowingKnifePamphlet:
             return "Enable Poison Throwing Knife pamphlet (test)";
         case BridgeCommand::ArmHunt1MissionProgression:
-            return "Arm HNT1 / Exit Pursued shared progression (host)";
+            return "Campaign progression: automatic (host)";
         case BridgeCommand::ArmFud1MissionProgression:
-            return "Arm FUD1 shared progression (host)";
+            return "Campaign audio: experimental cue status";
         case BridgeCommand::DisarmMissionProgression:
             return "Clear armed shared progression (host)";
         case BridgeCommand::EmergencyRecover:

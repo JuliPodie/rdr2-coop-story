@@ -410,7 +410,7 @@ internal static class Program
 
     private static Task MissionCinematicProtocolAsync()
     {
-        Check.Equal((ushort)27, ProtocolConstants.Version);
+        Check.Equal((ushort)30, ProtocolConstants.Version);
         Check.Equal((ushort)35, (ushort)MessageType.MissionCinematicState);
         Check.Equal((ushort)36, (ushort)MessageType.MissionCinematicAction);
 
@@ -569,7 +569,7 @@ internal static class Program
 
     private static Task AppearanceAndAnimSceneProtocolAsync()
     {
-        Check.Equal((ushort)27, ProtocolConstants.Version);
+        Check.Equal((ushort)30, ProtocolConstants.Version);
         Check.Equal((ushort)37, (ushort)MessageType.PlayerAppearanceState);
         Check.Equal((ushort)38, (ushort)MessageType.AnimSceneReplicaState);
         Check.Equal((ushort)39, (ushort)MessageType.AnimSceneDefinition);
@@ -1861,7 +1861,7 @@ internal static class Program
 
     private static Task PlayerActionProtocolAsync()
     {
-        Check.Equal((ushort)27, ProtocolConstants.Version);
+        Check.Equal((ushort)30, ProtocolConstants.Version);
         Check.Equal((ushort)30, (ushort)MessageType.PlayerAction);
 
         var guestId = NetEntityId.Create(0x11223344, 2);
@@ -2127,7 +2127,7 @@ internal static class Program
 
     private static Task InteractionAuthorityProtocolAsync()
     {
-        Check.Equal((ushort)27, ProtocolConstants.Version);
+        Check.Equal((ushort)30, ProtocolConstants.Version);
         Check.Equal((ushort)32, (ushort)MessageType.InteractionIntent);
         Check.Equal((ushort)33, (ushort)MessageType.InteractionResult);
         Check.Equal((ushort)34, (ushort)MessageType.RestraintState);
@@ -3150,7 +3150,7 @@ internal static class Program
 
     private static Task AnimationReplicationPayloadsAsync()
     {
-        Check.Equal((ushort)27, ProtocolConstants.Version);
+        Check.Equal((ushort)30, ProtocolConstants.Version);
         Check.Equal((ushort)28, (ushort)MessageType.PlayerAnimationState);
         Check.Equal((ushort)29, (ushort)MessageType.MotionReplicationConfig);
 
@@ -3370,7 +3370,7 @@ internal static class Program
 
     private static Task WorldAndEquipmentAsync()
     {
-        Check.Equal((ushort)27, ProtocolConstants.Version);
+        Check.Equal((ushort)30, ProtocolConstants.Version);
         Check.Equal((ushort)23, (ushort)MessageType.WorldState);
         Check.Equal((ushort)24, (ushort)MessageType.EquipmentState);
         Check.Equal((ushort)25, (ushort)MessageType.PauseVote);
@@ -3733,6 +3733,102 @@ internal static class Program
             SessionRole.Guest, progressionEnvelope));
         Check.False(SidecarRuntime.IsPeerEnvelopeAuthorized(
             SessionRole.Host, progressionEnvelope));
+        var startBarrierProgression = progression with
+        {
+            Phase = MissionProgressionPhase.StartBarrierOpen
+        };
+        var startBarrierEnvelope = progressionEnvelope with
+        {
+            Payload = BinaryPayloadCodec.EncodeMissionProgression(startBarrierProgression)
+        };
+        Check.Equal(startBarrierProgression, BinaryPayloadCodec.DecodeMissionProgression(
+            startBarrierEnvelope.Payload.Span));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, startBarrierEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest, startBarrierEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, startBarrierEnvelope));
+        var guestStartedProgression = progression with
+        {
+            Phase = MissionProgressionPhase.GuestInstanceStarted
+        };
+        var guestStartedEnvelope = progressionEnvelope with
+        {
+            Payload = BinaryPayloadCodec.EncodeMissionProgression(guestStartedProgression)
+        };
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, guestStartedEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Host, guestStartedEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, guestStartedEnvelope));
+        var objective = new MissionObjectivePayload(
+            new NetEntityId(0x0000000700000001UL),
+            7,
+            1,
+            0xCBF29CE484222325UL,
+            "TRACK THE BEAR");
+        var objectiveEnvelope = new ProtocolEnvelope(
+            MessageType.MissionObjective,
+            4,
+            5,
+            BinaryPayloadCodec.EncodeMissionObjective(objective));
+        SidecarRuntime.ValidateBinaryControlPayload(objectiveEnvelope);
+        Check.Equal(objective, BinaryPayloadCodec.DecodeMissionObjective(
+            objectiveEnvelope.Payload.Span));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, objectiveEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest, objectiveEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, objectiveEnvelope));
+        var dialogueCue = new MissionDialogueCuePayload(
+            new NetEntityId(0x0000000700000001UL),
+            7,
+            2,
+            9,
+            101,
+            201,
+            3,
+            5000);
+        var dialogueCueEnvelope = new ProtocolEnvelope(
+            MessageType.MissionDialogueCue,
+            5,
+            6,
+            BinaryPayloadCodec.EncodeMissionDialogueCue(dialogueCue));
+        SidecarRuntime.ValidateBinaryControlPayload(dialogueCueEnvelope);
+        Check.Equal(dialogueCue, BinaryPayloadCodec.DecodeMissionDialogueCue(
+            dialogueCueEnvelope.Payload.Span));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, dialogueCueEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest, dialogueCueEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, dialogueCueEnvelope));
+        var dialogueReady = new MissionDialogueReadyPayload(
+            new NetEntityId(0x0000000700000001UL),
+            7,
+            2,
+            9,
+            101,
+            201,
+            3,
+            MissionDialogueReadyState.Ready);
+        var dialogueReadyEnvelope = new ProtocolEnvelope(
+            MessageType.MissionDialogueReady,
+            6,
+            7,
+            BinaryPayloadCodec.EncodeMissionDialogueReady(dialogueReady));
+        SidecarRuntime.ValidateBinaryControlPayload(dialogueReadyEnvelope);
+        Check.Equal(dialogueReady, BinaryPayloadCodec.DecodeMissionDialogueReady(
+            dialogueReadyEnvelope.Payload.Span));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, dialogueReadyEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Host, dialogueReadyEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, dialogueReadyEnvelope));
         var completionProgression = new MissionProgressionPayload(
             0x2C3469ED,
             7,
@@ -3744,6 +3840,28 @@ internal static class Program
         var decodedCompletionProgression = BinaryPayloadCodec.DecodeMissionProgression(
             BinaryPayloadCodec.EncodeMissionProgression(completionProgression));
         Check.Equal(completionProgression, decodedCompletionProgression);
+        var appliedProgression = new MissionProgressionPayload(
+            0x2C3469ED,
+            7,
+            0x700000001,
+            MissionProgressionPhase.Applied,
+            MissionProgressionFlags.None);
+        var appliedEnvelope = new ProtocolEnvelope(
+            MessageType.MissionProgression,
+            3,
+            4,
+            BinaryPayloadCodec.EncodeMissionProgression(appliedProgression));
+        SidecarRuntime.ValidateBinaryControlPayload(appliedEnvelope);
+        Check.Equal(appliedProgression, BinaryPayloadCodec.DecodeMissionProgression(
+            appliedEnvelope.Payload.Span));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Guest, appliedEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Host, appliedEnvelope));
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, appliedEnvelope));
+        Check.False(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest, appliedEnvelope));
 
         ProtocolEnvelope CommandEnvelope(CommandOpcode opcode) =>
             new(

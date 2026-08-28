@@ -151,6 +151,22 @@ private:
     void TickMissionProgression(
         const LocalPlayerSample& sample,
         std::uint64_t nowMs);
+    void TickMissionObjective(
+        const LocalPlayerSample& sample,
+        std::uint64_t nowMs);
+    void HandleRemoteMissionObjective(
+        const Frame& frame,
+        const MissionObjectivePayload& objective);
+    void TickMissionDialogue(PlayerSlot localSlot, std::uint64_t nowMs);
+    void HandleRemoteMissionDialogueCue(
+        const Frame& frame,
+        const MissionDialogueCuePayload& cue);
+    void HandleRemoteMissionDialogueReady(
+        const Frame& frame,
+        const MissionDialogueReadyPayload& ready);
+    void SendMissionDialogueReady(
+        const MissionDialogueCuePayload& cue,
+        MissionDialogueReadyState state);
     void HandleRemoteMissionProgression(
         const MissionProgressionPayload& payload);
     void TickMissionCinematic(
@@ -297,6 +313,8 @@ private:
     SequenceWindow interactionResultSequences_{};
     SequenceWindow restraintStateSequences_{};
     SequenceWindow remoteMissionSequences_{};
+    SequenceWindow remoteMissionDialogueCueSequences_{};
+    SequenceWindow remoteMissionDialogueReadySequences_{};
     SequenceWindow remoteMissionCameraSequences_{};
     SequenceWindow remoteMissionCinematicSequences_{};
     SequenceWindow remoteMissionCinematicActionSequences_{};
@@ -321,9 +339,40 @@ private:
         pendingRestraintStates_{};
     std::optional<MissionStatePayload> localMissionState_{};
     std::optional<MissionStatePayload> remoteMissionState_{};
+    std::optional<MissionObjectivePayload> localMissionObjective_{};
+    std::optional<MissionObjectivePayload> remoteMissionObjective_{};
+    std::optional<MissionDialogueCuePayload> localMissionDialogueCue_{};
+    std::optional<MissionDialogueCuePayload> remoteMissionDialogueCue_{};
+    std::optional<MissionDialogueCuePayload> pendingHostMissionDialogueCue_{};
+    std::optional<MissionDialogueReadyPayload> remoteMissionDialogueReady_{};
+    std::uint32_t localMissionDialogueSequence_{};
+    std::uint64_t lastMissionDialogueCueSentMs_{};
+    std::uint64_t pendingHostMissionDialogueDueMs_{};
+    std::uint32_t localMissionObjectiveRevision_{};
+    std::uint64_t nextMissionObjectiveSampleMs_{};
     std::optional<MissionProgressionPayload> localMissionProgressionOffer_{};
+    // A mission completion can carry persistent save changes. Retain it for
+    // bounded retransmission until the guest explicitly acknowledges that
+    // its local transaction completed.
+    std::optional<MissionProgressionPayload> localMissionProgressionCompletion_{};
     std::optional<std::int32_t> localMissionProgressionStartingCash_{};
     std::optional<MissionProgressionPayload> remoteMissionProgressionOffer_{};
+    // The host opens this only after the guest has confirmed the exact
+    // MissionData entry. It is a bounded permission to use the guest's own
+    // vanilla prompt, never a general Story-mode exemption.
+    std::optional<MissionProgressionPayload> localMissionStartBarrier_{};
+    std::optional<MissionProgressionPayload> remoteMissionStartBarrier_{};
+    std::uint64_t localMissionStartBarrierDeadlineMs_{};
+    std::uint64_t remoteMissionStartBarrierDeadlineMs_{};
+    // A guest barrier starts guarded. The short verified-idle interval
+    // distinguishes a fresh host-authorized prompt interaction from a local
+    // mission that was already entering when the network barrier arrived.
+    std::uint64_t remoteMissionStartBarrierPromptArmedAtMs_{};
+    bool localMissionStartBarrierGuestStarted_{};
+    bool remoteMissionStartBarrierGuestStarted_{};
+    bool remoteMissionStartBarrierReleased_{};
+    bool remoteMissionStartBarrierRejected_{};
+    std::uint64_t nextGuestMissionInstanceStartedRetryMs_{};
     // This is calculated locally when the guest receives the offer.  A host
     // completion frame may never substitute for that local-save evidence.
     bool remoteMissionProgressionEligible_{};
@@ -333,6 +382,8 @@ private:
     std::optional<std::uint64_t> remoteMissionProgressionAppliedEventId_{};
     std::uint32_t localProgressionMissionId_{};
     bool guestMissionProgressionEligible_{};
+    bool guestMissionProgressionCompletionAcknowledged_{};
+    std::uint64_t nextMissionProgressionCompletionRetryMs_{};
     std::optional<MissionCinematicStatePayload>
         localMissionCinematicState_{};
     std::optional<MissionCinematicStatePayload>

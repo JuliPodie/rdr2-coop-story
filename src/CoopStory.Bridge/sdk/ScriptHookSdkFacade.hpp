@@ -34,6 +34,14 @@ public:
         std::uint32_t revision) noexcept override;
     [[nodiscard]] std::optional<MissionCameraSample> SampleMissionCamera()
         noexcept override;
+    [[nodiscard]] std::optional<MissionObjectiveSample>
+    SampleMissionObjective() noexcept override;
+    [[nodiscard]] std::vector<MissionDialogueSample>
+    SampleMissionDialogue(std::uint32_t missionId) noexcept override;
+    [[nodiscard]] bool PresentHostMissionDialogue(
+        std::uint32_t missionId,
+        std::uint32_t rootId) noexcept override;
+    void ClearHostMissionDialoguePresentation() noexcept override;
     [[nodiscard]] std::optional<AnimSceneReplicaStatePayload>
     SampleHostAnimScene(
         NetEntityId hostEntityId,
@@ -158,7 +166,8 @@ public:
     [[nodiscard]] GuestMissionIsolationStatus MaintainMissionAuthority(
         bool active,
         bool hostMissionActive,
-        bool hostPresentationActive) noexcept override;
+        bool hostPresentationActive,
+        bool allowExpectedLocalMissionInstance = false) noexcept override;
     void MaintainMissionSpectator(bool active) noexcept override;
     void MaintainMissionResumeBarrier(bool active) noexcept override;
     [[nodiscard]] MissionResumePreparation PrepareMissionCinematicResume(
@@ -728,6 +737,10 @@ private:
     bool remoteMissionParticipantHidden_{};
     LocalEntityHandle remoteMissionParticipantPed_{};
     LocalEntityHandle remoteMissionParticipantMount_{};
+    // Bridge-owned hidden actor shells used only by the host-only dialogue
+    // presenter. They are never networked or reused as world replicas.
+    std::array<LocalEntityHandle, 2U> hostMissionDialogueProxyPeds_{};
+    std::string hostMissionDialogueRoot_{};
     bool remoteMissionParticipantWasVisible_{true};
     bool remoteMissionParticipantMountWasVisible_{true};
     EntityRegistry worldEntityReplicas_{};

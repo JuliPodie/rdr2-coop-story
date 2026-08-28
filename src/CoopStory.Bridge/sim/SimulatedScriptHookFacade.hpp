@@ -87,7 +87,8 @@ public:
     [[nodiscard]] GuestMissionIsolationStatus MaintainMissionAuthority(
         bool active,
         bool hostMissionActive,
-        bool hostPresentationActive) noexcept override;
+        bool hostPresentationActive,
+        bool allowExpectedLocalMissionInstance = false) noexcept override;
     void RequestCheckpointRetry() noexcept override;
     void Log(std::string_view text) noexcept override;
     void WaitForNextTick() noexcept override;

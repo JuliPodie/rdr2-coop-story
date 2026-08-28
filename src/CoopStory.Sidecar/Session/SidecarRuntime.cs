@@ -5900,6 +5900,15 @@ public sealed class SidecarRuntime : IAsyncDisposable
             case MessageType.MissionProgression:
                 _ = BinaryPayloadCodec.DecodeMissionProgression(envelope.Payload.Span);
                 break;
+            case MessageType.MissionObjective:
+                _ = BinaryPayloadCodec.DecodeMissionObjective(envelope.Payload.Span);
+                break;
+            case MessageType.MissionDialogueCue:
+                _ = BinaryPayloadCodec.DecodeMissionDialogueCue(envelope.Payload.Span);
+                break;
+            case MessageType.MissionDialogueReady:
+                _ = BinaryPayloadCodec.DecodeMissionDialogueReady(envelope.Payload.Span);
+                break;
             case MessageType.PlayerAppearanceState:
                 _ = BinaryPayloadCodec.DecodePlayerAppearanceState(
                     envelope.Payload.Span);
@@ -6148,11 +6157,23 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 envelope.Payload.Span);
             return localRole switch
             {
-                SessionRole.Host => progression.Phase == MissionProgressionPhase.Eligibility,
-                SessionRole.Guest => progression.Phase is MissionProgressionPhase.Offer or MissionProgressionPhase.Completion,
+                SessionRole.Host => progression.Phase is MissionProgressionPhase.Eligibility or MissionProgressionPhase.Applied or MissionProgressionPhase.GuestInstanceStarted or MissionProgressionPhase.GuestInstanceRejected,
+                SessionRole.Guest => progression.Phase is MissionProgressionPhase.Offer or MissionProgressionPhase.Completion or MissionProgressionPhase.StartBarrierOpen or MissionProgressionPhase.StartBarrierReleased or MissionProgressionPhase.StartBarrierAborted,
                 _ => false
             };
         }
+
+        if (envelope.Type == MessageType.MissionObjective)
+            return localRole == SessionRole.Guest;
+
+        // Dialogue is strictly directional. The cue is a host-owned,
+        // read-only observation; the guest may only return readiness for that
+        // exact tuple. Neither frame can be used to name arbitrary game audio.
+        if (envelope.Type == MessageType.MissionDialogueCue)
+            return localRole == SessionRole.Guest;
+
+        if (envelope.Type == MessageType.MissionDialogueReady)
+            return localRole == SessionRole.Host;
 
         if (envelope.Type == MessageType.PlayerAppearanceState)
         {
@@ -6343,11 +6364,20 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 envelope.Payload.Span);
             return localRole switch
             {
-                SessionRole.Host => progression.Phase is MissionProgressionPhase.Offer or MissionProgressionPhase.Completion,
-                SessionRole.Guest => progression.Phase == MissionProgressionPhase.Eligibility,
+                SessionRole.Host => progression.Phase is MissionProgressionPhase.Offer or MissionProgressionPhase.Completion or MissionProgressionPhase.StartBarrierOpen or MissionProgressionPhase.StartBarrierReleased or MissionProgressionPhase.StartBarrierAborted,
+                SessionRole.Guest => progression.Phase is MissionProgressionPhase.Eligibility or MissionProgressionPhase.Applied or MissionProgressionPhase.GuestInstanceStarted or MissionProgressionPhase.GuestInstanceRejected,
                 _ => false
             };
         }
+
+        if (envelope.Type == MessageType.MissionObjective)
+            return localRole == SessionRole.Host;
+
+        if (envelope.Type == MessageType.MissionDialogueCue)
+            return localRole == SessionRole.Host;
+
+        if (envelope.Type == MessageType.MissionDialogueReady)
+            return localRole == SessionRole.Guest;
 
         if (envelope.Type == MessageType.PlayerAppearanceState)
         {

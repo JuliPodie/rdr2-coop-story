@@ -47,6 +47,112 @@ public static class BinaryPayloadCodec
     public const int CampaignCapabilityAckSize = 16;
     public const int PickupCollectedSize = 24;
     public const int MissionProgressionSize = 24;
+    public const int MissionObjectiveHeaderSize = 28;
+    public const int MaximumMissionObjectiveUtf8Bytes = 192;
+    public const int MissionDialogueCueSize = 40;
+    public const int MissionDialogueReadySize = 32;
+
+    public static byte[] EncodeMissionObjective(MissionObjectivePayload payload)
+    {
+        ValidateMissionObjective(payload);
+        var text = Encoding.UTF8.GetBytes(payload.Text);
+        var bytes = new byte[MissionObjectiveHeaderSize + text.Length];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, payload.HostEntityId.Value);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8), payload.MissionEpoch);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(12), payload.Revision);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(16), payload.Fingerprint);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(24), checked((ushort)text.Length));
+        // bytes 26..27 reserved and left zero.
+        text.CopyTo(bytes.AsSpan(MissionObjectiveHeaderSize));
+        return bytes;
+    }
+
+    public static MissionObjectivePayload DecodeMissionObjective(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < MissionObjectiveHeaderSize)
+            throw new ProtocolException("Mission objective payload is truncated.");
+        var textLength = BinaryPrimitives.ReadUInt16LittleEndian(payload[24..]);
+        if (payload[26] != 0 || payload[27] != 0 ||
+            textLength == 0 || textLength > MaximumMissionObjectiveUtf8Bytes ||
+            payload.Length != MissionObjectiveHeaderSize + textLength)
+            throw new ProtocolException("Mission objective payload length is invalid.");
+        var result = new MissionObjectivePayload(
+            new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[8..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]),
+            BinaryPrimitives.ReadUInt64LittleEndian(payload[16..]),
+            Encoding.UTF8.GetString(payload[MissionObjectiveHeaderSize..]));
+        ValidateMissionObjective(result);
+        return result;
+    }
+
+    public static byte[] EncodeMissionDialogueCue(MissionDialogueCuePayload payload)
+    {
+        ValidateMissionDialogueCue(payload);
+        var bytes = new byte[MissionDialogueCueSize];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, payload.HostEntityId.Value);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8), payload.MissionEpoch);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(12), payload.CheckpointGeneration);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16), payload.DialogueSequence);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(20), payload.ProfileId);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(24), payload.RootId);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(28), payload.LineIndex);
+        // bytes 30..31 are reserved and left zero.
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(32), payload.HostStartTick);
+        return bytes;
+    }
+
+    public static MissionDialogueCuePayload DecodeMissionDialogueCue(ReadOnlySpan<byte> payload)
+    {
+        RequireLength(payload, MissionDialogueCueSize, nameof(MissionDialogueCuePayload));
+        if (BinaryPrimitives.ReadUInt16LittleEndian(payload[30..]) != 0)
+            throw new ProtocolException("Mission dialogue cue reserved bytes must be zero.");
+        var result = new MissionDialogueCuePayload(
+            new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[8..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[16..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[20..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[24..]),
+            BinaryPrimitives.ReadUInt16LittleEndian(payload[28..]),
+            BinaryPrimitives.ReadUInt64LittleEndian(payload[32..]));
+        ValidateMissionDialogueCue(result);
+        return result;
+    }
+
+    public static byte[] EncodeMissionDialogueReady(MissionDialogueReadyPayload payload)
+    {
+        ValidateMissionDialogueReady(payload);
+        var bytes = new byte[MissionDialogueReadySize];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, payload.HostEntityId.Value);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8), payload.MissionEpoch);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(12), payload.CheckpointGeneration);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16), payload.DialogueSequence);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(20), payload.ProfileId);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(24), payload.RootId);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(28), payload.LineIndex);
+        bytes[30] = (byte)payload.State;
+        // byte 31 is reserved and left zero.
+        return bytes;
+    }
+
+    public static MissionDialogueReadyPayload DecodeMissionDialogueReady(ReadOnlySpan<byte> payload)
+    {
+        RequireLength(payload, MissionDialogueReadySize, nameof(MissionDialogueReadyPayload));
+        if (payload[31] != 0)
+            throw new ProtocolException("Mission dialogue readiness reserved byte must be zero.");
+        var result = new MissionDialogueReadyPayload(
+            new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[8..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[16..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[20..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[24..]),
+            BinaryPrimitives.ReadUInt16LittleEndian(payload[28..]),
+            (MissionDialogueReadyState)payload[30]);
+        ValidateMissionDialogueReady(result);
+        return result;
+    }
 
     public static byte[] EncodeMissionProgression(MissionProgressionPayload payload)
     {
@@ -2797,6 +2903,7 @@ public static class BinaryPayloadCodec
             MissionProgressionFlags.GuestCanStart |
             MissionProgressionFlags.VerifiedCompletionMapping;
         var completion = payload.Phase == MissionProgressionPhase.Completion;
+        var applied = payload.Phase == MissionProgressionPhase.Applied;
         var appliesMapping =
             (payload.Flags & MissionProgressionFlags.VerifiedCompletionMapping) != 0;
         if (payload.MissionId == 0 || payload.MissionEpoch == 0 ||
@@ -2805,11 +2912,39 @@ public static class BinaryPayloadCodec
             (!completion && payload.CompletionRating != 0) ||
             (!completion && payload.CompletionCashAward != 0) ||
             payload.CompletionCashAward < 0 ||
-            (appliesMapping && (!completion || payload.CompletionRating is < 2 or > 5)))
+            (appliesMapping && (!completion || payload.CompletionRating is < 2 or > 5)) ||
+            (applied && payload.Flags != MissionProgressionFlags.None))
         {
             throw new ProtocolException(
                 "Mission progression requires a catalog mission, epoch, event and valid flags.");
         }
+    }
+
+    private static void ValidateMissionObjective(MissionObjectivePayload payload)
+    {
+        if (!payload.HostEntityId.IsValid || payload.MissionEpoch == 0 ||
+            payload.Revision == 0 || payload.Fingerprint == 0 ||
+            string.IsNullOrWhiteSpace(payload.Text) ||
+            Encoding.UTF8.GetByteCount(payload.Text) > MaximumMissionObjectiveUtf8Bytes ||
+            payload.Text.Any(char.IsControl))
+            throw new ProtocolException("Mission objective payload is invalid.");
+    }
+
+    private static void ValidateMissionDialogueCue(MissionDialogueCuePayload payload)
+    {
+        if (!payload.HostEntityId.IsValid || payload.MissionEpoch == 0 ||
+            payload.CheckpointGeneration == 0 || payload.DialogueSequence == 0 ||
+            payload.ProfileId == 0 || payload.RootId == 0 || payload.HostStartTick == 0)
+            throw new ProtocolException("Mission dialogue cue payload is invalid.");
+    }
+
+    private static void ValidateMissionDialogueReady(MissionDialogueReadyPayload payload)
+    {
+        if (!payload.HostEntityId.IsValid || payload.MissionEpoch == 0 ||
+            payload.CheckpointGeneration == 0 || payload.DialogueSequence == 0 ||
+            payload.ProfileId == 0 || payload.RootId == 0 ||
+            !Enum.IsDefined(payload.State))
+            throw new ProtocolException("Mission dialogue readiness payload is invalid.");
     }
 
     private static void ValidateCampaignCapabilityAck(CampaignCapabilityAckPayload payload)

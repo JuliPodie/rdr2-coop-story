@@ -12,7 +12,7 @@
 namespace coopstory::bridge {
 
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
-inline constexpr std::uint16_t kProtocolVersion = 27U;
+inline constexpr std::uint16_t kProtocolVersion = 30U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
@@ -62,6 +62,14 @@ enum class MessageType : std::uint16_t {
     CampaignCapabilityAck = 42,
     PickupCollected = 43,
     MissionProgression = 44,
+    MissionObjective = 45,
+    // Host -> guest: a read-only observation of an admitted local Story
+    // conversation. A companion-only guest may present the same catalogued
+    // root with bridge-owned hidden voice proxies; it never skips or mutates
+    // a guest Story mission conversation.
+    MissionDialogueCue = 46,
+    // Guest -> host: readiness/diagnostic for the exact cue identity.
+    MissionDialogueReady = 47,
 };
 
 [[nodiscard]] bool IsKnownMessageType(std::uint16_t value) noexcept;
@@ -1095,6 +1103,19 @@ enum class MissionProgressionPhase : std::uint8_t {
     Offer = 1,
     Eligibility = 2,
     Completion = 3,
+    // Guest acknowledgement that the idempotent MissionData/reward
+    // transaction has persisted locally. It carries no save data itself.
+    Applied = 4,
+    // The host permits one short, exact-ID guest Story mission start window.
+    StartBarrierOpen = 5,
+    // The guest has observed the exact locally active MissionData entry.
+    GuestInstanceStarted = 6,
+    // Host acknowledgement that the matching instance entered the barrier.
+    StartBarrierReleased = 7,
+    // The guest rejected the window or observed a mismatched local mission.
+    GuestInstanceRejected = 8,
+    // Host closed the guest start window after a rejection or timeout.
+    StartBarrierAborted = 9,
 };
 enum class MissionProgressionFlag : std::uint8_t {
     GuestCanStart = 1U << 0U,
@@ -1120,6 +1141,71 @@ inline constexpr std::size_t kMissionProgressionPayloadSize = 24U;
 [[nodiscard]] std::vector<std::uint8_t> EncodeMissionProgression(
     const MissionProgressionPayload& payload);
 [[nodiscard]] std::optional<MissionProgressionPayload> DecodeMissionProgression(
+std::span<const std::uint8_t> bytes);
+// Presentation-only host objective. It contains a bounded UTF-8 line from
+// UILOG and no script globals, pointers, save data, or guest-authored state.
+struct MissionObjectivePayload final {
+    NetEntityId hostEntityId{};
+    std::uint32_t missionEpoch{};
+    std::uint32_t revision{};
+    std::uint64_t fingerprint{};
+    std::string text{};
+    [[nodiscard]] constexpr bool operator==(
+        const MissionObjectivePayload&) const noexcept = default;
+};
+inline constexpr std::size_t kMissionObjectiveHeaderSize = 28U;
+inline constexpr std::size_t kMaximumMissionObjectiveUtf8Bytes = 192U;
+[[nodiscard]] std::vector<std::uint8_t> EncodeMissionObjective(
+    const MissionObjectivePayload& payload);
+[[nodiscard]] std::optional<MissionObjectivePayload> DecodeMissionObjective(
+    std::span<const std::uint8_t> bytes);
+
+// Scripted-conversation roots are represented by catalog-owned numeric IDs,
+// never arbitrary strings supplied by a peer. The tuple identifies a single
+// observation within a host Story mission/checkpoint instance.
+struct MissionDialogueCuePayload final {
+    NetEntityId hostEntityId{};
+    std::uint32_t missionEpoch{};
+    std::uint32_t checkpointGeneration{};
+    std::uint32_t dialogueSequence{};
+    std::uint32_t profileId{};
+    std::uint32_t rootId{};
+    std::uint16_t lineIndex{};
+    std::uint64_t hostStartTick{};
+    [[nodiscard]] constexpr bool operator==(
+        const MissionDialogueCuePayload&) const noexcept = default;
+};
+inline constexpr std::size_t kMissionDialogueCuePayloadSize = 40U;
+[[nodiscard]] std::vector<std::uint8_t> EncodeMissionDialogueCue(
+    const MissionDialogueCuePayload& payload);
+[[nodiscard]] std::optional<MissionDialogueCuePayload> DecodeMissionDialogueCue(
+    std::span<const std::uint8_t> bytes);
+
+enum class MissionDialogueReadyState : std::uint8_t {
+    Ready = 1,
+    RootNotLoaded = 2,
+    RootNotPlaying = 3,
+    MissionMismatch = 4,
+    StaleCue = 5,
+    ProfileUnavailable = 6,
+};
+
+struct MissionDialogueReadyPayload final {
+    NetEntityId hostEntityId{};
+    std::uint32_t missionEpoch{};
+    std::uint32_t checkpointGeneration{};
+    std::uint32_t dialogueSequence{};
+    std::uint32_t profileId{};
+    std::uint32_t rootId{};
+    std::uint16_t lineIndex{};
+    MissionDialogueReadyState state{MissionDialogueReadyState::Ready};
+    [[nodiscard]] constexpr bool operator==(
+        const MissionDialogueReadyPayload&) const noexcept = default;
+};
+inline constexpr std::size_t kMissionDialogueReadyPayloadSize = 32U;
+[[nodiscard]] std::vector<std::uint8_t> EncodeMissionDialogueReady(
+    const MissionDialogueReadyPayload& payload);
+[[nodiscard]] std::optional<MissionDialogueReadyPayload> DecodeMissionDialogueReady(
     std::span<const std::uint8_t> bytes);
 inline constexpr std::size_t kPickupCollectedPayloadSize = 24U;
 [[nodiscard]] std::vector<std::uint8_t> EncodePickupCollected(const PickupCollectedPayload& payload);

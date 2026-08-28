@@ -60,7 +60,7 @@ void FrameCodecRoundTrip() {
     CHECK(bytes[1] == static_cast<std::uint8_t>('2'));
     CHECK(bytes[2] == static_cast<std::uint8_t>('C'));
     CHECK(bytes[3] == static_cast<std::uint8_t>('P'));
-    CHECK(bytes[4] == 27U);
+    CHECK(bytes[4] == 30U);
     CHECK(bytes[5] == 0U);
     CHECK(bytes[6] == 4U);
     CHECK(bytes[7] == 0U);
@@ -184,9 +184,19 @@ void CampaignMissionCatalogIsExplicitAndBound() {
     CHECK(dst1Rewards[1].recordHash ==
         CampaignMissionId("WEAPON_THROWN_THROWING_KNIVES"));
     const auto ind3Rewards = CampaignMissionRewards(CampaignMissionId("IND3"));
-    CHECK(ind3Rewards.size() == 1U);
+    CHECK(ind3Rewards.size() == 3U);
+    CHECK(ind3Rewards[0].binding ==
+        CampaignMissionRewardBinding::WeaponShopEligibility);
     CHECK(ind3Rewards[0].recordHash ==
         CampaignMissionId("WEAPON_SHOTGUN_SEMIAUTO"));
+    CHECK(ind3Rewards[1].binding ==
+        CampaignMissionRewardBinding::WeaponShopEligibility);
+    CHECK(ind3Rewards[1].recordHash ==
+        CampaignMissionId("WEAPON_REVOLVER_DOUBLEACTION_GAMBLER"));
+    CHECK(ind3Rewards[2].binding ==
+        CampaignMissionRewardBinding::InventoryItem);
+    CHECK(ind3Rewards[2].recordHash ==
+        CampaignMissionId("PROVISION_POCKET_WATCH_REUTLINGE"));
     const auto mud4Rewards = CampaignMissionRewards(CampaignMissionId("MUD4"));
     CHECK(mud4Rewards.size() == 1U);
     CHECK(mud4Rewards[0].recordHash ==
@@ -207,6 +217,34 @@ void CampaignMissionCatalogIsExplicitAndBound() {
         CampaignMissionRewardBinding::WeaponShopEligibility);
     CHECK(gry1Rewards[0].recordHash ==
         CampaignMissionId("WEAPON_REPEATER_EVANS"));
+    const auto utp2Rewards = CampaignMissionRewards(CampaignMissionId("UTP2"));
+    CHECK(utp2Rewards.size() == 1U);
+    CHECK(utp2Rewards[0].binding ==
+        CampaignMissionRewardBinding::WeaponOwnership);
+    CHECK(utp2Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_REPEATER_LANCASTER"));
+    const auto mud6Rewards = CampaignMissionRewards(CampaignMissionId("MUD6"));
+    CHECK(mud6Rewards.size() == 1U);
+    CHECK(mud6Rewards[0].binding ==
+        CampaignMissionRewardBinding::WeaponShopEligibility);
+    CHECK(mud6Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_SHOTGUN_PUMP"));
+    const auto gng3Rewards = CampaignMissionRewards(CampaignMissionId("GNG3"));
+    CHECK(gng3Rewards.size() == 1U);
+    CHECK(gng3Rewards[0].binding ==
+        CampaignMissionRewardBinding::WeaponShopEligibility);
+    CHECK(gng3Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_SHOTGUN_REPEATING"));
+    const auto dst5Rewards = CampaignMissionRewards(CampaignMissionId("DST5"));
+    CHECK(dst5Rewards.size() == 2U);
+    CHECK(dst5Rewards[0].binding ==
+        CampaignMissionRewardBinding::WeaponOwnership);
+    CHECK(dst5Rewards[0].recordHash ==
+        CampaignMissionId("WEAPON_SNIPERRIFLE_CARCANO"));
+    CHECK(dst5Rewards[1].binding ==
+        CampaignMissionRewardBinding::WeaponShopEligibility);
+    CHECK(dst5Rewards[1].recordHash ==
+        CampaignMissionId("WEAPON_REPEATER_LITCHFIELD"));
     const auto hunt1Rewards = CampaignMissionRewards(kHunt1MissionId);
     CHECK(hunt1Rewards.size() == 2U);
     CHECK(hunt1Rewards[0].binding ==
@@ -224,18 +262,52 @@ void CampaignMissionCatalogIsExplicitAndBound() {
               CampaignMissionRewardBinding::UnlockEntitlement) == 5U);
     CHECK(static_cast<std::uint8_t>(
               CampaignMissionRewardBinding::WeaponShopEligibility) == 6U);
-    CHECK(std::size(kCampaignMissionCatalog) > 2U);
+    // init_all_sp registers 79 MissionData Story missions. RABI1 is a
+    // separate supported MissionData entry, so the complete guest campaign
+    // catalogue deliberately contains all 80 exact IDs. Keep this assertion
+    // tight: silently dropping a mission would make its guest progression
+    // companion-only without any compile or protocol failure.
+    CHECK(std::size(kCampaignMissionCatalog) == 80U);
     for (std::size_t index{}; index < std::size(kCampaignMissionCatalog); ++index) {
         const auto& definition = kCampaignMissionCatalog[index];
         CHECK(definition.missionId == CampaignMissionId(definition.scriptName));
         CHECK(!definition.runtimeScriptName.empty());
         CHECK(HasVerifiedCampaignCompletionMapping(definition.missionId));
+        CHECK(HasCampaignMissionDialogueProfile(
+            definition.missionId,
+            CampaignMissionDialogueProfileId(definition.missionId)));
+        // Every explicit reward must be concrete and have an amount shape the
+        // facade can apply deterministically. This catches an accidentally
+        // blank record before it could reach a guest save.
+        for (const auto& reward : definition.rewards) {
+            CHECK(reward.recordHash != 0U);
+            switch (reward.binding) {
+                case CampaignMissionRewardBinding::WeaponOwnership:
+                    break;  // Binoculars intentionally carry zero ammo.
+                case CampaignMissionRewardBinding::InventoryItem:
+                    CHECK(reward.amount > 0U);
+                    break;
+                case CampaignMissionRewardBinding::UnlockVisible:
+                case CampaignMissionRewardBinding::RecipeUnlock:
+                case CampaignMissionRewardBinding::UnlockEntitlement:
+                case CampaignMissionRewardBinding::WeaponShopEligibility:
+                    CHECK(reward.amount == 0U);
+                    break;
+            }
+        }
         for (std::size_t other = index + 1U;
              other < std::size(kCampaignMissionCatalog);
              ++other) {
             CHECK(definition.missionId != kCampaignMissionCatalog[other].missionId);
         }
     }
+    const auto huntRoots = CampaignMissionDialogueRoots(kHunt1MissionId);
+    CHECK(huntRoots.size() == 4U);
+    CHECK(IsCampaignMissionDialogueRoot(
+        kHunt1MissionId, CampaignMissionId("RH1_TRACK_CHAT")));
+    CHECK(!IsCampaignMissionDialogueRoot(
+        kHunt1MissionId, CampaignMissionId("FUD1_FISHTALK1")));
+    CHECK(CampaignMissionDialogueRoots(CampaignMissionId("WNT1")).empty());
     CHECK(!FindCampaignMission(0xFFFFFFFFU).has_value());
 }
 
@@ -887,6 +959,44 @@ void PayloadContracts() {
         DecodeMissionProgression(completionProgressionBytes);
     CHECK(decodedCompletionProgression.has_value());
     CHECK(*decodedCompletionProgression == completionProgression);
+    const MissionProgressionPayload startBarrierProgression{
+        0x2C3469EDU, 7U, 0x700000001ULL,
+        MissionProgressionPhase::StartBarrierOpen, 0U};
+    const auto startBarrierBytes =
+        EncodeMissionProgression(startBarrierProgression);
+    const auto decodedStartBarrier =
+        DecodeMissionProgression(startBarrierBytes);
+    CHECK(decodedStartBarrier.has_value());
+    CHECK(*decodedStartBarrier == startBarrierProgression);
+    const MissionObjectivePayload objective{
+        NetEntityId::Compose(7U, 1U), 7U, 1U,
+        0xCBF29CE484222325ULL, "TRACK THE BEAR"};
+    const auto objectiveBytes = EncodeMissionObjective(objective);
+    const auto decodedObjective = DecodeMissionObjective(objectiveBytes);
+    CHECK(decodedObjective.has_value());
+    CHECK(*decodedObjective == objective);
+    const MissionDialogueCuePayload dialogueCue{
+        NetEntityId::Compose(7U, 1U), 7U, 2U, 9U, 101U, 201U, 3U,
+        5000ULL};
+    const auto dialogueCueBytes = EncodeMissionDialogueCue(dialogueCue);
+    CHECK(dialogueCueBytes.size() == kMissionDialogueCuePayloadSize);
+    const auto decodedDialogueCue = DecodeMissionDialogueCue(dialogueCueBytes);
+    CHECK(decodedDialogueCue.has_value());
+    CHECK(*decodedDialogueCue == dialogueCue);
+    auto dialogueCueWithReserved = dialogueCueBytes;
+    dialogueCueWithReserved[30U] = 1U;
+    CHECK(!DecodeMissionDialogueCue(dialogueCueWithReserved).has_value());
+    const MissionDialogueReadyPayload dialogueReady{
+        NetEntityId::Compose(7U, 1U), 7U, 2U, 9U, 101U, 201U, 3U,
+        MissionDialogueReadyState::Ready};
+    const auto dialogueReadyBytes = EncodeMissionDialogueReady(dialogueReady);
+    CHECK(dialogueReadyBytes.size() == kMissionDialogueReadyPayloadSize);
+    const auto decodedDialogueReady = DecodeMissionDialogueReady(dialogueReadyBytes);
+    CHECK(decodedDialogueReady.has_value());
+    CHECK(*decodedDialogueReady == dialogueReady);
+    auto invalidDialogueReady = dialogueReadyBytes;
+    invalidDialogueReady[30U] = 0U;
+    CHECK(!DecodeMissionDialogueReady(invalidDialogueReady).has_value());
     auto invalidCompletionProgression = completionProgression;
     invalidCompletionProgression.completionRating = 1U;
     bool invalidCompletionRejected{};
@@ -1475,7 +1585,7 @@ void PayloadContracts() {
 }
 
 void AnimationReplicationPayloadContracts() {
-    CHECK(kProtocolVersion == 27U);
+    CHECK(kProtocolVersion == 30U);
     CHECK(
         static_cast<std::uint16_t>(MessageType::PlayerAnimationState) ==
         28U);
@@ -3234,6 +3344,26 @@ public:
     SampleMissionCamera() noexcept override {
         return sampledMissionCamera;
     }
+    std::optional<MissionObjectiveSample>
+    SampleMissionObjective() noexcept override {
+        return sampledMissionObjective;
+    }
+    std::vector<MissionDialogueSample>
+    SampleMissionDialogue(const std::uint32_t missionId) noexcept override {
+        (void)missionId;
+        return sampledMissionDialogue;
+    }
+    bool PresentHostMissionDialogue(
+        const std::uint32_t missionId,
+        const std::uint32_t rootId) noexcept override {
+        ++hostMissionDialoguePresentationCount;
+        presentedHostMissionDialogueMissionId = missionId;
+        presentedHostMissionDialogueRootId = rootId;
+        return presentHostMissionDialogueResult;
+    }
+    void ClearHostMissionDialoguePresentation() noexcept override {
+        ++clearHostMissionDialoguePresentationCount;
+    }
     std::optional<AnimSceneReplicaStatePayload>
     SampleHostAnimScene(
         const NetEntityId hostEntityId,
@@ -3551,12 +3681,15 @@ public:
     GuestMissionIsolationStatus MaintainMissionAuthority(
         const bool active,
         const bool hostMissionActive,
-        const bool hostPresentationActive) noexcept override {
+        const bool hostPresentationActive,
+        const bool allowExpectedLocalMissionInstance = false) noexcept override {
         missionAuthorityActive = active;
         hostMissionAuthorityActive =
             active && hostMissionActive;
         hostMissionPresentationActive =
             active && hostPresentationActive;
+        expectedLocalMissionInstanceAllowed =
+            active && allowExpectedLocalMissionInstance;
         ++missionAuthorityCalls;
         missionAuthorityStates.push_back(active);
         missionAuthorityHostMissionStates.push_back(
@@ -3569,7 +3702,7 @@ public:
             return {};
         }
         auto status = missionIsolationStatus;
-        status.missionGateAsserted =
+        status.missionGateAsserted = !allowExpectedLocalMissionInstance &&
             ShouldAssertGuestMissionGate(
                 active,
                 hostMissionActive,
@@ -3687,6 +3820,13 @@ public:
     bool sampleAvailable{true};
     std::optional<PlayerAppearanceStatePayload> sampledAppearance{};
     std::optional<MissionCameraSample> sampledMissionCamera{};
+    std::optional<MissionObjectiveSample> sampledMissionObjective{};
+    std::vector<MissionDialogueSample> sampledMissionDialogue{};
+    bool presentHostMissionDialogueResult{};
+    std::size_t hostMissionDialoguePresentationCount{};
+    std::size_t clearHostMissionDialoguePresentationCount{};
+    std::uint32_t presentedHostMissionDialogueMissionId{};
+    std::uint32_t presentedHostMissionDialogueRootId{};
     std::optional<AnimSceneReplicaStatePayload> sampledAnimScene{};
     std::optional<LocalEntityHandle> sampledAnimSceneLocalHandle{};
     std::vector<CapturedAnimSceneDefinition>
@@ -3766,6 +3906,7 @@ public:
     bool missionAuthorityActive{};
     bool hostMissionAuthorityActive{};
     bool hostMissionPresentationActive{};
+    bool expectedLocalMissionInstanceAllowed{};
     bool missionGateAsserted{};
     std::vector<bool> missionGateStates{};
     std::vector<bool> missionAuthorityStates{};
@@ -4000,6 +4141,29 @@ LastSentMissionProgression(const TestTransport& transport) {
         if (frame->header.type != MessageType::MissionProgression) continue;
         if (const auto payload = DecodeMissionProgression(frame->payload);
             payload.has_value()) return payload;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<MissionObjectivePayload>
+LastSentMissionObjective(const TestTransport& transport) {
+    for (auto frame = transport.sent.rbegin();
+         frame != transport.sent.rend();
+         ++frame) {
+        if (frame->header.type != MessageType::MissionObjective) continue;
+        if (const auto payload = DecodeMissionObjective(frame->payload);
+            payload.has_value()) return payload;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<MissionDialogueCuePayload>
+LastSentMissionDialogueCue(const TestTransport& transport) {
+    for (auto frame = transport.sent.rbegin();
+         frame != transport.sent.rend(); ++frame) {
+        if (frame->header.type != MessageType::MissionDialogueCue) continue;
+        if (const auto cue = DecodeMissionDialogueCue(frame->payload);
+            cue.has_value()) return cue;
     }
     return std::nullopt;
 }
@@ -5817,6 +5981,72 @@ void RuntimeHunt1MissionProgressionHandshake() {
     hostTransport.inbound.push_back(std::move(eligible));
     host.Tick();
     CHECK(HasLog(hostFacade, "host accepted guest mission eligibility"));
+    const auto barrier = LastSentMissionProgression(hostTransport);
+    CHECK(barrier.has_value());
+    CHECK(barrier->phase == MissionProgressionPhase::StartBarrierOpen);
+    CHECK(barrier->missionId == kHunt1);
+    CHECK(barrier->eventId == offer->eventId);
+
+    // The host has already entered HUNT1; only now may the eligible guest
+    // reach its own matching vanilla prompt. A locally active different
+    // MissionData entry would be rejected by the runtime instead.
+    Frame openBarrier;
+    openBarrier.header.type = MessageType::MissionProgression;
+    openBarrier.header.sequence = ++guestTransport.inboundSequence;
+    openBarrier.header.tick = guestFacade.tick;
+    openBarrier.payload = EncodeMissionProgression(*barrier);
+    guestTransport.inbound.push_back(std::move(openBarrier));
+    guest.Tick();
+    CHECK(HasLog(guestFacade, "verifying idle state"));
+    // The guest's marker remains guarded for a short verified-idle interval.
+    // A prompt interaction that began before the network barrier must never
+    // be accepted retroactively as a synchronized start.
+    CHECK(!guestFacade.expectedLocalMissionInstanceAllowed);
+    guestFacade.tick += 250U;
+    guest.Tick();
+    CHECK(guestFacade.expectedLocalMissionInstanceAllowed);
+    guestTransport.sent.clear();
+    guestFacade.sample.missionActive = true;
+    guestFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, true, false, false, 0U};
+    guestFacade.tick += 16U;
+    guest.Tick();
+    const auto guestStarted = LastSentMissionProgression(guestTransport);
+    CHECK(guestStarted.has_value());
+    CHECK(guestStarted->phase == MissionProgressionPhase::GuestInstanceStarted);
+    CHECK(guestStarted->eventId == offer->eventId);
+
+    Frame guestStartedFrame;
+    guestStartedFrame.header.type = MessageType::MissionProgression;
+    guestStartedFrame.header.sequence = ++hostTransport.inboundSequence;
+    guestStartedFrame.header.tick = hostFacade.tick;
+    guestStartedFrame.payload = EncodeMissionProgression(*guestStarted);
+    hostTransport.inbound.push_back(std::move(guestStartedFrame));
+    host.Tick();
+    const auto released = LastSentMissionProgression(hostTransport);
+    CHECK(released.has_value());
+    CHECK(released->phase == MissionProgressionPhase::StartBarrierReleased);
+
+    Frame releasedFrame;
+    releasedFrame.header.type = MessageType::MissionProgression;
+    releasedFrame.header.sequence = ++guestTransport.inboundSequence;
+    releasedFrame.header.tick = guestFacade.tick;
+    releasedFrame.payload = EncodeMissionProgression(*released);
+    guestTransport.inbound.push_back(std::move(releasedFrame));
+    guest.Tick();
+    CHECK(HasLog(guestFacade, "host acknowledged matching guest mission instance"));
+
+    // Checkpoint retry remains host-selected. Once the exact guest instance
+    // has crossed the barrier, the authenticated host command is the only
+    // path that may request the guest's corresponding vanilla retry.
+    Frame hostRetry;
+    hostRetry.header.type = MessageType::Command;
+    hostRetry.header.sequence = ++guestTransport.inboundSequence;
+    hostRetry.header.tick = guestFacade.tick;
+    hostRetry.payload = EncodeCommand(CommandPayload{
+        CommandOpcode::RetryCheckpoint, 0U, {}, {}, 0.0F, 0.0F});
+    guestTransport.inbound.push_back(std::move(hostRetry));
+    guest.Tick();
+    CHECK(guestFacade.retryCount == 1U);
 
     hostTransport.sent.clear();
     hostFacade.sample.missionActive = false;
@@ -5832,6 +6062,15 @@ void RuntimeHunt1MissionProgressionHandshake() {
         MissionProgressionFlag::VerifiedCompletionMapping)) != 0U);
     CHECK(completion->completionRating == 4U);
     CHECK(completion->completionCashAward == 140);
+
+    // A dropped completion is retried until the guest records the exact
+    // transaction. The retry reuses the event identity, so it is safe.
+    hostTransport.sent.clear();
+    hostFacade.tick += 1'000U;
+    host.Tick();
+    const auto retransmittedCompletion = LastSentMissionProgression(hostTransport);
+    CHECK(retransmittedCompletion.has_value());
+    CHECK(*retransmittedCompletion == *completion);
 
     // A future allow-listed save mapping is still constrained by the guest's
     // own preflight evidence and is exactly-once even if the completion is
@@ -5855,6 +6094,24 @@ void RuntimeHunt1MissionProgressionHandshake() {
     CHECK(guestFacade.campaignMissionCashApplyCount == 1U);
     CHECK(guestFacade.appliedCampaignMissionCashEventId == offer->eventId);
     CHECK(guestFacade.appliedCampaignMissionCashAmount == 140);
+    const auto applied = LastSentMissionProgression(guestTransport);
+    CHECK(applied.has_value());
+    CHECK(applied->phase == MissionProgressionPhase::Applied);
+    CHECK(applied->missionId == offer->missionId);
+    CHECK(applied->eventId == offer->eventId);
+
+    Frame appliedFrame;
+    appliedFrame.header.type = MessageType::MissionProgression;
+    appliedFrame.header.sequence = ++hostTransport.inboundSequence;
+    appliedFrame.header.tick = hostFacade.tick;
+    appliedFrame.payload = EncodeMissionProgression(*applied);
+    hostTransport.inbound.push_back(std::move(appliedFrame));
+    host.Tick();
+    CHECK(HasLog(hostFacade, "guest acknowledged durable completion mapping"));
+    hostTransport.sent.clear();
+    hostFacade.tick += 2'000U;
+    host.Tick();
+    CHECK(!LastSentMissionProgression(hostTransport).has_value());
 
     mappedCompletion.header.sequence = ++guestTransport.inboundSequence;
     guestTransport.inbound.push_back(std::move(mappedCompletion));
@@ -5887,15 +6144,20 @@ void RuntimeHunt1MissionProgressionHandshake() {
         static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping),
         4U, 140});
     guestTransport.inbound.push_back(retryCompletion);
+    guestTransport.sent.clear();
     guest.Tick();
     CHECK(guestFacade.campaignMissionCompletionApplyCount == 2U);
     CHECK(guestFacade.campaignMissionCashApplyCount == 2U);
+    CHECK(!LastSentMissionProgression(guestTransport).has_value());
     guestFacade.applyCampaignMissionCashAwardResult = true;
     retryCompletion.header.sequence = ++guestTransport.inboundSequence;
     guestTransport.inbound.push_back(std::move(retryCompletion));
     guest.Tick();
     CHECK(guestFacade.campaignMissionCompletionApplyCount == 3U);
     CHECK(guestFacade.campaignMissionCashApplyCount == 3U);
+    const auto retriedApplied = LastSentMissionProgression(guestTransport);
+    CHECK(retriedApplied.has_value());
+    CHECK(retriedApplied->phase == MissionProgressionPhase::Applied);
 
     guestFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, false, false, false, 0U};
     const MissionProgressionPayload ineligibleOffer{
@@ -5922,6 +6184,53 @@ void RuntimeHunt1MissionProgressionHandshake() {
     guest.Tick();
     CHECK(guestFacade.campaignMissionCompletionApplyCount == 3U);
     CHECK(guestFacade.campaignMissionCashApplyCount == 3U);
+}
+
+void RuntimeMissionStartBarrierRejectsPreArmedGuestInstance() {
+    constexpr std::uint32_t kHunt1 = kHunt1MissionId;
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+
+    TestFacade facade;
+    facade.sampledCampaignMission = CampaignMissionProbe{kHunt1, false, true, false, 0U};
+    TestTransport transport;
+    transport.acknowledgementPayload = {static_cast<std::uint8_t>(PlayerSlot::Guest)};
+    BridgeRuntime runtime{facade, transport};
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+
+    constexpr std::uint32_t kEpoch = 11U;
+    constexpr std::uint64_t kEvent = (static_cast<std::uint64_t>(kEpoch) << 32U) | 1U;
+    const auto pushProgression = [&](const MissionProgressionPayload& payload) {
+        Frame frame;
+        frame.header.type = MessageType::MissionProgression;
+        frame.header.sequence = ++transport.inboundSequence;
+        frame.header.tick = facade.tick;
+        frame.payload = EncodeMissionProgression(payload);
+        transport.inbound.push_back(std::move(frame));
+        runtime.Tick();
+    };
+    pushProgression(MissionProgressionPayload{
+        kHunt1, kEpoch, kEvent, MissionProgressionPhase::Offer, 0U});
+    pushProgression(MissionProgressionPayload{
+        kHunt1, kEpoch, kEvent, MissionProgressionPhase::StartBarrierOpen, 0U});
+    CHECK(!facade.expectedLocalMissionInstanceAllowed);
+
+    // This models a two-second-ish human race that began just before the
+    // guest received the host's barrier: it must be rejected rather than
+    // adopted as the shared mission instance.
+    facade.sample.missionActive = true;
+    facade.sampledCampaignMission = CampaignMissionProbe{kHunt1, true, false, false, 0U};
+    facade.tick += 16U;
+    runtime.Tick();
+    const auto rejection = LastSentMissionProgression(transport);
+    CHECK(rejection.has_value());
+    CHECK(rejection->phase == MissionProgressionPhase::GuestInstanceRejected);
+    CHECK(!facade.expectedLocalMissionInstanceAllowed);
+    CHECK(HasLog(facade, "already entering before the host barrier armed"));
 }
 
 void RuntimeHostDebouncesScriptedControlPresentation() {
@@ -7783,6 +8092,24 @@ void RuntimeGuestPresentsHostObjectiveAndCutsceneCamera() {
         transport.remotePosition.x);
     CHECK(!facade.replicatedMissionCameraSpectatorActive);
 
+    Frame objective;
+    objective.header.type = MessageType::MissionObjective;
+    objective.header.sequence = ++transport.inboundSequence;
+    objective.header.tick = facade.tick;
+    objective.payload = EncodeMissionObjective(MissionObjectivePayload{
+        transport.remoteEntityId,
+        7U,
+        1U,
+        0xCBF29CE484222325ULL,
+        "TRACK THE BEAR"});
+    transport.inbound.push_back(std::move(objective));
+    facade.tick += 1U;
+    runtime.Tick();
+    CHECK(facade.missionCompanionPresentation.active);
+    CHECK(facade.missionCompanionPresentation.objectiveText ==
+        "TRACK THE BEAR");
+    CHECK(HasLog(facade, "accepted host objective"));
+
     facade.tick += 50U;
     pushMission(MissionPhase::Cutscene, 2U, kMissionAndAnchor);
     pushCinematic(
@@ -7838,6 +8165,125 @@ void RuntimeGuestPresentsHostObjectiveAndCutsceneCamera() {
     CHECK(!facade.replicatedMissionCameraSpectatorActive);
     CHECK(!facade.replicatedMissionCameraState.has_value());
     CHECK(!facade.missionCompanionPresentation.active);
+}
+
+void RuntimeHostPublishesChangedMissionObjective() {
+    TestFacade facade;
+    facade.sample.missionActive = true;
+    facade.sampledCampaignMission = CampaignMissionProbe{
+        kHunt1MissionId, true, false, false, 0U};
+    facade.sampledMissionObjective = MissionObjectiveSample{"TRACK THE BEAR"};
+    facade.sampledMissionDialogue = {
+        MissionDialogueSample{kHunt1MissionId,
+            CampaignMissionId("RH1_TRACK_CHAT"), 3U, true, true, true}};
+    TestTransport transport;
+    transport.acknowledgementPayload = {
+        static_cast<std::uint8_t>(PlayerSlot::Host)};
+    transport.remoteSlot = PlayerSlot::Guest;
+    BridgeRuntime runtime{facade, transport};
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+    const auto mission = LastSentMissionState(transport);
+    const auto firstObjective = LastSentMissionObjective(transport);
+    CHECK(mission.has_value());
+    CHECK(firstObjective.has_value());
+    CHECK(firstObjective->hostEntityId == runtime.LocalEntityId());
+    CHECK(firstObjective->missionEpoch == mission->missionEpoch);
+    CHECK(firstObjective->revision == 1U);
+    CHECK(firstObjective->text == "TRACK THE BEAR");
+    const auto firstDialogueCue = LastSentMissionDialogueCue(transport);
+    CHECK(firstDialogueCue.has_value());
+    CHECK(firstDialogueCue->missionEpoch == mission->missionEpoch);
+    CHECK(firstDialogueCue->checkpointGeneration == mission->checkpointGeneration);
+    CHECK(firstDialogueCue->profileId == kHunt1MissionId);
+    CHECK(firstDialogueCue->rootId == CampaignMissionId("RH1_TRACK_CHAT"));
+    CHECK(firstDialogueCue->lineIndex == 3U);
+
+    const auto objectiveCount = [&]() {
+        return static_cast<std::size_t>(std::count_if(
+            transport.sent.begin(), transport.sent.end(),
+            [](const auto& frame) {
+                return frame.header.type == MessageType::MissionObjective;
+            }));
+    };
+    CHECK(objectiveCount() == 1U);
+    facade.tick += 250U;
+    runtime.Tick();
+    CHECK(objectiveCount() == 1U);
+
+    facade.sampledMissionObjective = MissionObjectiveSample{"REACH THE LAKE"};
+    facade.tick += 250U;
+    runtime.Tick();
+    const auto changedObjective = LastSentMissionObjective(transport);
+    CHECK(changedObjective.has_value());
+    CHECK(changedObjective->revision == 2U);
+    CHECK(changedObjective->text == "REACH THE LAKE");
+    CHECK(objectiveCount() == 2U);
+}
+
+void RuntimeGuestPresentsHostOnlyMissionDialogue() {
+    TestFacade facade;
+    facade.presentHostMissionDialogueResult = true;
+    TestTransport transport;
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    BridgeRuntime runtime{facade, transport};
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+
+    const auto push = [&](const MessageType type,
+                          std::vector<std::uint8_t> payload) {
+        Frame frame;
+        frame.header.type = type;
+        frame.header.sequence = ++transport.inboundSequence;
+        frame.header.tick = facade.tick;
+        frame.payload = std::move(payload);
+        transport.inbound.push_back(std::move(frame));
+    };
+    constexpr std::uint32_t kEpoch = 17U;
+    constexpr std::uint64_t kEvent = 91U;
+    push(MessageType::MissionProgression, EncodeMissionProgression(
+        MissionProgressionPayload{kHunt1MissionId, kEpoch, kEvent,
+            MissionProgressionPhase::Offer, 0U}));
+    push(MessageType::MissionState, EncodeMissionState(MissionStatePayload{
+        transport.remoteEntityId, kEpoch, 1U, 1U, MissionPhase::Active,
+        static_cast<std::uint8_t>(MissionStateFlag::MissionActive) |
+            static_cast<std::uint8_t>(MissionStateFlag::AnchorValid),
+        transport.remotePosition, transport.remoteHeading}));
+    const auto rootId = CampaignMissionId("RH1_TRACK_CHAT");
+    push(MessageType::MissionDialogueCue, EncodeMissionDialogueCue(
+        MissionDialogueCuePayload{transport.remoteEntityId, kEpoch, 1U, 1U,
+            kHunt1MissionId, rootId, 0U, facade.tick + 150U}));
+    runtime.Tick();
+
+    CHECK(facade.hostMissionDialoguePresentationCount == 0U);
+    facade.tick += 150U;
+    runtime.Tick();
+
+    CHECK(facade.hostMissionDialoguePresentationCount == 1U);
+    CHECK(facade.presentedHostMissionDialogueMissionId == kHunt1MissionId);
+    CHECK(facade.presentedHostMissionDialogueRootId == rootId);
+    bool ready{};
+    for (const auto& frame : transport.sent) {
+        if (frame.header.type != MessageType::MissionDialogueReady) continue;
+        const auto response = DecodeMissionDialogueReady(frame.payload);
+        CHECK(response.has_value());
+        CHECK(response->state == MissionDialogueReadyState::Ready);
+        ready = true;
+    }
+    CHECK(ready);
+    const auto cleanupBeforeStop = facade.clearHostMissionDialoguePresentationCount;
+    runtime.Stop("host-only dialogue cleanup test");
+    CHECK(facade.clearHostMissionDialoguePresentationCount ==
+        cleanupBeforeStop + 1U);
 }
 
 void RuntimeCinematicChainsLoadingAndWaitsForResumeReady() {
@@ -10627,6 +11073,8 @@ int main() {
          RuntimeIgnoresNonMissionStoryLoadCamera},
         {"RuntimeHunt1MissionProgressionHandshake",
          RuntimeHunt1MissionProgressionHandshake},
+        {"RuntimeMissionStartBarrierRejectsPreArmedGuestInstance",
+         RuntimeMissionStartBarrierRejectsPreArmedGuestInstance},
         {"RuntimeHostDebouncesScriptedControlPresentation",
          RuntimeHostDebouncesScriptedControlPresentation},
         {"RuntimeHostSpectatesMinigamesImmediately",
@@ -10643,6 +11091,10 @@ int main() {
          RuntimeAnimSceneHybridTwoPhaseCommit},
         {"RuntimeGuestPresentsHostObjectiveAndCutsceneCamera",
          RuntimeGuestPresentsHostObjectiveAndCutsceneCamera},
+        {"RuntimeHostPublishesChangedMissionObjective",
+         RuntimeHostPublishesChangedMissionObjective},
+        {"RuntimeGuestPresentsHostOnlyMissionDialogue",
+         RuntimeGuestPresentsHostOnlyMissionDialogue},
         {"RuntimeCinematicChainsLoadingAndWaitsForResumeReady",
          RuntimeCinematicChainsLoadingAndWaitsForResumeReady},
         {"RuntimeGuestRejectsOldCameraAndTearsDownOnHostLoss",

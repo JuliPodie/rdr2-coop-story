@@ -319,12 +319,13 @@ GuestMissionIsolationStatus
 SimulatedScriptHookFacade::MaintainMissionAuthority(
     const bool active,
     const bool hostMissionActive,
-    const bool hostPresentationActive) noexcept {
+    const bool hostPresentationActive,
+    const bool allowExpectedLocalMissionInstance) noexcept {
     if (active && hostMissionActive) {
         Log("simulated host mission authority enabled");
     }
     GuestMissionIsolationStatus status;
-    status.missionGateAsserted =
+    status.missionGateAsserted = !allowExpectedLocalMissionInstance &&
         ShouldAssertGuestMissionGate(
             active,
             hostMissionActive,
