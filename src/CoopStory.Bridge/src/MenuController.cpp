@@ -1,5 +1,6 @@
 #include "coopstory/bridge/MenuController.hpp"
 
+#include <algorithm>
 #include <array>
 
 namespace coopstory::bridge {
@@ -21,6 +22,7 @@ constexpr std::array kCommands{
     BridgeCommand::RetryCheckpoint,
     BridgeCommand::GrantTestLasso,
     BridgeCommand::ToggleSoloTest,
+    BridgeCommand::ToggleGuestWorldView,
     BridgeCommand::ToggleGhostRecord,
     BridgeCommand::ToggleGhostReplay,
     BridgeCommand::ProbeRepeatingShotgunShopUnlock,
@@ -32,8 +34,7 @@ constexpr std::array kCommands{
     BridgeCommand::Unload,
 };
 
-static_assert(
-    kCommands.size() == MenuController::PrimaryCommandCount() * 2U);
+static_assert(kCommands.size() == 25U);
 
 }  // namespace
 
@@ -53,20 +54,24 @@ MenuUpdate MenuController::Update(const MenuInputState& input) {
                 MenuController::PrimaryCommandCount();
             const auto columnStart =
                 selection_ >= kColumnSize ? kColumnSize : 0U;
+            const auto columnLength = std::min(
+                kColumnSize,
+                kCommands.size() - columnStart);
             const auto row = selection_ - columnStart;
             if (Rising(input.up, previous_.up)) {
                 selection_ = columnStart +
-                    (row == 0U ? kColumnSize - 1U : row - 1U);
+                    (row == 0U ? columnLength - 1U : row - 1U);
             }
             if (Rising(input.down, previous_.down)) {
-                selection_ = columnStart + ((row + 1U) % kColumnSize);
+                selection_ = columnStart + ((row + 1U) % columnLength);
             }
             if (Rising(input.left, previous_.left) &&
                 selection_ >= kColumnSize) {
                 selection_ -= kColumnSize;
             }
             if (Rising(input.right, previous_.right) &&
-                selection_ < kColumnSize) {
+                selection_ < kColumnSize &&
+                selection_ + kColumnSize < kCommands.size()) {
                 selection_ += kColumnSize;
             }
             if (Rising(input.confirm, previous_.confirm)) {
@@ -88,7 +93,9 @@ std::string_view MenuController::Label(const BridgeCommand command) noexcept {
         case BridgeCommand::SkipCutscene:
             return "Vote: skip cutscene";
         case BridgeCommand::ToggleSoloTest:
-            return "Test solo: start / stop";
+            return "Live mirror: start / stop";
+        case BridgeCommand::ToggleGuestWorldView:
+            return "World view: host / co-op";
         case BridgeCommand::ToggleGhostRecord:
             return "Ghost Record: start / stop";
         case BridgeCommand::ToggleGhostReplay:

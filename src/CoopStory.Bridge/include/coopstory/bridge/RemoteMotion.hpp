@@ -118,6 +118,7 @@ inline constexpr float kRemoteMotionEmergencyHardResyncDistanceMeters = 12.0F;
 inline constexpr std::uint64_t kRemoteMotionEmergencyHardResyncSustainMs =
     200U;
 inline constexpr std::uint64_t kRemoteMotionHardResyncCooldownMs = 2'000U;
+inline constexpr float kRemoteMountHardCorrectionMeters = 12.0F;
 inline constexpr float kRemoteTraversalApproachDistanceMeters = 3.0F;
 inline constexpr float kRemoteTraversalActivationDistanceMeters = 1.25F;
 // A stale traversal played many metres after its source action looks worse
@@ -139,7 +140,7 @@ inline constexpr std::uint64_t kRemoteAnimationStateCacheTtlMs = 500U;
 // FORCE_PED_MOTION_STATE on a taskless CREATE_PED proxy reports success but
 // leaves its skeleton in a T-pose. A long, non-navmesh visual task keeps the
 // native gait graph alive while network coordinates remain authoritative.
-inline constexpr std::uint64_t kDirectReplicaVisualTaskRefreshMs = 2'500U;
+inline constexpr std::uint64_t kDirectReplicaVisualTaskRefreshMs = 8'000U;
 inline constexpr std::uint64_t kDirectReplicaVisualTaskMinimumRefreshMs =
     250U;
 inline constexpr float kDirectReplicaVisualTaskHeadingRefreshDegrees = 18.0F;
@@ -147,12 +148,6 @@ inline constexpr float kDirectReplicaTurnInPlaceHeadingDegrees = 6.0F;
 inline constexpr std::uint64_t kDirectReplicaTraversalMaximumAgeMs = 3'500U;
 inline constexpr float kDirectReplicaTraversalActivationDistanceMeters =
     1.25F;
-// Native traversal/ragdoll keeps ownership of the skeleton, but an extended
-// burst of queued actions must not leave the replicated root several metres
-// behind its authoritative marker. Only the coordinates are corrected beyond
-// this leash; task, heading, IK and motion-state ownership remain untouched.
-inline constexpr float kDirectReplicaPhysicalRootLeashMeters = 1.50F;
-
 enum class RemoteMotionMode {
     Hold,
     SmoothVelocity,
@@ -306,17 +301,12 @@ struct RemoteSnapshotSample final {
     std::uint64_t renderedSenderTickMs,
     std::uint64_t nowMs) noexcept;
 
-// Direct-root ownership must yield completely to RDR2 physics. In particular,
-// no coordinate or heading correction is legal during ragdoll, lasso, fall,
-// get-up, jump or climb handling.
-[[nodiscard]] bool ShouldApplyAnimGraphDirectRootCorrection(
+// The visual gait controller yields completely to mounts and protected native
+// physics. Ordinary coordinates are never written by this decision; bounded
+// hard recovery is evaluated separately after sustained divergence.
+[[nodiscard]] bool ShouldRunAnimGraphVisualController(
     bool mounted,
     bool protectedPhysicalAnimation) noexcept;
-
-[[nodiscard]] bool ShouldApplyDirectReplicaPhysicalRootLeash(
-    bool mounted,
-    bool protectedPhysicalAnimation,
-    float positionErrorMeters) noexcept;
 
 // Chooses the visual gait advertised to RDR2's native task graph. A validated
 // sender state wins; desiredMoveBlend is a fail-closed fallback for recordings
@@ -452,6 +442,12 @@ struct RemoteSnapshotSample final {
     bool physicsInterrupted,
     bool mounted,
     bool authoritativeDiscontinuity) noexcept;
+
+// A mount's navmesh task owns all ordinary movement and hoof placement.
+// Coordinate correction is legal only after emergency-scale divergence.
+[[nodiscard]] bool ShouldApplyRemoteMountHardCorrection(
+    float positionErrorMeters,
+    float horizontalErrorMeters) noexcept;
 
 // Traversal is recorded at the authoritative route position. If the visual
 // proxy is behind, defer jump/climb until it reaches that position instead of

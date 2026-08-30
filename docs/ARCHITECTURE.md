@@ -66,7 +66,7 @@ The source contains foundations for:
   presentation experiments;
 - epoch/checkpoint-scoped mission dialogue cue/ready coordination with a small
   bridge-owned companion-audio fallback;
-- five host-owned ambient profiles backed by 50 reviewed local script
+- five host-owned ambient profiles backed by 94 reviewed local action-script
   detections: roadside ambush, hostage rescue, wagon defense, animal attack,
   and camp clear-out;
 - interpolation, reconnect replay, impairment simulation, ghost recording, and

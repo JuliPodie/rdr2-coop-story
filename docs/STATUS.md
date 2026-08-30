@@ -18,7 +18,7 @@ while failing closed when an exact local state cannot be verified.
 | Matching MissionData barrier | Implemented, two-PC validation needed | The host offers an exact mission ID. A guest may use only its own identical, incomplete, startable vanilla prompt during the 45 s window. Any conflict, refusal, or timeout stays companion-only. |
 | Mission completion/progression | Implemented, two-PC persistence validation needed | For an eligible matching run, the guest can receive verified MissionData completion/rating, bounded positive cash delta, and only reviewed idempotent rewards. The catalog covers the 80 registered Story MissionData entries; item/entitlement writes remain explicitly allow-listed. |
 | Mission dialogue coordination | Experimental | The host samples admitted local dialogue roots/lines, sends epoch- and checkpoint-scoped cues, and waits for guest readiness. A matching guest keeps its own vanilla playback; a companion-only guest can use the small reviewed bridge-owned audio presentation. Unmapped dialogue remains local. |
-| Ambient encounters | Implemented tester coverage, two-PC validation needed | 50 reviewed script detections map to five host-owned profiles: 35 ambushes, 5 rescues, 3 wagon defenses, 3 animal attacks, and 4 camp clear-outs. The host owns phases/outcome/cleanup; guest combat contributes through validated intent. |
+| Ambient encounters | Implemented tester coverage, two-PC validation needed | 94 reviewed action-script detections map to five host-owned profiles: 65 hostile roadside actions, 15 rescues, 6 wagon defenses, 3 animal attacks, and 5 camp clear-outs. The host owns phases/outcome/cleanup; guest combat contributes through validated intent. Non-action ambient vignettes remain visible through the world mirror without inventing combat or rewards. |
 | Capability/pickup journal | Guarded and deny-by-default | Reviewed entitlements and collection telemetry are idempotent; unsupported record shapes are rejected. Corpse/container/plant/document inventory is not synchronized. |
 
 ## Mission progression and rewards
@@ -75,7 +75,7 @@ eligibility preflight but follows the same generic-local-loot policy.
 
 ## Latest verification
 
-The Protocol 32 source and tester package were built on 2026-08-28.
+The Protocol 32 source and tester package were built on 2026-08-30.
 
 - Native ASI build and `ctest`: **1/1 passed**.
 - Managed protocol/sidecar self-test: **49/49 passed**.

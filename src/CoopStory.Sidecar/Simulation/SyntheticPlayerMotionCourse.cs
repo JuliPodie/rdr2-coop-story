@@ -4,6 +4,7 @@ namespace CoopStory.Sidecar.Simulation;
 
 public enum LocalGameTestMotionProfile
 {
+    LiveMirror,
     FollowHost,
     PuppetCourse
 }
@@ -25,6 +26,13 @@ internal static class SyntheticPlayerMotionCourse
         TimeSpan elapsed,
         float hostHeadingDegrees)
     {
+        if (profile == LocalGameTestMotionProfile.LiveMirror)
+        {
+            throw new ArgumentException(
+                "LiveMirror remaps the real host stream and does not use the synthetic motion course.",
+                nameof(profile));
+        }
+
         if (profile == LocalGameTestMotionProfile.FollowHost)
         {
             var headingRadians = hostHeadingDegrees * (MathF.PI / 180f);

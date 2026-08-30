@@ -3,12 +3,12 @@ setlocal
 title RDR2 Coop Story - local test
 pushd "%~dp0"
 
-set "GAME_PATH=%ProgramFiles(x86)%\Steam\steamapps\common\Red Dead Redemption 2"
+set "GAME_PATH=D:\Program Files (x86)\Neuer Ordner\steamapps\common\Red Dead Redemption 2"
 if not "%~1"=="" set "GAME_PATH=%~1"
 
 echo RDR2 COOP STORY - LOCAL SMOKE TEST
 echo.
-echo This launcher starts a synthetic second player and opens the game through Steam.
+echo This launcher mirrors your real player onto a local co-op replica and opens the game through Steam.
 echo Select STORY MODE ONLY. Never enter Red Dead Online with the mod installed.
 echo.
 

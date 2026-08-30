@@ -536,6 +536,7 @@ private:
     bool soloOverride_{};
     bool cutsceneSpectator_{};
     bool synchronizedPaused_{};
+    bool pauseStateChangedByRemoteThisTick_{};
     bool hostPauseVoted_{};
     bool guestPauseVoted_{};
     bool previousRemoteStreaming_{};
@@ -582,6 +583,10 @@ private:
     std::uint64_t pendingTeleportRequestedAtMs_{};
     bool hostWorldMirrorActive_{};
     bool guestWorldMirrorActive_{};
+    // SOLO TEST only: accepts the looped-back, offset host graph through the
+    // normal guest proxy renderer so one PC can switch between host and guest
+    // population layers. It is gated by the SyntheticTest player flag.
+    bool soloGuestWorldViewEnabled_{};
     bool guestWorldAuthorityConfirmed_{};
     // This lease starts before a JOIN request leaves the bridge and survives
     // transport reconnects, spectator windows and Solo override. Releasing it

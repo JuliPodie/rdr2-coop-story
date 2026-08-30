@@ -889,7 +889,7 @@ function Launch-Easy {
 `$Host.UI.RawUI.WindowTitle = 'RDR2 Coop Story - LOCAL TEST'
 Write-Host 'Do not close this window during the test.' -ForegroundColor Cyan
 Write-Host 'Success: LOCAL_TEST_BRIDGE_ACTIVE and LOCAL_TEST_GUEST_STREAMING appear.'
-& '$escapedSidecar' local-test --config '$escapedConfig' --ready-file '$escapedReady' --motion-profile puppet
+& '$escapedSidecar' local-test --config '$escapedConfig' --ready-file '$escapedReady' --motion-profile mirror
 `$sidecarExit = `$LASTEXITCODE
 if (-not (Test-Path -LiteralPath '$escapedReady')) {
     [IO.File]::WriteAllText('$escapedFailure', [string]`$sidecarExit)

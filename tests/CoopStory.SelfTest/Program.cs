@@ -78,6 +78,8 @@ internal static class Program
         ("bridge Goodbye stops the sidecar fail-closed", BridgeGoodbyeStopsRuntimeAsync),
         ("synthetic puppet course is continuous and exercises gait phases",
             SyntheticPuppetCourseAsync),
+        ("live mirror remaps the real host stream beside the local player",
+            LiveMirrorRemappingAsync),
         ("synthetic action course couples blocking reloads to motion",
             SyntheticActionCourseAsync),
         ("ghost recording saves atomically and replays validated player samples",
@@ -410,7 +412,7 @@ internal static class Program
 
     private static Task MissionCinematicProtocolAsync()
     {
-        Check.Equal((ushort)32, ProtocolConstants.Version);
+        Check.Equal((ushort)33, ProtocolConstants.Version);
         Check.Equal((ushort)35, (ushort)MessageType.MissionCinematicState);
         Check.Equal((ushort)36, (ushort)MessageType.MissionCinematicAction);
 
@@ -569,7 +571,7 @@ internal static class Program
 
     private static Task AppearanceAndAnimSceneProtocolAsync()
     {
-        Check.Equal((ushort)32, ProtocolConstants.Version);
+        Check.Equal((ushort)33, ProtocolConstants.Version);
         Check.Equal((ushort)37, (ushort)MessageType.PlayerAppearanceState);
         Check.Equal((ushort)38, (ushort)MessageType.AnimSceneReplicaState);
         Check.Equal((ushort)39, (ushort)MessageType.AnimSceneDefinition);
@@ -1861,7 +1863,7 @@ internal static class Program
 
     private static Task PlayerActionProtocolAsync()
     {
-        Check.Equal((ushort)32, ProtocolConstants.Version);
+        Check.Equal((ushort)33, ProtocolConstants.Version);
         Check.Equal((ushort)30, (ushort)MessageType.PlayerAction);
 
         var guestId = NetEntityId.Create(0x11223344, 2);
@@ -2127,7 +2129,7 @@ internal static class Program
 
     private static Task InteractionAuthorityProtocolAsync()
     {
-        Check.Equal((ushort)32, ProtocolConstants.Version);
+        Check.Equal((ushort)33, ProtocolConstants.Version);
         Check.Equal((ushort)32, (ushort)MessageType.InteractionIntent);
         Check.Equal((ushort)33, (ushort)MessageType.InteractionResult);
         Check.Equal((ushort)34, (ushort)MessageType.RestraintState);
@@ -3150,7 +3152,7 @@ internal static class Program
 
     private static Task AnimationReplicationPayloadsAsync()
     {
-        Check.Equal((ushort)32, ProtocolConstants.Version);
+        Check.Equal((ushort)33, ProtocolConstants.Version);
         Check.Equal((ushort)28, (ushort)MessageType.PlayerAnimationState);
         Check.Equal((ushort)29, (ushort)MessageType.MotionReplicationConfig);
 
@@ -3370,7 +3372,7 @@ internal static class Program
 
     private static Task WorldAndEquipmentAsync()
     {
-        Check.Equal((ushort)32, ProtocolConstants.Version);
+        Check.Equal((ushort)33, ProtocolConstants.Version);
         Check.Equal((ushort)23, (ushort)MessageType.WorldState);
         Check.Equal((ushort)24, (ushort)MessageType.EquipmentState);
         Check.Equal((ushort)25, (ushort)MessageType.PauseVote);
@@ -3624,7 +3626,8 @@ internal static class Program
             () => BinaryPayloadCodec.EncodePauseVote(
                 pauseState with
                 {
-                    Kind = PauseVoteKind.RequestToggle
+                    Kind = PauseVoteKind.RequestState,
+                    Flags = PauseVoteFlags.HostVoted
                 }));
         var pauseWithReservedData = encodedPause.ToArray();
         pauseWithReservedData[8] = 1;
@@ -3638,9 +3641,9 @@ internal static class Program
             1,
             BinaryPayloadCodec.EncodePauseVote(
                 new PauseVotePayload(
-                    PauseVoteKind.RequestToggle,
+                    PauseVoteKind.RequestState,
                     (byte)SessionRole.Guest,
-                    PauseVoteFlags.None,
+                    PauseVoteFlags.Paused,
                     Generation: 42)));
         var hostPauseState = new ProtocolEnvelope(
             MessageType.PauseVote,
@@ -7607,6 +7610,7 @@ internal static class Program
                      SessionMenuAction.ToggleSoloTest,
                      SessionMenuAction.ToggleGhostRecord,
                      SessionMenuAction.ToggleGhostReplay,
+                     SessionMenuAction.ToggleGuestWorldView,
                      SessionMenuAction.StopSession
                  })
         {
@@ -8103,6 +8107,7 @@ internal static class Program
                         Interlocked.Exchange(ref sawGhostSavedStatus, 1);
                     }
                 },
+                motionProfile: LocalGameTestMotionProfile.PuppetCourse,
                 waitForInGameActivation: true,
                 ghostRecordingPath: ghostRecordingPath);
 
@@ -8226,6 +8231,77 @@ internal static class Program
                 matchingAnimations[1].SampleSequence >
                     matchingAnimations[0].SampleSequence,
                 "Synthetic animation sampleSequence did not advance.");
+
+            await WriteSessionMenuRequestAsync(
+                pipe,
+                SessionMenuAction.ToggleGuestWorldView,
+                sequence: 850,
+                sessionStop.Token).ConfigureAwait(false);
+            var hostWorldId = NetEntityId.Create(77, 1_111);
+            var hostWorldState = new WorldEntityStatePayload(
+                hostWorldId,
+                ModelHash: 0x1234,
+                WorldEntityKind.Ped,
+                WorldEntityStateFlags.Human,
+                WorldCombatTargetSlot.None,
+                Position: hostPosition + new Vector3(4f, 1f, 0f),
+                Velocity: Vector3.Zero,
+                Heading: 45f,
+                HealthFraction: 1f,
+                WeaponHash: 0,
+                TaskKind: WorldTaskKind.Idle);
+            await ProtocolCodec.WriteAsync(
+                pipe,
+                new ProtocolEnvelope(
+                    MessageType.EntitySpawn,
+                    Sequence: 851,
+                    Tick: unchecked((ulong)Environment.TickCount64),
+                    BinaryPayloadCodec.EncodeWorldEntityState(
+                        hostWorldState)),
+                sessionStop.Token).ConfigureAwait(false);
+
+            WorldEntityStatePayload? guestWorldState = null;
+            using (var guestWorldStop =
+                   CancellationTokenSource.CreateLinkedTokenSource(
+                       sessionStop.Token))
+            {
+                guestWorldStop.CancelAfter(TimeSpan.FromSeconds(3));
+                while (guestWorldState is null)
+                {
+                    var envelope = await ProtocolCodec.ReadAsync(
+                        pipe,
+                        guestWorldStop.Token).ConfigureAwait(false);
+                    if (envelope is null)
+                    {
+                        throw new SelfTestException(
+                            "Bridge pipe closed before Guest World View replayed an entity.");
+                    }
+                    if (envelope.Type != MessageType.EntitySpawn)
+                    {
+                        continue;
+                    }
+                    var candidate = BinaryPayloadCodec.DecodeWorldEntityState(
+                        envelope.Payload.Span);
+                    if (candidate.EntityId ==
+                        LocalGameTestSession.RemapGuestWorldEntityId(
+                            hostWorldId))
+                    {
+                        guestWorldState = candidate;
+                    }
+                }
+            }
+            Check.Near(
+                3f,
+                Vector3.Distance(
+                    hostWorldState.Position,
+                    guestWorldState.Value.Position),
+                tolerance: 0.01f);
+            Check.Equal(hostWorldState.ModelHash, guestWorldState.Value.ModelHash);
+            await WriteSessionMenuRequestAsync(
+                pipe,
+                SessionMenuAction.ToggleGuestWorldView,
+                sequence: 852,
+                sessionStop.Token).ConfigureAwait(false);
             await WaitUntilAsync(
                 () => LogContains(
                     config.LogPath,
@@ -8610,6 +8686,100 @@ internal static class Program
             origin,
             playerHeadingDegrees: 0f);
         Check.Equal((uint)7, nextCycleShot.FireSequence);
+        return Task.CompletedTask;
+    }
+
+    private static Task LiveMirrorRemappingAsync()
+    {
+        var hostId = NetEntityId.Create(91, 1);
+        var mirrorId = NetEntityId.Create(91, 2);
+        var offset = LocalGameTestSession.CreateLiveMirrorOffset(0f);
+        Check.Near(0f, offset.X, tolerance: 0.001f);
+        Check.Near(3f, offset.Y, tolerance: 0.001f);
+        Check.Near(0f, offset.Z, tolerance: 0.001f);
+
+        var host = new PlayerStatePayload(
+            hostId,
+            Slot: (byte)SessionRole.Host,
+            PlayerLifecycle.Alive,
+            Position: new Vector3(10f, 20f, 2f),
+            Velocity: new Vector3(2f, 1f, 0f),
+            Heading: 45f,
+            HealthFraction: 0.75f,
+            Flags:
+                PlayerStateFlags.Aiming |
+                PlayerStateFlags.AimTargetValid |
+                PlayerStateFlags.InCover |
+                PlayerStateFlags.Mounted |
+                PlayerStateFlags.OnlineModeDetected,
+            AimTarget: new Vector3(30f, 40f, 3f),
+            FireSequence: 17,
+            MovementHeading: 30f,
+            LocalForwardSpeed: 2.25f,
+            LocalRightSpeed: -0.5f,
+            DesiredMoveBlend: 2f,
+            LocomotionEpoch: 7,
+            TraversalActionId: 4,
+            TraversalKind: PlayerTraversalKind.Climb,
+            LocomotionMode: PlayerLocomotionMode.Mounted,
+            TraversalAnchor: new Vector3(11f, 21f, 2f),
+            TraversalHeading: 60f);
+
+        var mirror = LocalGameTestSession.CreateLiveMirrorState(
+            host,
+            mirrorId,
+            offset);
+        Check.Equal(mirrorId, mirror.EntityId);
+        Check.Equal((byte)SessionRole.Guest, mirror.Slot);
+        Check.Equal(host.Position + offset, mirror.Position);
+        Check.Equal(host.Velocity, mirror.Velocity);
+        Check.Equal(host.AimTarget + offset, mirror.AimTarget);
+        Check.Equal(host.TraversalAnchor + offset, mirror.TraversalAnchor);
+        Check.Equal(host.FireSequence, mirror.FireSequence);
+        Check.Equal(host.LocomotionEpoch, mirror.LocomotionEpoch);
+        Check.Equal(PlayerLocomotionMode.Grounded, mirror.LocomotionMode);
+        Check.True(
+            (mirror.Flags & PlayerStateFlags.SyntheticTest) != 0,
+            "The live mirror must retain the loopback-only visual marker.");
+        Check.True(
+            (mirror.Flags & PlayerStateFlags.InCover) != 0,
+            "The live mirror dropped a real animation state flag.");
+        Check.False(
+            (mirror.Flags & PlayerStateFlags.OnlineModeDetected) != 0,
+            "The live mirror must never echo the online safety marker.");
+        Check.False(
+            (mirror.Flags & PlayerStateFlags.Mounted) != 0,
+            "The live mirror must not claim a mount without mirroring the mount lane.");
+
+        var horseId = NetEntityId.Create(91, 1_200);
+        var riderId = NetEntityId.Create(91, 1_201);
+        var worldState = new WorldEntityStatePayload(
+            riderId,
+            ModelHash: 0x1234,
+            WorldEntityKind.Ped,
+            WorldEntityStateFlags.Human |
+                WorldEntityStateFlags.Mounted,
+            WorldCombatTargetSlot.Guest,
+            Position: new Vector3(12f, 22f, 2f),
+            Velocity: new Vector3(1f, 0f, 0f),
+            Heading: 30f,
+            HealthFraction: 1f,
+            WeaponHash: 0,
+            TaskKind: WorldTaskKind.Mounted,
+            ParentEntityId: horseId,
+            TaskTarget: new Vector3(20f, 25f, 2f));
+        var guestWorld = LocalGameTestSession.CreateGuestWorldViewState(
+            worldState,
+            offset);
+        Check.Equal(
+            LocalGameTestSession.RemapGuestWorldEntityId(riderId),
+            guestWorld.EntityId);
+        Check.Equal(
+            LocalGameTestSession.RemapGuestWorldEntityId(horseId),
+            guestWorld.ParentEntityId);
+        Check.Equal(worldState.Position + offset, guestWorld.Position);
+        Check.Equal(worldState.TaskTarget + offset, guestWorld.TaskTarget);
+        Check.Equal(worldState.Velocity, guestWorld.Velocity);
         return Task.CompletedTask;
     }
 

@@ -580,7 +580,8 @@ public:
     virtual void MaintainWorldMirrorGuest(
         bool active,
         bool authoritativePopulationReady,
-        float radiusMeters) noexcept = 0;
+        float radiusMeters,
+        bool preserveSameProcessSourceActors = false) noexcept = 0;
     [[nodiscard]] virtual bool ApplyWorldEntityDamage(
         LocalEntityHandle target,
         float damage) noexcept = 0;

@@ -3398,13 +3398,14 @@ std::vector<std::uint8_t> EncodePauseVote(
     const auto kind = static_cast<std::uint8_t>(payload.kind);
     const auto slot = static_cast<std::uint8_t>(payload.voterSlot);
     if ((kind != static_cast<std::uint8_t>(
-                     PauseVoteKind::RequestToggle) &&
+                     PauseVoteKind::RequestState) &&
          kind != static_cast<std::uint8_t>(
                      PauseVoteKind::AuthoritativeState)) ||
         !IsKnownSlot(slot) ||
         (payload.flags & ~kKnownFlags) != 0U ||
-        (payload.kind == PauseVoteKind::RequestToggle &&
-         payload.flags != 0U)) {
+        (payload.kind == PauseVoteKind::RequestState &&
+         (payload.flags & ~static_cast<std::uint8_t>(
+                              PauseVoteFlag::Paused)) != 0U)) {
         throw std::invalid_argument("invalid pause-vote payload");
     }
 
@@ -3443,14 +3444,15 @@ std::optional<PauseVotePayload> DecodePauseVote(
         static_cast<std::uint8_t>(PauseVoteFlag::GuestVoted) |
         static_cast<std::uint8_t>(PauseVoteFlag::Paused);
     if ((kind != static_cast<std::uint8_t>(
-                     PauseVoteKind::RequestToggle) &&
+                     PauseVoteKind::RequestState) &&
          kind != static_cast<std::uint8_t>(
                      PauseVoteKind::AuthoritativeState)) ||
         !IsKnownSlot(slot) ||
         (flags & ~kKnownFlags) != 0U ||
         (kind == static_cast<std::uint8_t>(
-                     PauseVoteKind::RequestToggle) &&
-         flags != 0U) ||
+                      PauseVoteKind::RequestState) &&
+          (flags & ~static_cast<std::uint8_t>(
+                        PauseVoteFlag::Paused)) != 0U) ||
         reservedByte != 0U ||
         reserved != 0U) {
         return std::nullopt;
@@ -3575,6 +3577,7 @@ std::vector<std::uint8_t> EncodeSessionMenuRequest(
         action != SessionMenuAction::ToggleSoloTest &&
         action != SessionMenuAction::ToggleGhostRecord &&
         action != SessionMenuAction::ToggleGhostReplay &&
+        action != SessionMenuAction::ToggleGuestWorldView &&
         action != SessionMenuAction::StopSession) {
         throw std::invalid_argument("unknown session menu action");
     }

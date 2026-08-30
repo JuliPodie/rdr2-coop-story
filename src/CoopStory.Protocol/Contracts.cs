@@ -872,7 +872,7 @@ public readonly record struct EquipmentStatePayload(
 
 public enum PauseVoteKind : byte
 {
-    RequestToggle = 1,
+    RequestState = 1,
     AuthoritativeState = 2
 }
 

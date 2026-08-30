@@ -13,7 +13,7 @@
 namespace coopstory::bridge {
 
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
-inline constexpr std::uint16_t kProtocolVersion = 32U;
+inline constexpr std::uint16_t kProtocolVersion = 33U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
@@ -1018,7 +1018,7 @@ inline constexpr std::size_t kEquipmentStatePayloadSize = 24U;
     std::span<const std::uint8_t> bytes);
 
 enum class PauseVoteKind : std::uint8_t {
-    RequestToggle = 1,
+    RequestState = 1,
     AuthoritativeState = 2,
 };
 
@@ -1029,7 +1029,7 @@ enum class PauseVoteFlag : std::uint8_t {
 };
 
 struct PauseVotePayload final {
-    PauseVoteKind kind{PauseVoteKind::RequestToggle};
+    PauseVoteKind kind{PauseVoteKind::RequestState};
     PlayerSlot voterSlot{PlayerSlot::Host};
     std::uint8_t flags{};
     std::uint32_t generation{};
@@ -1067,6 +1067,7 @@ enum class BridgeCommand : std::uint16_t {
     ArmHunt1MissionProgression = 22,
     ArmFud1MissionProgression = 23,
     DisarmMissionProgression = 24,
+    ToggleGuestWorldView = 25,
 };
 
 enum class CampaignCapabilityKind : std::uint8_t {
@@ -1347,6 +1348,7 @@ enum class SessionMenuAction : std::uint8_t {
     ToggleGhostRecord = 4,
     ToggleGhostReplay = 5,
     StopSession = 6,
+    ToggleGuestWorldView = 7,
 };
 
 enum class SessionMenuStatusKind : std::uint8_t {

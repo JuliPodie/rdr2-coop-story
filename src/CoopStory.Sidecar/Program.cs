@@ -142,13 +142,18 @@ internal static class Program
         Console.WriteLine(
             "Waiting for a live player position before sending the synthetic guest.");
         Console.WriteLine(
-            motionProfile == LocalGameTestMotionProfile.PuppetCourse
-                ? "Synthetic guest course: idle, walk, run, sprint, stop and reverse."
-                : "Synthetic guest follows the local player at a fixed offset.");
+            motionProfile switch
+            {
+                LocalGameTestMotionProfile.LiveMirror =>
+                    "Live mirror: the co-op replica repeats the real local player at a fixed offset.",
+                LocalGameTestMotionProfile.PuppetCourse =>
+                    "Synthetic guest course: idle, walk, run, sprint, stop and reverse.",
+                _ => "Synthetic guest follows the local player at a fixed offset."
+            });
         if (waitForF9)
         {
             Console.WriteLine(
-                "In Story Mode open F9 and choose 'Test solo: start / stop'.");
+                "In Story Mode open F9 and choose 'Live mirror: start / stop'.");
         }
         Console.WriteLine(
             "Never enter Red Dead Online while the mod is loaded. Press Ctrl+C to stop.");
@@ -187,6 +192,13 @@ internal static class Program
         string? value)
     {
         if (string.IsNullOrWhiteSpace(value) ||
+            value.Equals("mirror", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("live-mirror", StringComparison.OrdinalIgnoreCase))
+        {
+            return LocalGameTestMotionProfile.LiveMirror;
+        }
+
+        if (
             value.Equals("puppet", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("course", StringComparison.OrdinalIgnoreCase))
         {
@@ -199,7 +211,7 @@ internal static class Program
         }
 
         throw new ConfigurationException(
-            "local-test --motion-profile must be 'puppet' or 'follow'.");
+            "local-test --motion-profile must be 'mirror', 'puppet' or 'follow'.");
     }
 
     private static bool ParseBooleanOption(string? value, string optionName)
@@ -355,7 +367,7 @@ internal static class Program
               CoopStory.Sidecar.exe run --config <path>
               CoopStory.Sidecar.exe local-test --config <host-config-path>
                   [--ready-file <create-new-signal-path>]
-                  [--motion-profile puppet|follow]
+                  [--motion-profile mirror|puppet|follow]
                   [--wait-for-f9 true|false]
                   [--ghost-recording <persistent-json-path>]
               CoopStory.Sidecar.exe simulate [--config <path>] [--duration <seconds>]

@@ -10,7 +10,8 @@ public enum SessionMenuAction : byte
     ToggleSoloTest = 3,
     ToggleGhostRecord = 4,
     ToggleGhostReplay = 5,
-    StopSession = 6
+    StopSession = 6,
+    ToggleGuestWorldView = 7
 }
 
 public enum SessionMenuStatusKind : byte

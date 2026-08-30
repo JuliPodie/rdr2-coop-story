@@ -2,6 +2,7 @@
 #include "coopstory/bridge/BuildInfo.hpp"
 
 #include "coopstory/bridge/CampaignMissionCatalog.hpp"
+#include "coopstory/bridge/BridgeOwnedEncounterCatalog.hpp"
 #include "coopstory/bridge/ExactEncounterCatalog.hpp"
 
 #include <chrono>
@@ -139,6 +140,7 @@ constexpr std::uint32_t kTransientPlayerActionDurationMilliseconds =
         case BridgeCommand::ToggleSoloTest:
         case BridgeCommand::ToggleGhostRecord:
         case BridgeCommand::ToggleGhostReplay:
+        case BridgeCommand::ToggleGuestWorldView:
         case BridgeCommand::GrantTestPistol:
         case BridgeCommand::GrantTestLasso:
         case BridgeCommand::ProbeRepeatingShotgunShopUnlock:
@@ -820,6 +822,7 @@ bool BridgeRuntime::Start(
     cutsceneSpectator_ = false;
     hostWorldMirrorActive_ = false;
     guestWorldMirrorActive_ = false;
+    soloGuestWorldViewEnabled_ = false;
     guestMissionIsolationLeaseActive_ = false;
     (void)guestWorldGraph_.Reset();
     worldMirrorHost_.emplace(
@@ -1661,6 +1664,8 @@ void BridgeRuntime::Tick() {
         return;
     }
 
+    pauseStateChangedByRemoteThisTick_ = false;
+
     lastTickStage_ = "clock-and-mode";
     const auto now = facade_.TickMilliseconds();
     const auto elapsed = ElapsedMilliseconds(previousTickMs_, now);
@@ -1981,6 +1986,7 @@ void BridgeRuntime::Tick() {
     } else if (
         remoteStreaming &&
         escapePressedEdge &&
+        !pauseStateChangedByRemoteThisTick_ &&
         !sessionMenuWasOpen &&
         !commandMenuWasOpen) {
         HandleLocalPauseToggle();
@@ -3174,6 +3180,14 @@ void BridgeRuntime::TickWorldMirror(
                 "entity graph v10.1 enabled: host authority, priority admission, 12m hysteresis, stable IDs, radius=80m, candidates=96, nodes=48");
         }
         hostWorldMirrorActive_ = true;
+        if (soloGuestWorldViewEnabled_) {
+            guestWorldMirrorActive_ = true;
+            facade_.MaintainWorldMirrorGuest(
+                true,
+                true,
+                kWorldMirrorRadiusMeters,
+                true);
+        }
         if (!FlushPendingHostWorldDespawns()) {
             facade_.Log(
                 "[ENTITY_GRAPH_HOST][REPLAY] pending despawn tombstones were not fully delivered; new graph traffic remains paused to prevent orphan proxies");
@@ -3436,7 +3450,8 @@ void BridgeRuntime::ResetGuestWorldMirror(
 void BridgeRuntime::HandleEntitySpawn(
     const Frame& frame,
     const WorldEntityStatePayload& state) {
-    if (localSlot_ != PlayerSlot::Guest) {
+    if (localSlot_ != PlayerSlot::Guest &&
+        !soloGuestWorldViewEnabled_) {
         return;
     }
     const auto localSample = facade_.SampleLocalPlayer();
@@ -3444,7 +3459,7 @@ void BridgeRuntime::HandleEntitySpawn(
         remoteMissionCinematicState_.has_value() &&
         IsCinematicPresentationPhase(
             remoteMissionCinematicState_->phase);
-    const bool safeMirrorWindow =
+    const bool safeMirrorWindow = soloGuestWorldViewEnabled_ ||
         localSample.has_value() &&
         !soloOverride_ &&
         ((!cutsceneSpectator_ && !localSample->cutsceneActive &&
@@ -3471,7 +3486,8 @@ void BridgeRuntime::HandleEntitySpawn(
 void BridgeRuntime::HandleEntityUpdate(
     const Frame& frame,
     const WorldEntityStatePayload& state) {
-    if (localSlot_ != PlayerSlot::Guest) {
+    if (localSlot_ != PlayerSlot::Guest &&
+        !soloGuestWorldViewEnabled_) {
         return;
     }
     const auto localSample = facade_.SampleLocalPlayer();
@@ -3479,7 +3495,7 @@ void BridgeRuntime::HandleEntityUpdate(
         remoteMissionCinematicState_.has_value() &&
         IsCinematicPresentationPhase(
             remoteMissionCinematicState_->phase);
-    const bool safeMirrorWindow =
+    const bool safeMirrorWindow = soloGuestWorldViewEnabled_ ||
         localSample.has_value() &&
         !soloOverride_ &&
         ((!cutsceneSpectator_ && !localSample->cutsceneActive &&
@@ -3508,7 +3524,8 @@ void BridgeRuntime::HandleEntityUpdate(
 void BridgeRuntime::HandleEntityDespawn(
     const Frame& frame,
     const NetEntityId entityId) {
-    if (localSlot_ != PlayerSlot::Guest) {
+    if (localSlot_ != PlayerSlot::Guest &&
+        !soloGuestWorldViewEnabled_) {
         return;
     }
     const auto signals = guestWorldGraph_.ApplyDespawn(
@@ -4322,12 +4339,36 @@ void BridgeRuntime::HandleRemoteAmbientEncounterProposal(
             return;
         }
     }
+    const bool exactExtortionEvidence =
+        payload.profile == kExtortionEncounter.profile &&
+        payload.localEvidenceHash == kExtortionEncounter.scriptId;
+    const auto* catalogEvidence =
+        FindBridgeOwnedEncounter(payload.localEvidenceHash);
+    if (!exactExtortionEvidence &&
+        (catalogEvidence == nullptr ||
+         catalogEvidence->profile != payload.profile)) {
+        try {
+            Frame reply;
+            reply.header.type = MessageType::AmbientEncounterState;
+            reply.header.sequence = sequencer_.Next();
+            reply.header.tick = facade_.TickMilliseconds();
+            reply.payload = EncodeAmbientEncounterState(
+                AmbientEncounterStatePayload{
+                    localEntityId_, payload.proposalId, payload.profile,
+                    AmbientEncounterPhase::Proposed,
+                    AmbientEncounterRejection::UnsupportedProfile,
+                    {}, 0.0F, 0U, 0U, 0U});
+            SendBestEffort(std::move(reply));
+        } catch (...) {}
+        facade_.Log(
+            "[AMBIENT_ENCOUNTER] rejected unreviewed or mismatched guest evidence");
+        return;
+    }
     // Extortion is an exact-ID adaptation, not a generic hostage heuristic.
     // A guest becomes a participant only when both save processes currently
     // observe the same script-owned beat. Otherwise the host-owned bridge
     // scene still starts as companion-only; it cannot change the guest save.
-    if (payload.profile == AmbientEncounterProfile::HostageRescue &&
-        payload.localEvidenceHash == kExtortionEncounter.scriptId) {
+    if (exactExtortionEvidence) {
         const auto hostExact = facade_.SampleExactEncounterObservation();
         if (!hostExact.has_value() || !hostExact->locallyEligible ||
             hostExact->scriptId != kExtortionEncounter.scriptId) {
@@ -4371,8 +4412,7 @@ void BridgeRuntime::HandleRemoteAmbientEncounterProposal(
         return;
     }
     auto& instance = *ambientEncounterCoordinator_.Active();
-    if (payload.profile == kExtortionEncounter.profile &&
-        payload.localEvidenceHash == kExtortionEncounter.scriptId) {
+    if (exactExtortionEvidence) {
         // The guest found Extortion first. The host's exact-ID check above
         // already proved both local saves are eligible.
         instance.exactEventId = kExtortionEncounter.scriptId;
@@ -4651,7 +4691,7 @@ void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
             localEntityId_, localAmbientEncounterProposalId_, observed->profile, observed->anchor,
             observed->radiusMeters, observed->localEvidenceHash, observed->suggestedRosterSeed});
         SendBestEffort(std::move(proposal));
-        notificationText_ = "Ambush spotted — waiting for host";
+        notificationText_ = "Encounter spotted — waiting for host";
         notificationUntilMs_ = nowMs + 3'000U;
     } catch (...) { localAmbientEncounterProposalExpiresMs_ = 0U; }
 }
@@ -8397,6 +8437,7 @@ void BridgeRuntime::HandleLocalPauseToggle() {
         return;
     }
 
+    const bool desiredPaused = !synchronizedPaused_;
     if (*localSlot_ == PlayerSlot::Guest) {
         Frame request;
         request.header.type = MessageType::PauseVote;
@@ -8404,24 +8445,24 @@ void BridgeRuntime::HandleLocalPauseToggle() {
         request.header.tick = previousTickMs_;
         request.payload = EncodePauseVote(
             PauseVotePayload{
-                PauseVoteKind::RequestToggle,
+                PauseVoteKind::RequestState,
                 PlayerSlot::Guest,
-                0U,
+                desiredPaused
+                    ? static_cast<std::uint8_t>(
+                          PauseVoteFlag::Paused)
+                    : 0U,
                 pauseVoteGeneration_});
         SendBestEffort(std::move(request));
         facade_.Log(
             synchronizedPaused_
-                ? "guest requested synchronized resume vote"
-                : "guest requested synchronized pause vote");
+                ? "guest requested synchronized resume"
+                : "guest requested synchronized pause");
         return;
     }
 
-    hostPauseVoted_ = !hostPauseVoted_;
-    if (hostPauseVoted_ && guestPauseVoted_) {
-        synchronizedPaused_ = !synchronizedPaused_;
-        hostPauseVoted_ = false;
-        guestPauseVoted_ = false;
-    }
+    synchronizedPaused_ = desiredPaused;
+    hostPauseVoted_ = false;
+    guestPauseVoted_ = false;
     pauseVoteGeneration_ =
         pauseVoteGeneration_ ==
                 std::numeric_limits<std::uint32_t>::max()
@@ -8444,7 +8485,7 @@ void BridgeRuntime::HandlePauseVote(
     }
 
     if (*localSlot_ == PlayerSlot::Host) {
-        if (payload.kind != PauseVoteKind::RequestToggle ||
+        if (payload.kind != PauseVoteKind::RequestState ||
             payload.voterSlot != PlayerSlot::Guest) {
             return;
         }
@@ -8452,12 +8493,15 @@ void BridgeRuntime::HandlePauseVote(
             PublishPauseVoteState();
             return;
         }
-        guestPauseVoted_ = !guestPauseVoted_;
-        if (hostPauseVoted_ && guestPauseVoted_) {
-            synchronizedPaused_ = !synchronizedPaused_;
-            hostPauseVoted_ = false;
-            guestPauseVoted_ = false;
-        }
+        const bool desiredPaused =
+            (payload.flags &
+             static_cast<std::uint8_t>(
+                 PauseVoteFlag::Paused)) != 0U;
+        pauseStateChangedByRemoteThisTick_ =
+            synchronizedPaused_ != desiredPaused;
+        synchronizedPaused_ = desiredPaused;
+        hostPauseVoted_ = false;
+        guestPauseVoted_ = false;
         pauseVoteGeneration_ =
             pauseVoteGeneration_ ==
                     std::numeric_limits<std::uint32_t>::max()
@@ -8481,10 +8525,13 @@ void BridgeRuntime::HandlePauseVote(
         (payload.flags &
          static_cast<std::uint8_t>(
              PauseVoteFlag::GuestVoted)) != 0U;
-    synchronizedPaused_ =
+    const bool desiredPaused =
         (payload.flags &
          static_cast<std::uint8_t>(
              PauseVoteFlag::Paused)) != 0U;
+    pauseStateChangedByRemoteThisTick_ =
+        synchronizedPaused_ != desiredPaused;
+    synchronizedPaused_ = desiredPaused;
 }
 
 void BridgeRuntime::PublishPauseVoteState() {
@@ -8493,14 +8540,6 @@ void BridgeRuntime::PublishPauseVoteState() {
         return;
     }
     std::uint8_t flags{};
-    if (hostPauseVoted_) {
-        flags |= static_cast<std::uint8_t>(
-            PauseVoteFlag::HostVoted);
-    }
-    if (guestPauseVoted_) {
-        flags |= static_cast<std::uint8_t>(
-            PauseVoteFlag::GuestVoted);
-    }
     if (synchronizedPaused_) {
         flags |= static_cast<std::uint8_t>(
             PauseVoteFlag::Paused);
@@ -8519,9 +8558,7 @@ void BridgeRuntime::PublishPauseVoteState() {
     facade_.Log(
         synchronizedPaused_
             ? "authoritative synchronized pause state published"
-            : (hostPauseVoted_ || guestPauseVoted_
-                   ? "authoritative pause vote published"
-                   : "authoritative synchronized resume state published"));
+            : "authoritative synchronized resume state published");
 }
 
 void BridgeRuntime::ResetPauseVoteState(
@@ -9824,12 +9861,34 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
     }
     if (command == BridgeCommand::ToggleSoloTest ||
         command == BridgeCommand::ToggleGhostRecord ||
-        command == BridgeCommand::ToggleGhostReplay) {
+        command == BridgeCommand::ToggleGhostReplay ||
+        command == BridgeCommand::ToggleGuestWorldView) {
+        if (command == BridgeCommand::ToggleGuestWorldView) {
+            constexpr auto kSyntheticTest = static_cast<std::uint32_t>(
+                PlayerStateFlag::SyntheticTest);
+            const bool syntheticPeer =
+                latestRemoteState_.has_value() &&
+                (latestRemoteState_->flags & kSyntheticTest) != 0U;
+            if (!soloGuestWorldViewEnabled_ && !syntheticPeer) {
+                facade_.Log(
+                    "[GUEST_WORLD_VIEW] rejected: start SOLO TEST and Live mirror first");
+                return;
+            }
+            soloGuestWorldViewEnabled_ =
+                !soloGuestWorldViewEnabled_;
+            if (!soloGuestWorldViewEnabled_) {
+                ResetGuestWorldMirror();
+            } else {
+                guestWorldMirrorActive_ = true;
+            }
+        }
         const auto action =
             command == BridgeCommand::ToggleGhostRecord
                 ? SessionMenuAction::ToggleGhostRecord
                 : command == BridgeCommand::ToggleGhostReplay
                       ? SessionMenuAction::ToggleGhostReplay
+                      : command == BridgeCommand::ToggleGuestWorldView
+                            ? SessionMenuAction::ToggleGuestWorldView
                       : SessionMenuAction::ToggleSoloTest;
         Frame frame;
         frame.header.type = MessageType::SessionMenuRequest;
@@ -9841,6 +9900,10 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
                         ? "[INFO][GHOST_RECORD] F9 toggle request sent to the sidecar"
                     : command == BridgeCommand::ToggleGhostReplay
                         ? "[INFO][GHOST_REPLAY] F9 toggle request sent to the sidecar"
+                    : command == BridgeCommand::ToggleGuestWorldView
+                        ? (soloGuestWorldViewEnabled_
+                               ? "[INFO][GUEST_WORLD_VIEW] co-op population layer enabled"
+                               : "[INFO][GUEST_WORLD_VIEW] host population layer restored")
                         : "[INFO][SOLO_TEST] F9 toggle request sent to the sidecar");
         return;
     }

@@ -450,19 +450,10 @@ bool IsRemoteAnimationStateFresh(
     return tickDistance <= kRemoteAnimationStateCacheTtlMs;
 }
 
-bool ShouldApplyAnimGraphDirectRootCorrection(
+bool ShouldRunAnimGraphVisualController(
     const bool mounted,
     const bool protectedPhysicalAnimation) noexcept {
     return !mounted && !protectedPhysicalAnimation;
-}
-
-bool ShouldApplyDirectReplicaPhysicalRootLeash(
-    const bool mounted,
-    const bool protectedPhysicalAnimation,
-    const float positionErrorMeters) noexcept {
-    return !mounted && protectedPhysicalAnimation &&
-           IsFinite(positionErrorMeters) && positionErrorMeters >= 0.0F &&
-           positionErrorMeters >= kDirectReplicaPhysicalRootLeashMeters;
 }
 
 RemoteLocomotion SelectDirectReplicaVisualLocomotion(
@@ -916,6 +907,15 @@ bool ShouldApplyRemoteHardResync(
                kRemoteMotionEmergencyHardResyncSustainMs;
     }
     return sustainedForMs >= kRemoteMotionHardResyncSustainMs;
+}
+
+bool ShouldApplyRemoteMountHardCorrection(
+    const float positionErrorMeters,
+    const float horizontalErrorMeters) noexcept {
+    return IsFinite(positionErrorMeters) && positionErrorMeters >= 0.0F &&
+           IsFinite(horizontalErrorMeters) && horizontalErrorMeters >= 0.0F &&
+           (positionErrorMeters >= kRemoteMountHardCorrectionMeters ||
+            horizontalErrorMeters >= kRemoteMountHardCorrectionMeters);
 }
 
 bool ShouldExecuteDeferredRemoteTraversal(

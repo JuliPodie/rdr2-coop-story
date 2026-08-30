@@ -2948,11 +2948,11 @@ public static class BinaryPayloadCodec
                 $"Pause vote contains unknown flags 0x{(byte)payload.Flags:X2}.");
         }
 
-        if (payload.Kind == PauseVoteKind.RequestToggle &&
-            payload.Flags != PauseVoteFlags.None)
+        if (payload.Kind == PauseVoteKind.RequestState &&
+            (payload.Flags & ~PauseVoteFlags.Paused) != 0)
         {
             throw new ProtocolException(
-                "Pause-vote request must not carry authoritative state flags.");
+                "Pause-state request may only carry the desired paused flag.");
         }
     }
 

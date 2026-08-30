@@ -551,8 +551,9 @@ public sealed class MainForm : Form
             ForeColor = LauncherTheme.TextMuted,
             Text =
                 "The launcher checks the installation, replaces the current build if needed, " +
-                "and starts a synthetic SOLO BOT player. After entering Story Mode, " +
-                "open F9 and select 'Solo test: start / stop'."
+                "and starts a LIVE MIRROR of your real player through the co-op receiver. " +
+                "After entering Story Mode, open F9 and start Live mirror; " +
+                "use 'World view: host / co-op' to inspect guest NPC replicas."
         };
         panel.Controls.Add(description);
         panel.Controls.Add(title);
@@ -1458,7 +1459,7 @@ public sealed class MainForm : Form
                 ? "The current build is installed correctly."
                 : "The current build will now be installed safely.";
         var modeInstruction = _selectedMode == LauncherMode.Solo
-            ? "After loading Story Mode, open F9 and start the solo test."
+            ? "After loading Story Mode, open F9 and start Live mirror."
             : _selectedMode == LauncherMode.Host
                 ? $"In Story Mode, load the slot corresponding to {Path.GetFileName(settings.HostSavePath)}."
                 : "After entering Story Mode, wait for the host connection.";
@@ -1495,7 +1496,7 @@ public sealed class MainForm : Form
                 _services.Package,
                 launchTarget);
             SetStatus(
-                "Solo test started. In Story Mode, use F9 -> 'Solo test: start / stop'.",
+                "Solo test started. In Story Mode, use F9 -> 'Live mirror: start / stop'.",
                 StatusKind.Success);
         }
         else
@@ -2324,7 +2325,7 @@ public sealed class MainForm : Form
                 ? "Player"
                 : _nickname.Text.Trim(),
             localRole,
-            _selectedMode == LauncherMode.Solo ? "SOLO BOT" : string.Empty,
+            _selectedMode == LauncherMode.Solo ? "LIVE MIRROR" : string.Empty,
             localRole == LauncherRole.Host
                 ? LauncherRole.Guest
                 : LauncherRole.Host,

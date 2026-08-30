@@ -23,7 +23,7 @@ labels describe research milestones, not stable public releases.
   fallback behavior.
 - **Protocol 30:** exact MissionData progression barrier, deny-by-default
   completion/reward catalog, and mission dialogue cue/ready coordination.
-- **Protocol 32:** host-owned ambient-event coordinator and 50 reviewed
+- **Protocol 32:** host-owned ambient-event coordinator, later expanded to 94 reviewed
   free-roam script detections spanning five bounded co-op profiles.
 
 The current private tester line is **Protocol 32**. It remains experimental and

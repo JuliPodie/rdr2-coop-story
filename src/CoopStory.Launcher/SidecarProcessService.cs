@@ -127,7 +127,7 @@ public sealed class SidecarProcessService : IDisposable
         if (localTest)
         {
             start.ArgumentList.Add("--motion-profile");
-            start.ArgumentList.Add("puppet");
+            start.ArgumentList.Add("mirror");
             start.ArgumentList.Add("--wait-for-f9");
             start.ArgumentList.Add("true");
             start.ArgumentList.Add("--ghost-recording");
@@ -175,7 +175,7 @@ public sealed class SidecarProcessService : IDisposable
         UpdateLobby(_ => new LauncherLobbySnapshot(
             settings.Nickname,
             settings.Role,
-            localTest ? "SOLO BOT" : string.Empty,
+            localTest ? "LIVE MIRROR" : string.Empty,
             settings.Role == LauncherRole.Host
                 ? LauncherRole.Guest
                 : LauncherRole.Host,

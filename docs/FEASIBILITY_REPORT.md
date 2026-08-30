@@ -43,7 +43,7 @@ and difficult to validate safely.
 - Synthetic and dependency-free tests can validate large parts of the system
   without launching the game.
 - The Protocol 32 tester build also exercises an exact-MissionData barrier,
-  bounded dialogue cue/ready coordination, and 50 host-owned ambient encounter
+  bounded dialogue cue/ready coordination, and 94 host-owned ambient encounter
   detections. Those remain validation features, not proof of a shared campaign.
 
 ## What it does not prove

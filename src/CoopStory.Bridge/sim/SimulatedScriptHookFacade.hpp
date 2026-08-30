@@ -77,7 +77,8 @@ public:
     void MaintainWorldMirrorGuest(
         bool active,
         bool authoritativePopulationReady,
-        float radiusMeters) noexcept override;
+        float radiusMeters,
+        bool preserveSameProcessSourceActors = false) noexcept override;
     [[nodiscard]] bool ApplyWorldEntityDamage(
         LocalEntityHandle target,
         float damage) noexcept override;

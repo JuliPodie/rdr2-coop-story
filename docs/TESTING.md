@@ -64,6 +64,57 @@ Verify that:
 Do not perform an install operation against a game directory during a UI-only
 check.
 
+## One-PC live animation mirror
+
+The launcher **SOLO TEST** mode runs one RDR2 Story Mode process plus an
+authenticated loopback guest. After loading a safe free-roam save, open `F9`
+and select **Live mirror: start / stop**. A replica named `LIVE MIRROR` appears
+three metres beside the local player and consumes the same player-state,
+equipment, interpolation, animation-presentation, and remote-ped code used by
+a real peer.
+
+Walk, run, sprint, stop, turn, crouch, aim, fire, reload, enter/leave cover,
+jump, climb, swim, fall, and recover while watching the replica. The mirror
+keeps a fixed world-space offset so both paths remain comparable. Mount state
+is deliberately omitted until the separate mount entity/relationship lane can
+also be mirrored; use a two-PC session for mount animation validation.
+
+For NPC and encounter presentation, keep Live mirror running and select
+**World view: host / co-op** in `F9`. In co-op view, the authenticated host
+world graph is replayed through the normal guest proxy renderer. Entity IDs,
+parent dependencies, positions, and task targets receive the same fixed offset
+as `LIVE MIRROR`. The source population remains faintly visible and keeps its
+original collision in this one-process mode so host sampling cannot feed back
+proxy corrections or make actors fall through terrain. Select the command
+again to delete the guest graph and restore normal presentation. This exception
+is loopback-only and cannot enable guest-authored world entities in a normal
+two-PC session.
+
+Use the toggle to compare NPC count, models, relative placement, weapons,
+health/death state, locomotion/combat tasks, mounted parent ordering, and
+despawn cleanup. Guest replicas are invulnerable presentation actors and never
+fire local damaging bullets. Combat contribution and encounter authority still
+require their separate authenticated intent paths.
+
+On a real two-PC guest, deterministic Story and camp actors reported as
+script-owned scenarios are matched by model and a tight position tolerance to
+the guest's existing game-owned actor. RDR2 remains the animation owner for a
+match, preserving its authored scenario graph, current phase, props, and IK.
+The log reports a match as `[WORLD_SCENARIO_RECONCILE]` and includes the count
+as `exact-local-scenario` in `[WORLD_PROXY_PHYSICS]`. An unmatched actor first
+tries the guest's nearest authored scenario point, then uses a stable idle
+fallback instead of repeatedly clearing tasks.
+
+This test validates the local sender and production receiver in one process,
+but it cannot reproduce two independent game clocks, frame rates, streaming
+state, collision worlds, or physics. In particular, the three-metre offset has
+no authored scenario point, so it validates population, placement, task
+classification, and stability—not the exact camp chore clip. The current SDK
+also cannot enumerate an arbitrary ped's active animation dictionary, clip, or
+phase; exact generic clip streaming would require a separate version-specific
+game-memory integration. Repeat important scenario fixes on two PCs when a
+tester is available.
+
 ## Two-PC research test prerequisites
 
 An in-game test requires an independently obtained Script Hook runtime and SDK,
@@ -95,10 +146,11 @@ Test one feature group at a time:
 
 ## Ambient encounter pass
 
-The tester build contains 50 reviewed free-roam script detections: 35 roadside
-ambushes, five rescues, three wagon defenses, three animal attacks, and four
-camp clear-outs. These are host-owned bridge scenes, not synchronized runs of
-Rockstar's ambient scripts.
+The tester build contains 94 reviewed free-roam action-script detections: 65
+hostile roadside actions, 15 rescues, six wagon defenses, three animal attacks,
+and five camp clear-outs. These are host-owned bridge scenes, not synchronized
+runs of Rockstar's ambient scripts. Non-action ambient vignettes continue
+through the ordinary world mirror and are not converted into invented fights.
 
 For each profile, use disposable free-roam saves and confirm:
 

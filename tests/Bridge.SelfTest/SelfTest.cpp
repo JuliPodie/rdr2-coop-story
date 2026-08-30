@@ -51,12 +51,12 @@ void Check(
     Check(static_cast<bool>(expression), #expression, __FILE__, __LINE__)
 
 void AmbientEncounterCoordinatorPolicy() {
-    CHECK(kBridgeOwnedEncounterCatalog.size() == 50U);
-    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::RoadsideAmbush) == 35U);
-    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::HostageRescue) == 5U);
-    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::WagonDefense) == 3U);
+    CHECK(kBridgeOwnedEncounterCatalog.size() == 94U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::RoadsideAmbush) == 65U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::HostageRescue) == 15U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::WagonDefense) == 6U);
     CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::AnimalAttack) == 3U);
-    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::CampClearout) == 4U);
+    CHECK(BridgeOwnedEncounterCount(AmbientEncounterProfile::CampClearout) == 5U);
     for (const auto& definition : kBridgeOwnedEncounterCatalog) {
         CHECK(definition.scriptId != 0U);
         CHECK(definition.scriptName != nullptr);
@@ -1692,7 +1692,7 @@ void PayloadContracts() {
 }
 
 void AnimationReplicationPayloadContracts() {
-    CHECK(kProtocolVersion == 32U);
+    CHECK(kProtocolVersion == 33U);
     CHECK(
         static_cast<std::uint16_t>(MessageType::PlayerAnimationState) ==
         28U);
@@ -2369,14 +2369,14 @@ void MenuEdges() {
     (void)soloMenu.Update(MenuInputState{.up = true});
     CHECK(
         soloMenu.Commands()[soloMenu.Selection()] ==
-        BridgeCommand::ArmFud1MissionProgression);
-    CHECK(soloMenu.Commands().size() == 24U);
+        BridgeCommand::RetryCheckpoint);
+    CHECK(soloMenu.Commands().size() == 25U);
     CHECK(
         soloMenu.Commands()[0U] ==
         BridgeCommand::SkipCutscene);
     CHECK(
         soloMenu.Commands()[MenuController::PrimaryCommandCount()] ==
-        BridgeCommand::RetryCheckpoint);
+        BridgeCommand::GrantTestLasso);
 
     MenuController columnMenu;
     (void)columnMenu.Update(MenuInputState{.f9 = true});
@@ -2384,7 +2384,7 @@ void MenuEdges() {
     (void)columnMenu.Update(MenuInputState{.right = true});
     CHECK(
         columnMenu.Commands()[columnMenu.Selection()] ==
-        BridgeCommand::RetryCheckpoint);
+        BridgeCommand::GrantTestLasso);
     (void)columnMenu.Update({});
     (void)columnMenu.Update(MenuInputState{.left = true});
     CHECK(columnMenu.Selection() == 0U);
@@ -2397,6 +2397,9 @@ void MenuEdges() {
     CHECK(
         MenuController::Label(BridgeCommand::ToggleGhostReplay) ==
         "Ghost Replay: start / stop");
+    CHECK(
+        MenuController::Label(BridgeCommand::ToggleGuestWorldView) ==
+        "World view: host / co-op");
     CHECK(
         MenuController::Label(BridgeCommand::GrantTestPistol) ==
         "Give pistol + max ammo (test)");
@@ -2497,6 +2500,13 @@ void SessionOverlayAndPayloads() {
         stopRequest.front() ==
         static_cast<std::uint8_t>(
             SessionMenuAction::StopSession));
+    const auto guestWorldRequest = EncodeSessionMenuRequest(
+        SessionMenuAction::ToggleGuestWorldView);
+    CHECK(guestWorldRequest.size() == 1U);
+    CHECK(
+        guestWorldRequest.front() ==
+        static_cast<std::uint8_t>(
+            SessionMenuAction::ToggleGuestWorldView));
 
     const std::string message{"HOST ready"};
     const std::string invite{"R2C1.secret"};
@@ -3207,25 +3217,22 @@ void RemoteSnapshotInterpolation() {
         0U,
         0U,
         1'100U));
-    CHECK(ShouldApplyAnimGraphDirectRootCorrection(false, false));
-    CHECK(!ShouldApplyAnimGraphDirectRootCorrection(true, false));
-    CHECK(!ShouldApplyAnimGraphDirectRootCorrection(false, true));
-    CHECK(!ShouldApplyDirectReplicaPhysicalRootLeash(
-        false,
-        false,
-        kDirectReplicaPhysicalRootLeashMeters + 1.0F));
-    CHECK(!ShouldApplyDirectReplicaPhysicalRootLeash(
-        true,
-        true,
-        kDirectReplicaPhysicalRootLeashMeters + 1.0F));
-    CHECK(!ShouldApplyDirectReplicaPhysicalRootLeash(
-        false,
-        true,
-        kDirectReplicaPhysicalRootLeashMeters - 0.01F));
-    CHECK(ShouldApplyDirectReplicaPhysicalRootLeash(
-        false,
-        true,
-        kDirectReplicaPhysicalRootLeashMeters));
+    CHECK(ShouldRunAnimGraphVisualController(false, false));
+    CHECK(!ShouldRunAnimGraphVisualController(true, false));
+    CHECK(!ShouldRunAnimGraphVisualController(false, true));
+    CHECK(!ShouldApplyRemoteMountHardCorrection(0.55F, 0.55F));
+    CHECK(!ShouldApplyRemoteMountHardCorrection(
+        kRemoteMountHardCorrectionMeters - 0.01F,
+        kRemoteMountHardCorrectionMeters - 0.01F));
+    CHECK(ShouldApplyRemoteMountHardCorrection(
+        kRemoteMountHardCorrectionMeters,
+        0.0F));
+    CHECK(ShouldApplyRemoteMountHardCorrection(
+        0.0F,
+        kRemoteMountHardCorrectionMeters));
+    CHECK(!ShouldApplyRemoteMountHardCorrection(
+        std::numeric_limits<float>::quiet_NaN(),
+        kRemoteMountHardCorrectionMeters));
 
     CHECK(
         SelectDirectReplicaVisualLocomotion(
@@ -3792,10 +3799,13 @@ public:
     void MaintainWorldMirrorGuest(
         const bool active,
         const bool authoritativePopulationReady,
-        float) noexcept override {
+        float,
+        const bool preserveSameProcessSourceActors = false) noexcept override {
         worldMirrorGuestActive = active;
         worldMirrorAuthorityReady =
             active && authoritativePopulationReady;
+        worldMirrorSameProcessSourcePreserved =
+            active && preserveSameProcessSourceActors;
         ++worldMirrorMaintainCalls;
     }
     bool ApplyWorldEntityDamage(
@@ -4045,6 +4055,7 @@ public:
     std::vector<PauseVoteView> pauseVoteStates{};
     bool realtimeSessionActive{};
     bool worldMirrorAuthorityReady{};
+    bool worldMirrorSameProcessSourcePreserved{};
     bool synchronizedPauseActive{};
     bool applyRemoteTransformSucceeds{true};
     bool applyWorldDamageSucceeds{true};
@@ -4822,6 +4833,45 @@ void RuntimeCatalogEncountersUseOneHostOwnedScene() {
         CHECK(hostFacade.clearedAmbientEncounterPresentations.size() == 1U);
         CHECK(hostFacade.clearedAmbientEncounterPresentations.front() ==
             active->instanceId);
+    }
+
+    // Authenticated peers still cannot turn arbitrary or profile-mismatched
+    // evidence hashes into host-owned actors.
+    for (const auto& [evidence, profile] :
+         std::array<std::pair<std::uint32_t, AmbientEncounterProfile>, 2U>{{
+             {0xDEADBEEFU, AmbientEncounterProfile::RoadsideAmbush},
+             {kBridgeOwnedEncounterCatalog.front().scriptId,
+              AmbientEncounterProfile::HostageRescue}}}) {
+        std::string error;
+        TestFacade hostFacade;
+        hostFacade.beginAmbientEncounterPresentationResult = true;
+        TestTransport hostTransport;
+        hostTransport.acknowledgementPayload = {
+            static_cast<std::uint8_t>(PlayerSlot::Host)};
+        hostTransport.remoteSlot = PlayerSlot::Guest;
+        hostTransport.remoteEntityId = guestId;
+        BridgeRuntime host{hostFacade, hostTransport};
+        CHECK(host.Start(supported, error));
+
+        Frame forged;
+        forged.header.type = MessageType::AmbientEncounterProposal;
+        forged.header.sequence = ++hostTransport.inboundSequence;
+        forged.header.tick = hostFacade.tick;
+        forged.payload = EncodeAmbientEncounterProposal(
+            AmbientEncounterProposalPayload{
+                guestId, 77U, profile, {25.0F, 30.0F, 5.0F}, 32.0F,
+                evidence, 0xA5A55A5AU});
+        hostTransport.inbound.push_back(std::move(forged));
+        host.Tick();
+
+        const auto rejected = LastSentAmbientEncounterState(hostTransport);
+        CHECK(rejected.has_value());
+        CHECK(rejected->phase == AmbientEncounterPhase::Proposed);
+        CHECK(rejected->rejection ==
+            AmbientEncounterRejection::UnsupportedProfile);
+        CHECK(hostFacade.begunAmbientEncounterPresentations.empty());
+        CHECK(HasLog(hostFacade,
+            "rejected unreviewed or mismatched guest evidence"));
     }
 }
 
@@ -11318,7 +11368,7 @@ void ReconnectWaitsForFreshRole() {
     CHECK(runtime.LocalEntityId().Counter() == 2U);
 }
 
-void RuntimeSynchronizedPauseRequiresBothVotes() {
+void RuntimeSynchronizedPauseFollowsEitherPlayer() {
     TestFacade facade;
     TestTransport transport;
     transport.acknowledgementPayload = {
@@ -11349,30 +11399,16 @@ void RuntimeSynchronizedPauseRequiresBothVotes() {
     CHECK(
         (state->flags &
          static_cast<std::uint8_t>(
-             PauseVoteFlag::HostVoted)) != 0U);
-    CHECK(!facade.synchronizedPauseActive);
-
-    Frame guestVote;
-    guestVote.header.type = MessageType::PauseVote;
-    guestVote.header.sequence =
-        ++transport.inboundSequence;
-    guestVote.header.tick = facade.tick;
-    guestVote.payload = EncodePauseVote(
-        PauseVotePayload{
-            PauseVoteKind::RequestToggle,
-            PlayerSlot::Guest,
-            0U,
-            state->generation});
-    transport.inbound.push_back(
-        std::move(guestVote));
-    runtime.Tick();
-    CHECK(facade.synchronizedPauseActive);
-    state = LastSentPauseVote(transport);
-    CHECK(state.has_value());
+             PauseVoteFlag::Paused)) != 0U);
     CHECK(
         (state->flags &
          static_cast<std::uint8_t>(
-             PauseVoteFlag::Paused)) != 0U);
+             PauseVoteFlag::HostVoted)) == 0U);
+    CHECK(
+        (state->flags &
+         static_cast<std::uint8_t>(
+             PauseVoteFlag::GuestVoted)) == 0U);
+    CHECK(facade.synchronizedPauseActive);
 
     Frame sameSessionResync;
     sameSessionResync.header.type = MessageType::ResyncRequest;
@@ -11405,18 +11441,6 @@ void RuntimeSynchronizedPauseRequiresBothVotes() {
     runtime.Tick();
     CHECK(facade.synchronizedPauseActive);
 
-    facade.menuInput.cancel = true;
-    runtime.Tick();
-    facade.menuInput = {};
-    runtime.Tick();
-    state = LastSentPauseVote(transport);
-    CHECK(state.has_value());
-    CHECK(
-        (state->flags &
-         static_cast<std::uint8_t>(
-             PauseVoteFlag::HostVoted)) != 0U);
-    CHECK(facade.synchronizedPauseActive);
-
     Frame guestResume;
     guestResume.header.type = MessageType::PauseVote;
     guestResume.header.sequence =
@@ -11424,12 +11448,41 @@ void RuntimeSynchronizedPauseRequiresBothVotes() {
     guestResume.header.tick = facade.tick;
     guestResume.payload = EncodePauseVote(
         PauseVotePayload{
-            PauseVoteKind::RequestToggle,
+            PauseVoteKind::RequestState,
             PlayerSlot::Guest,
             0U,
             state->generation});
     transport.inbound.push_back(
         std::move(guestResume));
+    runtime.Tick();
+    CHECK(!facade.synchronizedPauseActive);
+
+    state = LastSentPauseVote(transport);
+    CHECK(state.has_value());
+    Frame guestPause;
+    guestPause.header.type = MessageType::PauseVote;
+    guestPause.header.sequence =
+        ++transport.inboundSequence;
+    guestPause.header.tick = facade.tick;
+    guestPause.payload = EncodePauseVote(
+        PauseVotePayload{
+            PauseVoteKind::RequestState,
+            PlayerSlot::Guest,
+            static_cast<std::uint8_t>(
+                PauseVoteFlag::Paused),
+            state->generation});
+    // A simultaneous host Escape expresses the same pre-frame intent. The
+    // accepted remote state must win this tick instead of toggling twice.
+    facade.menuInput.cancel = true;
+    transport.inbound.push_back(std::move(guestPause));
+    runtime.Tick();
+    CHECK(facade.synchronizedPauseActive);
+    facade.menuInput = {};
+    runtime.Tick();
+
+    facade.menuInput.cancel = true;
+    runtime.Tick();
+    facade.menuInput = {};
     runtime.Tick();
     CHECK(!facade.synchronizedPauseActive);
 }
@@ -11611,8 +11664,8 @@ int main() {
          RuntimeGuestValidatesTeleportTarget},
         {"InvalidRoleAcknowledgement", InvalidRoleAcknowledgement},
         {"ReconnectWaitsForFreshRole", ReconnectWaitsForFreshRole},
-        {"RuntimeSynchronizedPauseRequiresBothVotes",
-         RuntimeSynchronizedPauseRequiresBothVotes},
+        {"RuntimeSynchronizedPauseFollowsEitherPlayer",
+         RuntimeSynchronizedPauseFollowsEitherPlayer},
         {"RuntimeCheckpointRespawnRestoresLifecycle",
          RuntimeCheckpointRespawnRestoresLifecycle},
     };

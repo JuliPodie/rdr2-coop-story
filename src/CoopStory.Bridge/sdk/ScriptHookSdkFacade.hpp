@@ -162,7 +162,8 @@ public:
     void MaintainWorldMirrorGuest(
         bool active,
         bool authoritativePopulationReady,
-        float radiusMeters) noexcept override;
+        float radiusMeters,
+        bool preserveSameProcessSourceActors = false) noexcept override;
     [[nodiscard]] bool ApplyWorldEntityDamage(
         LocalEntityHandle target,
         float damage) noexcept override;
@@ -218,6 +219,11 @@ private:
         // The first hostileCount entries are host-authoritative combatants.
         // The remaining entries are non-combatant scene roles.
         std::vector<LocalEntityHandle> peds{};
+        // Actors remain frozen until their local terrain/collision tile is
+        // ready. This prevents a newly materialized encounter from falling
+        // through the world before its first combat task can run.
+        std::vector<bool> collisionReady{};
+        std::uint64_t collisionDeadlineMs{};
         std::size_t hostileCount{};
         std::size_t protectedCivilianCount{};
         struct SuppressedSourcePed final {
@@ -302,6 +308,8 @@ private:
             WorldProxySpawnDisposition::PendingModel};
         bool aiming{};
         bool mounted{};
+        bool borrowedLocalEntity{};
+        bool collisionReady{};
         bool modelWaitLogged{};
         bool permanentFailureLogged{};
     };
@@ -362,6 +370,7 @@ private:
     EntityRegistry remoteMountReplicas_{};
     EntityRegistry remoteVehicleReplicas_{};
     NetEntityId remotePlayerId_{};
+    bool remotePlayerCollisionReady_{};
     NetEntityId remoteMountId_{};
     std::uint32_t remoteMountModelHash_{};
     std::uint32_t remoteMountGeneration_{};
@@ -382,6 +391,7 @@ private:
     Vec3 previousRemoteMountTaskDestination_{};
     LocalEntityHandle remotePlayerMountHandle_{};
     bool remoteMountMoving_{};
+    bool remoteMountCollisionReady_{};
     bool remotePlayerMounted_{};
     bool remotePlayerMountBorrowed_{};
     LocalEntityHandle localKnownMountHandle_{};
@@ -827,6 +837,7 @@ private:
     std::uint64_t animGraphMissingLocomotionTicks_{};
     std::uint64_t animGraphMissingLocomotionSinceMs_{};
     std::uint64_t animGraphPreviousLocomotionRecoveryMs_{};
+    std::uint64_t animGraphPreviousTraversalRecoveryMs_{};
     std::uint64_t animGraphLocomotionRecoveries_{};
     PlayerLocomotionMode animGraphPreviousLocomotionMode_{
         PlayerLocomotionMode::Grounded};
@@ -838,7 +849,6 @@ private:
     std::uint64_t animGraphTraversalClimbTaskStarts_{};
     std::uint64_t animGraphAirborneLaunches_{};
     std::uint64_t animGraphPhysicalRootYieldTicks_{};
-    std::uint64_t animGraphPhysicalRootLeashCorrections_{};
     std::uint64_t animGraphRagdollTaskStarts_{};
     std::uint64_t animGraphStealthExpectedTicks_{};
     std::uint64_t animGraphStealthObservedTicks_{};

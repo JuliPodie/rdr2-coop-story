@@ -289,7 +289,8 @@ void SimulatedScriptHookFacade::DespawnWorldEntityProxy(
 void SimulatedScriptHookFacade::MaintainWorldMirrorGuest(
     const bool active,
     const bool,
-    const float) noexcept {
+    const float,
+    const bool) noexcept {
     if (!active) {
         worldEntityProxies_.clear();
     }

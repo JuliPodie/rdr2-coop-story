@@ -25,7 +25,7 @@ public static class LocalGameTestSession
         CancellationToken cancellationToken = default,
         Action<string>? status = null,
         LocalGameTestMotionProfile motionProfile =
-            LocalGameTestMotionProfile.PuppetCourse,
+            LocalGameTestMotionProfile.LiveMirror,
         bool waitForInGameActivation = false,
         string? ghostRecordingPath = null)
     {
@@ -56,7 +56,8 @@ public static class LocalGameTestSession
             hostConfig,
             credentials,
             logger,
-            IPAddress.Loopback);
+            IPAddress.Loopback,
+            allowLoopbackGuestWorldView: true);
         await using var guest = new LanSessionGuest(
             guestConfig,
             credentials,
@@ -64,6 +65,8 @@ public static class LocalGameTestSession
             IPAddress.Loopback);
 
         HostAnchor? latestHost = null;
+        AnimationAnchor? latestHostAnimation = null;
+        EquipmentAnchor? latestHostEquipment = null;
         var hostSnapshotsObserved = 0;
         var guestSnapshotsSent = 0;
         var guestSnapshotsDelivered = 0;
@@ -72,6 +75,8 @@ public static class LocalGameTestSession
             ? LocalSoloTestMode.Idle
             : LocalSoloTestMode.Automatic;
         var modeGeneration = 0;
+        var guestWorldViewEnabled = false;
+        var guestWorldViewReplayPending = false;
         var entityId = CreateSyntheticGuestId();
         GhostRecordingDocument? replayRecording = null;
         long replayStartedAtMilliseconds = 0;
@@ -99,6 +104,7 @@ public static class LocalGameTestSession
         var previousSyntheticJumping = false;
         Vector3? previousSyntheticPosition = null;
         var previousSyntheticHeading = 0f;
+        Vector3? liveMirrorWorldOffset = null;
         runtime.SoloTestToggleRequested += () =>
         {
             bool enabled;
@@ -197,6 +203,32 @@ public static class LocalGameTestSession
                 return true;
             }
         };
+        runtime.GuestWorldViewToggleRequested += () =>
+        {
+            lock (modeGate)
+            {
+                guestWorldViewEnabled = !guestWorldViewEnabled;
+                if (guestWorldViewEnabled)
+                {
+                    if (mode != LocalSoloTestMode.Automatic)
+                    {
+                        mode = LocalSoloTestMode.Automatic;
+                        entityId = CreateSyntheticGuestId();
+                        modeGeneration++;
+                    }
+                    guestWorldViewReplayPending = true;
+                }
+                else
+                {
+                    guestWorldViewReplayPending = false;
+                }
+                status?.Invoke(
+                    guestWorldViewEnabled
+                        ? "GUEST_WORLD_VIEW_ENABLED: replaying the host entity graph as offset guest proxies."
+                        : "GUEST_WORLD_VIEW_DISABLED: restoring the host world layer.");
+                return guestWorldViewEnabled;
+            }
+        };
         runtime.BridgeEnvelopeDelivered += envelope =>
         {
             if (envelope.Type != MessageType.PlayerState)
@@ -259,6 +291,76 @@ public static class LocalGameTestSession
                 return;
             }
 
+            if (envelope.Type is MessageType.EntitySpawn or
+                MessageType.EntityUpdate)
+            {
+                bool worldViewEnabled;
+                Vector3 worldOffset;
+                lock (modeGate)
+                {
+                    worldViewEnabled = guestWorldViewEnabled;
+                    if (!liveMirrorWorldOffset.HasValue)
+                    {
+                        var host = Volatile.Read(ref latestHost);
+                        if (host is not null)
+                        {
+                            liveMirrorWorldOffset = CreateLiveMirrorOffset(
+                                host.Heading);
+                        }
+                    }
+                    worldOffset = liveMirrorWorldOffset ?? Vector3.Zero;
+                }
+                if (!worldViewEnabled || worldOffset == Vector3.Zero)
+                {
+                    return;
+                }
+                var source = BinaryPayloadCodec.DecodeWorldEntityState(
+                    envelope.Payload.Span);
+                var guestView = CreateGuestWorldViewState(
+                    source,
+                    worldOffset);
+                if (envelope.Type == MessageType.EntityUpdate)
+                {
+                    await guest.SendSnapshotAsync(
+                        MessageType.EntityUpdate,
+                        BinaryPayloadCodec.EncodeWorldEntityState(guestView),
+                        envelope.Tick,
+                        eventCancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await guest.SendControlAsync(
+                        MessageType.EntitySpawn,
+                        BinaryPayloadCodec.EncodeWorldEntityState(guestView),
+                        envelope.Tick,
+                        eventCancellationToken).ConfigureAwait(false);
+                }
+                return;
+            }
+
+            if (envelope.Type == MessageType.EntityDespawn)
+            {
+                bool worldViewEnabled;
+                lock (modeGate)
+                {
+                    worldViewEnabled = guestWorldViewEnabled;
+                }
+                if (!worldViewEnabled)
+                {
+                    return;
+                }
+                var source = BinaryPayloadCodec.DecodeEntityDespawn(
+                    envelope.Payload.Span);
+                var guestView = new EntityDespawnPayload(
+                    RemapGuestWorldEntityId(source.EntityId));
+                await guest.SendControlAsync(
+                    MessageType.EntityDespawn,
+                    BinaryPayloadCodec.EncodeEntityDespawn(guestView),
+                    envelope.Tick,
+                    eventCancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (envelope.Type == MessageType.PlayerState)
             {
                 var state = BinaryPayloadCodec.DecodePlayerState(
@@ -271,10 +373,7 @@ public static class LocalGameTestSession
                     Volatile.Write(
                         ref latestHost,
                         new HostAnchor(
-                            state.Position,
-                            state.Velocity,
-                            state.Heading,
-                            state.Flags,
+                            state,
                             observedAtMilliseconds));
                     lock (modeGate)
                     {
@@ -297,6 +396,27 @@ public static class LocalGameTestSession
                 var equipment = BinaryPayloadCodec.DecodeEquipmentState(
                     envelope.Payload.Span);
                 recordingStore.ObserveEquipment(equipment);
+                if (equipment.EntityId == Volatile.Read(ref latestHost)?.State.EntityId)
+                {
+                    Volatile.Write(
+                        ref latestHostEquipment,
+                        new EquipmentAnchor(
+                            equipment,
+                            Environment.TickCount64));
+                }
+            }
+            else if (envelope.Type == MessageType.PlayerAnimationState)
+            {
+                var animation = AnimationReplicationPayloadCodec
+                    .DecodePlayerAnimationState(envelope.Payload.Span);
+                if (animation.Slot == (byte)SessionRole.Host)
+                {
+                    Volatile.Write(
+                        ref latestHostAnimation,
+                        new AnimationAnchor(
+                            animation,
+                            Environment.TickCount64));
+                }
             }
 
         };
@@ -324,7 +444,7 @@ public static class LocalGameTestSession
             if (waitForInGameActivation)
             {
                 status?.Invoke(
-                    "LOCAL_TEST_WAITING_FOR_F9: open F9 and select Test solo: start / stop.");
+                    "LOCAL_TEST_WAITING_FOR_F9: open F9 and select Live mirror: start / stop.");
             }
 
             var interval = TimeSpan.FromSeconds(
@@ -338,11 +458,22 @@ public static class LocalGameTestSession
                 LocalSoloTestMode currentMode;
                 int currentModeGeneration;
                 NetEntityId currentEntityId;
+                bool requestGuestWorldReplay;
                 lock (modeGate)
                 {
                     currentMode = mode;
                     currentModeGeneration = modeGeneration;
                     currentEntityId = entityId;
+                    requestGuestWorldReplay = guestWorldViewReplayPending;
+                    guestWorldViewReplayPending = false;
+                }
+                if (requestGuestWorldReplay)
+                {
+                    _ = await guest.SendControlAsync(
+                        MessageType.ResyncRequest,
+                        ReadOnlyMemory<byte>.Empty,
+                        NetworkClock.Tick,
+                        linked.Token).ConfigureAwait(false);
                 }
                 if (observedModeGeneration != currentModeGeneration)
                 {
@@ -364,6 +495,10 @@ public static class LocalGameTestSession
                     previousSyntheticJumping = false;
                     previousSyntheticPosition = null;
                     previousSyntheticHeading = 0f;
+                    lock (modeGate)
+                    {
+                        liveMirrorWorldOffset = null;
+                    }
                 }
 
                 var host = Volatile.Read(ref latestHost);
@@ -609,6 +744,112 @@ public static class LocalGameTestSession
                                 ["playerFlags"] =
                                     $"0x{replayFrame.PlayerFlags:X8}",
                                 ["fireSequence"] = replayFrame.FireSequence
+                            },
+                            linked.Token).ConfigureAwait(false);
+                    }
+                    continue;
+                }
+
+                if (motionProfile == LocalGameTestMotionProfile.LiveMirror)
+                {
+                    Vector3 mirrorOffset;
+                    lock (modeGate)
+                    {
+                        liveMirrorWorldOffset ??= CreateLiveMirrorOffset(
+                            host.Heading);
+                        mirrorOffset = liveMirrorWorldOffset.Value;
+                    }
+                    var mirrorState = CreateLiveMirrorState(
+                        host.State,
+                        currentEntityId,
+                        mirrorOffset);
+                    var mirrorSnapshotTick = NetworkClock.Tick;
+                    var mirrorSent = await guest.SendSnapshotAsync(
+                        MessageType.PlayerState,
+                        BinaryPayloadCodec.EncodePlayerState(mirrorState),
+                        mirrorSnapshotTick,
+                        linked.Token).ConfigureAwait(false);
+                    if (mirrorSent)
+                    {
+                        _ = Interlocked.Increment(ref guestSnapshotsSent);
+                    }
+
+                    var animationAnchor = Volatile.Read(
+                        ref latestHostAnimation);
+                    if (animationAnchor is not null &&
+                        nowMilliseconds >= animationAnchor.ObservedAtMilliseconds &&
+                        nowMilliseconds - animationAnchor.ObservedAtMilliseconds <=
+                            HostSnapshotFreshnessMs &&
+                        animationAnchor.State.LocomotionEpoch ==
+                            mirrorState.LocomotionEpoch)
+                    {
+                        var mirrorAnimation = animationAnchor.State with
+                        {
+                            EntityId = currentEntityId,
+                            Slot = (byte)SessionRole.Guest
+                        };
+                        _ = await guest.SendSnapshotAsync(
+                            MessageType.PlayerAnimationState,
+                            AnimationReplicationPayloadCodec
+                                .EncodePlayerAnimationState(mirrorAnimation),
+                            mirrorSnapshotTick,
+                            linked.Token).ConfigureAwait(false);
+                    }
+
+                    var equipmentAnchor = Volatile.Read(
+                        ref latestHostEquipment);
+                    var mirrorEquipmentRefreshDue =
+                        previousEquipmentPublishMilliseconds == 0 ||
+                        nowMilliseconds < previousEquipmentPublishMilliseconds ||
+                        nowMilliseconds - previousEquipmentPublishMilliseconds >= 1_000;
+                    if (equipmentAnchor is not null &&
+                        mirrorEquipmentRefreshDue)
+                    {
+                        var equipment = equipmentAnchor.State with
+                        {
+                            EntityId = currentEntityId
+                        };
+                        _ = await guest.SendControlAsync(
+                            MessageType.EquipmentState,
+                            BinaryPayloadCodec.EncodeEquipmentState(equipment),
+                            NetworkClock.Tick,
+                            linked.Token).ConfigureAwait(false);
+                        previousEquipmentPublishMilliseconds = nowMilliseconds;
+                    }
+
+                    if (previousIdentityPublishMilliseconds == 0 ||
+                        nowMilliseconds < previousIdentityPublishMilliseconds ||
+                        nowMilliseconds - previousIdentityPublishMilliseconds >= 5_000)
+                    {
+                        var identity = new PlayerIdentityPayload(
+                            currentEntityId,
+                            Slot: (byte)SessionRole.Guest,
+                            Nickname: "LIVE MIRROR");
+                        _ = await guest.SendControlAsync(
+                            MessageType.PlayerIdentity,
+                            BinaryPayloadCodec.EncodePlayerIdentity(identity),
+                            NetworkClock.Tick,
+                            linked.Token).ConfigureAwait(false);
+                        previousIdentityPublishMilliseconds = nowMilliseconds;
+                    }
+
+                    if (!string.Equals(
+                            previousMotionPhase,
+                            "live-mirror",
+                            StringComparison.Ordinal))
+                    {
+                        previousMotionPhase = "live-mirror";
+                        const string message =
+                            "LOCAL_TEST_MOTION_PHASE: live-mirror";
+                        status?.Invoke(message);
+                        await logger.InfoAsync(
+                            "local-test.motion.phase",
+                            message,
+                            new Dictionary<string, object?>
+                            {
+                                ["profile"] = motionProfile.ToString(),
+                                ["offsetX"] = mirrorOffset.X,
+                                ["offsetY"] = mirrorOffset.Y
                             },
                             linked.Token).ConfigureAwait(false);
                     }
@@ -935,6 +1176,82 @@ public static class LocalGameTestSession
             TransitionProgress: 0);
     }
 
+    internal static Vector3 CreateLiveMirrorOffset(float headingDegrees)
+    {
+        var radians = NormalizeHeading(headingDegrees) *
+            (MathF.PI / 180f);
+        return new Vector3(
+            -MathF.Sin(radians) * 3f,
+            MathF.Cos(radians) * 3f,
+            0f);
+    }
+
+    internal static PlayerStatePayload CreateLiveMirrorState(
+        PlayerStatePayload host,
+        NetEntityId mirrorEntityId,
+        Vector3 worldOffset)
+    {
+        var flags = host.Flags;
+        flags &= ~PlayerStateFlags.OnlineModeDetected;
+        // A mount needs its own replicated entity and relationship. Until the
+        // live mirror also mirrors that lane, presenting the actor as mounted
+        // would leave it suspended beside the local horse.
+        flags &= ~PlayerStateFlags.Mounted;
+        flags |= PlayerStateFlags.SyntheticTest;
+        var aimTarget =
+            (flags & PlayerStateFlags.AimTargetValid) != 0
+                ? host.AimTarget + worldOffset
+                : Vector3.Zero;
+        var traversalAnchor =
+            host.TraversalKind != PlayerTraversalKind.None
+                ? host.TraversalAnchor + worldOffset
+                : Vector3.Zero;
+        return host with
+        {
+            EntityId = mirrorEntityId,
+            Slot = (byte)SessionRole.Guest,
+            Position = host.Position + worldOffset,
+            Flags = flags,
+            AimTarget = aimTarget,
+            LocomotionMode = host.LocomotionMode == PlayerLocomotionMode.Mounted
+                ? PlayerLocomotionMode.Grounded
+                : host.LocomotionMode,
+            TraversalAnchor = traversalAnchor
+        };
+    }
+
+    internal static NetEntityId RemapGuestWorldEntityId(NetEntityId source)
+    {
+        if (!source.IsValid)
+        {
+            return NetEntityId.None;
+        }
+        var epoch = source.Epoch ^ 0x8000_0000U;
+        if (epoch == 0)
+        {
+            epoch = 0x8000_0001U;
+        }
+        return NetEntityId.Create(epoch, source.Counter);
+    }
+
+    internal static WorldEntityStatePayload CreateGuestWorldViewState(
+        WorldEntityStatePayload source,
+        Vector3 worldOffset)
+    {
+        var taskTarget = source.TaskTarget == Vector3.Zero
+            ? Vector3.Zero
+            : source.TaskTarget + worldOffset;
+        return source with
+        {
+            EntityId = RemapGuestWorldEntityId(source.EntityId),
+            Position = source.Position + worldOffset,
+            ParentEntityId = source.ParentEntityId.IsValid
+                ? RemapGuestWorldEntityId(source.ParentEntityId)
+                : NetEntityId.None,
+            TaskTarget = taskTarget
+        };
+    }
+
     private static uint RageJoaat(string value)
     {
         var hash = 0U;
@@ -1075,10 +1392,21 @@ public static class LocalGameTestSession
     }
 
     private sealed record HostAnchor(
-        Vector3 Position,
-        Vector3 Velocity,
-        float Heading,
-        PlayerStateFlags Flags,
+        PlayerStatePayload State,
+        long ObservedAtMilliseconds)
+    {
+        public Vector3 Position => State.Position;
+        public Vector3 Velocity => State.Velocity;
+        public float Heading => State.Heading;
+        public PlayerStateFlags Flags => State.Flags;
+    }
+
+    private sealed record AnimationAnchor(
+        PlayerAnimationStatePayload State,
+        long ObservedAtMilliseconds);
+
+    private sealed record EquipmentAnchor(
+        EquipmentStatePayload State,
         long ObservedAtMilliseconds);
 
     private enum LocalSoloTestMode

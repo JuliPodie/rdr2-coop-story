@@ -55,6 +55,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
     private readonly BridgePipeServer _bridge;
     private readonly NetworkBridgeDeliveryPump _networkBridgePump;
     private readonly IPAddress? _hostListenAddress;
+    private readonly bool _allowLoopbackGuestWorldView;
     private readonly TaskCompletionSource<Exception> _fatalSessionFailure =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Channel<NetworkSessionRun> _networkSessions =
@@ -147,12 +148,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
     internal event Func<bool>? SoloTestToggleRequested;
     internal event Func<bool>? GhostRecordToggleRequested;
     internal event Func<bool>? GhostReplayToggleRequested;
+    internal event Func<bool>? GuestWorldViewToggleRequested;
 
     public SidecarRuntime(
         SidecarConfig config,
         SessionCredentials credentials,
         JsonLineLogger logger,
-        IPAddress? hostListenAddress = null)
+        IPAddress? hostListenAddress = null,
+        bool allowLoopbackGuestWorldView = false)
     {
         _config = (config ?? throw new ArgumentNullException(nameof(config))).Validate();
         _menuBootstrapConfig = _config;
@@ -164,6 +167,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _hostListenAddress = hostListenAddress;
+        _allowLoopbackGuestWorldView = allowLoopbackGuestWorldView;
         _bridge = new BridgePipeServer(_config.PipeName);
         _networkBridgePump = new NetworkBridgeDeliveryPump(
             DeliverNetworkEnvelopeToBridgeAsync);
@@ -625,6 +629,13 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 .ConfigureAwait(false);
             return;
         }
+
+        if (request.Action == SessionMenuAction.ToggleGuestWorldView)
+        {
+            await ToggleGuestWorldViewFromMenuAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
         if (request.Action == SessionMenuAction.ToggleGhostRecord)
         {
             await ToggleGhostModeFromMenuAsync(
@@ -809,8 +820,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
 
         var message = enabled
-            ? "SOLO TEST ENABLED: the SOLO BOT starts its route."
-            : "SOLO TEST STOPPED: the bot will disappear after the stream expires.";
+            ? "LIVE MIRROR ENABLED: the co-op replica now repeats the local player beside you."
+            : "LIVE MIRROR STOPPED: the replica will disappear after the stream expires.";
         await SendSessionStatusAsync(
             new SessionMenuStatusPayload(
                 SessionMenuStatusKind.ReadyHost,
@@ -821,6 +832,68 @@ public sealed class SidecarRuntime : IAsyncDisposable
             enabled
                 ? "local-test.f9-enabled"
                 : "local-test.f9-disabled",
+            message,
+            new Dictionary<string, object?>
+            {
+                ["enabled"] = enabled,
+                ["source"] = "bridge-f9"
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask ToggleGuestWorldViewFromMenuAsync(
+        CancellationToken cancellationToken)
+    {
+        var handler = GuestWorldViewToggleRequested;
+        if (handler is null)
+        {
+            const string unavailable =
+                "Guest World View is available only from SOLO TEST in the launcher.";
+            await SendSessionStatusAsync(
+                new SessionMenuStatusPayload(
+                    SessionMenuStatusKind.Error,
+                    unavailable),
+                cancellationToken).ConfigureAwait(false);
+            await _logger.WarningAsync(
+                "local-test.guest-world-view-unavailable",
+                unavailable,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        bool enabled;
+        try
+        {
+            enabled = handler.Invoke();
+        }
+        catch (Exception exception)
+        {
+            await SendSessionStatusAsync(
+                new SessionMenuStatusPayload(
+                    SessionMenuStatusKind.Error,
+                    "Guest World View could not be toggled. Export diagnostics."),
+                cancellationToken).ConfigureAwait(false);
+            await _logger.ErrorAsync(
+                "local-test.guest-world-view-toggle-failed",
+                "The in-game F9 Guest World View toggle failed.",
+                exception,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var message = enabled
+            ? "CO-OP WORLD VIEW: host NPCs are replaced by the offset guest replicas."
+            : "HOST WORLD VIEW: guest NPC replicas were removed and local NPCs restored.";
+        await SendSessionStatusAsync(
+            new SessionMenuStatusPayload(
+                SessionMenuStatusKind.ReadyHost,
+                message,
+                _activeInviteCode),
+            cancellationToken).ConfigureAwait(false);
+        await _logger.InfoAsync(
+            enabled
+                ? "local-test.guest-world-view-enabled"
+                : "local-test.guest-world-view-disabled",
             message,
             new Dictionary<string, object?>
             {
@@ -3361,7 +3434,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
             return;
         }
 
-        if (!IsPeerEnvelopeAuthorized(_config.Role, envelope))
+        var loopbackGuestWorldEnvelope =
+            _allowLoopbackGuestWorldView &&
+            _config.Role == SessionRole.Host &&
+            envelope.Type is MessageType.EntitySpawn or
+                MessageType.EntityUpdate or
+                MessageType.EntityDespawn;
+        if (!loopbackGuestWorldEnvelope &&
+            !IsPeerEnvelopeAuthorized(_config.Role, envelope))
         {
             _messageFlowDiagnostics.MarkDropped(
                 MessageFlowDirection.NetworkToBridge,
@@ -6109,7 +6189,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             return localRole switch
             {
                 SessionRole.Host =>
-                    pause.Kind == PauseVoteKind.RequestToggle &&
+                    pause.Kind == PauseVoteKind.RequestState &&
                     pause.VoterSlot == (byte)SessionRole.Guest,
                 SessionRole.Guest =>
                     pause.Kind == PauseVoteKind.AuthoritativeState &&
@@ -6334,7 +6414,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                     pause.Kind == PauseVoteKind.AuthoritativeState &&
                     pause.VoterSlot == (byte)SessionRole.Host,
                 SessionRole.Guest =>
-                    pause.Kind == PauseVoteKind.RequestToggle &&
+                    pause.Kind == PauseVoteKind.RequestState &&
                     pause.VoterSlot == (byte)SessionRole.Guest,
                 _ => false
             };

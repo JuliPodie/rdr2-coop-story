@@ -55,6 +55,7 @@ namespace {
 constexpr std::uintmax_t kBridgeLogMaxBytes = 8U * 1024U * 1024U;
 constexpr unsigned int kBridgeLogArchiveCount = 3U;
 constexpr std::uint64_t kAmbientEncounterRediscoveryCooldownMs = 90'000U;
+constexpr std::uint64_t kAmbientEncounterCollisionTimeoutMs = 10'000U;
 
 [[nodiscard]] constexpr std::size_t AmbientHostileCount(
     const AmbientEncounterProfile profile) noexcept {
@@ -126,11 +127,11 @@ constexpr std::uint32_t kPoisonThrowingKnifePamphletHash = 0x366089E7U;
 // metres made a walking replica reach an old point, stop, and then sprint to
 // the next one. Route intent can update roughly three times per second without
 // clearing the task graph, so the destination remains ahead at sprint speed.
-constexpr std::uint64_t kRemoteTaskRefreshMilliseconds = 2'000U;
-constexpr std::uint64_t kRemoteTaskMinimumRefreshMilliseconds = 300U;
+constexpr std::uint64_t kRemoteTaskRefreshMilliseconds = 8'000U;
+constexpr std::uint64_t kRemoteTaskMinimumRefreshMilliseconds = 500U;
 constexpr std::uint64_t kRemoteMotionDiagnosticsMilliseconds = 5'000U;
 constexpr float kRemoteTaskHeadingRefreshDegrees = 35.0F;
-constexpr float kRemoteTaskDestinationRefreshMeters = 0.35F;
+constexpr float kRemoteTaskDestinationRefreshMeters = 1.50F;
 constexpr float kRemoteTaskRecoveryMeters = 10.0F;
 constexpr std::uint64_t kRemoteTaskRecoveryCooldownMilliseconds = 4'000U;
 constexpr std::uint64_t kRemoteTaskWatchdogToleranceMilliseconds = 250U;
@@ -149,7 +150,7 @@ constexpr float kWorldDamageIntentFixedDamage = 25.0F;
 constexpr float kMissionScriptOwnedActorRadiusMeters = 300.0F;
 constexpr std::uint64_t kWorldModelLoadTimeoutMilliseconds = 5'000U;
 constexpr std::uint64_t kWorldAimTaskRefreshMilliseconds = 250U;
-constexpr float kWorldProxySnapDistanceMeters = 6.0F;
+constexpr float kWorldProxySnapDistanceMeters = 12.0F;
 constexpr std::uint64_t kRemotePlayerAimTaskRefreshMilliseconds = 200U;
 constexpr int kRemotePlayerAimTaskDurationMilliseconds = 350;
 constexpr float kRemotePlayerAimTargetRefreshMeters = 0.35F;
@@ -234,14 +235,9 @@ constexpr std::uint64_t kWorldMirrorDiagnosticsMilliseconds = 5'000U;
 constexpr float kEntityDivergenceThresholdMeters = 1.5F;
 constexpr std::uint64_t kOwnedMountScanMilliseconds = 1'000U;
 constexpr float kLocalOwnMountInteractionExclusionMeters = 4.5F;
-constexpr std::uint64_t kRemoteMountTaskRefreshMilliseconds = 650U;
-constexpr std::uint64_t kRemoteMountTaskMinimumRefreshMilliseconds = 200U;
+constexpr std::uint64_t kRemoteMountTaskMinimumRefreshMilliseconds = 500U;
 constexpr std::uint64_t kRemoteMountRelationRetryMilliseconds = 250U;
-constexpr float kRemoteMountTaskDestinationRefreshMeters = 0.90F;
-constexpr float kRemoteMountMovingCorrectionMeters = 0.55F;
-constexpr float kRemoteMountIdleCorrectionMeters = 0.10F;
-constexpr float kRemoteMountHardCorrectionMeters = 6.0F;
-constexpr std::uint64_t kWorldSemanticTaskRefreshMilliseconds = 900U;
+constexpr float kRemoteMountTaskDestinationRefreshMeters = 2.0F;
 constexpr float kWorldSemanticTaskDestinationRefreshMeters = 2.0F;
 constexpr float kFallbackAimDistanceMeters = 250.0F;
 constexpr int kInputGroupGameplay = 0;
@@ -1039,7 +1035,6 @@ constexpr float kLocalTraversalProbeRadiusMeters = 0.28F;
 constexpr int kTraversalShapeTestFlags = 1 | 16;
 constexpr std::uint64_t kRemoteTraversalGeometryProbeTimeoutMs = 350U;
 constexpr float kRemoteTraversalGeometryToleranceMeters = 2.75F;
-constexpr float kAnimGraphReplicaCoordinateDeadZoneMeters = 0.015F;
 constexpr float kAnimGraphReplicaHeadingDeadZoneDegrees = 0.15F;
 constexpr int kAnimGraphVisualTaskTimeoutMilliseconds = 10'000;
 constexpr int kAnimGraphVisualIdleTaskMilliseconds = 3'500;
@@ -1845,6 +1840,35 @@ InspectNativeHandlerMemory(const void* handler) {
 [[nodiscard]] Vec3 GroundSafePosition(
     const Vec3& position) noexcept {
     return SelectGroundSafePosition(position, ProbeGroundZ(position));
+}
+
+[[nodiscard]] Vec3 GroundSafePedPosition(
+    const Vec3& position,
+    const Hash model) noexcept {
+    const auto groundZ = ProbeGroundZ(position);
+    if (!groundZ.has_value() || !std::isfinite(*groundZ)) {
+        return position;
+    }
+
+    Vector3 minimum{};
+    Vector3 maximum{};
+    GAMEPLAY::GET_MODEL_DIMENSIONS(model, &minimum, &maximum);
+    // GET_ENTITY_COORDS reports the model origin, not the bottom of its feet.
+    // Placing that origin directly at terrain Z buries peds and horses by
+    // roughly half their height. Offset the terrain by the model's lower
+    // bound, while rejecting implausible floors/interior levels.
+    if (!std::isfinite(minimum.z) || !std::isfinite(maximum.z) ||
+        minimum.z >= -0.05F || maximum.z <= minimum.z) {
+        return position;
+    }
+    const auto supportOffset = std::clamp(-minimum.z, 0.0F, 2.5F);
+    const auto supportedZ = *groundZ + supportOffset + 0.03F;
+    if (!std::isfinite(supportedZ) ||
+        std::abs(supportedZ - position.z) >
+            kRemoteMotionMaximumGroundCorrectionMeters) {
+        return position;
+    }
+    return {position.x, position.y, supportedZ};
 }
 
 [[nodiscard]] Vec3 TeleportSafePosition(
@@ -3010,6 +3034,7 @@ void ScriptHookSdkFacade::ExpireRemotePlayerActions(
 }
 
 void ScriptHookSdkFacade::ResetRemoteMotionTracking() noexcept {
+    remotePlayerCollisionReady_ = false;
     latestRemoteAnimationState_.reset();
     latestRemoteAnimationStateReceivedAtMs_.reset();
     animGraphReplicaPreparedEntity_ = {};
@@ -3034,6 +3059,7 @@ void ScriptHookSdkFacade::ResetRemoteMotionTracking() noexcept {
     animGraphMissingLocomotionTicks_ = 0U;
     animGraphMissingLocomotionSinceMs_ = 0U;
     animGraphPreviousLocomotionRecoveryMs_ = 0U;
+    animGraphPreviousTraversalRecoveryMs_ = 0U;
     animGraphLocomotionRecoveries_ = 0U;
     animGraphPreviousLocomotionMode_ =
         PlayerLocomotionMode::Grounded;
@@ -3045,7 +3071,6 @@ void ScriptHookSdkFacade::ResetRemoteMotionTracking() noexcept {
     animGraphTraversalClimbTaskStarts_ = 0U;
     animGraphAirborneLaunches_ = 0U;
     animGraphPhysicalRootYieldTicks_ = 0U;
-    animGraphPhysicalRootLeashCorrections_ = 0U;
     animGraphRagdollTaskStarts_ = 0U;
     previousRemoteSemanticRagdollMs_ = 0U;
     animGraphStealthExpectedTicks_ = 0U;
@@ -5382,10 +5407,13 @@ bool ScriptHookSdkFacade::BeginAmbientEncounterPresentation(
         presentation.instanceId = instance.instanceId;
         presentation.profile = instance.profile;
         presentation.sourceScriptId = sourceScriptId;
+        presentation.collisionDeadlineMs =
+            TickMilliseconds() + kAmbientEncounterCollisionTimeoutMs;
         presentation.hostileCount = AmbientHostileCount(instance.profile);
         presentation.protectedCivilianCount =
             AmbientProtectedCivilianCount(instance.profile);
         presentation.peds.reserve(instance.rosterCount);
+        presentation.collisionReady.reserve(instance.rosterCount);
 
         const std::array<Vec3, 6U> offsets{{
             {-3.0F, -1.5F, 0.0F},
@@ -5414,7 +5442,10 @@ bool ScriptHookSdkFacade::BeginAmbientEncounterPresentation(
                 instance.anchor.x + offsets[index].x,
                 instance.anchor.y + offsets[index].y,
                 instance.anchor.z};
-            const auto spawn = GroundSafePosition(requestedPosition);
+            const auto spawn = GroundSafePedPosition(
+                requestedPosition, requestedModel);
+            STREAMING::REQUEST_COLLISION_AT_COORD(
+                spawn.x, spawn.y, spawn.z);
             const auto ped = PED::CREATE_PED(
                 requestedModel,
                 spawn.x,
@@ -5433,11 +5464,13 @@ bool ScriptHookSdkFacade::BeginAmbientEncounterPresentation(
                 return false;
             }
             presentation.peds.push_back(ped);
+            presentation.collisionReady.push_back(false);
             ENTITY::SET_ENTITY_AS_MISSION_ENTITY(ped, TRUE, TRUE);
             ENTITY::SET_ENTITY_LOAD_COLLISION_FLAG(ped, TRUE);
-            ENTITY::SET_ENTITY_HAS_GRAVITY(ped, TRUE);
+            ENTITY::SET_ENTITY_HAS_GRAVITY(ped, FALSE);
             ENTITY::SET_ENTITY_COLLISION(ped, TRUE, TRUE);
-            ENTITY::SET_ENTITY_CAN_BE_DAMAGED(ped, TRUE);
+            ENTITY::FREEZE_ENTITY_POSITION(ped, TRUE);
+            ENTITY::SET_ENTITY_CAN_BE_DAMAGED(ped, FALSE);
             ENTITY::SET_ENTITY_VISIBLE(ped, TRUE);
             ENTITY::RESET_ENTITY_ALPHA(ped);
             SetRandomOutfitVariation(ped);
@@ -5513,6 +5546,39 @@ ScriptHookSdkFacade::SampleAmbientEncounterOutcome(
             return std::nullopt;
         }
         auto& presentation = *ambientEncounterPresentation_;
+        bool collisionPending{};
+        for (std::size_t index{}; index < presentation.peds.size(); ++index) {
+            const auto ped = presentation.peds[index];
+            if (ped == 0 || ENTITY::DOES_ENTITY_EXIST(ped) == FALSE) {
+                continue;
+            }
+            if (index < presentation.collisionReady.size() &&
+                presentation.collisionReady[index]) {
+                continue;
+            }
+            const auto position = ENTITY::GET_ENTITY_COORDS(ped, TRUE, FALSE);
+            STREAMING::REQUEST_COLLISION_AT_COORD(
+                position.x, position.y, position.z);
+            if (ENTITY::HAS_COLLISION_LOADED_AROUND_ENTITY(ped) != FALSE) {
+                ENTITY::FREEZE_ENTITY_POSITION(ped, FALSE);
+                ENTITY::SET_ENTITY_HAS_GRAVITY(ped, TRUE);
+                ENTITY::SET_ENTITY_CAN_BE_DAMAGED(ped, TRUE);
+                if (index < presentation.collisionReady.size()) {
+                    presentation.collisionReady[index] = true;
+                }
+            } else {
+                ENTITY::FREEZE_ENTITY_POSITION(ped, TRUE);
+                ENTITY::SET_ENTITY_HAS_GRAVITY(ped, FALSE);
+                collisionPending = true;
+            }
+        }
+        if (collisionPending) {
+            if (TickMilliseconds() >= presentation.collisionDeadlineMs) {
+                Log("[AMBIENT_ENCOUNTER] collision streaming timed out; abandoning scene");
+                return AmbientEncounterPhase::Abandoned;
+            }
+            return std::nullopt;
+        }
         for (const auto& source : presentation.suppressedSourcePeds) {
             if (source.handle != 0 &&
                 ENTITY::DOES_ENTITY_EXIST(source.handle) != FALSE &&
@@ -5952,6 +6018,12 @@ ScriptHookSdkFacade::SampleWorldEntities(
                 ENTITY::GET_ENTITY_VELOCITY(
                     ped,
                     0));
+            const auto horizontalSpeedSquared =
+                velocity.x * velocity.x +
+                velocity.y * velocity.y;
+            const bool moving =
+                std::isfinite(horizontalSpeedSquared) &&
+                horizontalSpeedSquared > 0.04F;
             const bool fleeing =
                 PED::IS_PED_FLEEING(ped) != FALSE;
             if (fleeing) {
@@ -5993,25 +6065,32 @@ ScriptHookSdkFacade::SampleWorldEntities(
                 }
             } else if (fleeing) {
                 taskKind = WorldTaskKind::Fleeing;
+            } else if (usesScenario && !moving) {
+                taskKind = WorldTaskKind::Scenario;
+            } else if (moving) {
+                // Movement outranks the blip heuristic. Story actors commonly
+                // retain a blip while walking; classifying those actors as a
+                // scenario made the guest stand still and periodically warp.
+                taskKind = WorldTaskKind::Locomotion;
             } else if (hasEntityBlip || usesScenario) {
                 taskKind = WorldTaskKind::Scenario;
-            } else {
-                const auto speedSquared =
-                    velocity.x * velocity.x +
-                    velocity.y * velocity.y +
-                    velocity.z * velocity.z;
-                if (std::isfinite(speedSquared) &&
-                    speedSquared > 0.04F) {
-                    taskKind =
-                        WorldTaskKind::Locomotion;
-                }
             }
             if (taskKind == WorldTaskKind::Locomotion ||
                 taskKind == WorldTaskKind::Fleeing) {
+                const auto horizontalSpeed =
+                    std::sqrt(horizontalSpeedSquared);
+                const auto lookAheadMeters =
+                    std::clamp(horizontalSpeed * 2.5F, 2.0F, 8.0F);
+                const auto inverseSpeed =
+                    horizontalSpeed > 0.001F
+                        ? 1.0F / horizontalSpeed
+                        : 0.0F;
                 taskTarget = {
-                    position.x + velocity.x * 1.5F,
-                    position.y + velocity.y * 1.5F,
-                    position.z + velocity.z * 1.5F};
+                    position.x +
+                        velocity.x * inverseSpeed * lookAheadMeters,
+                    position.y +
+                        velocity.y * inverseSpeed * lookAheadMeters,
+                    position.z};
             }
 
             auto selectionPriority =
@@ -7304,10 +7383,10 @@ bool ScriptHookSdkFacade::ApplyNetworkCommand(
                 ENTITY::DOES_ENTITY_EXIST(sourcePed) == FALSE) {
                 return false;
             }
-            const auto spawnPosition =
-                GroundSafePosition(command.position);
             const auto sourceModel =
                 ENTITY::GET_ENTITY_MODEL(sourcePed);
+            const auto spawnPosition =
+                GroundSafePedPosition(command.position, sourceModel);
             Ped replica{};
             bool independentPuppet{};
             if (sourceModel != 0U &&
@@ -7350,8 +7429,9 @@ bool ScriptHookSdkFacade::ApplyNetworkCommand(
             PED::SET_PED_CAN_PLAY_AMBIENT_ANIMS(replica, TRUE);
             PED::SET_PED_CAN_PLAY_AMBIENT_BASE_ANIMS(replica, TRUE);
             ENTITY::SET_ENTITY_LOAD_COLLISION_FLAG(replica, TRUE);
-            ENTITY::SET_ENTITY_HAS_GRAVITY(replica, TRUE);
+            ENTITY::SET_ENTITY_HAS_GRAVITY(replica, FALSE);
             ENTITY::SET_ENTITY_COLLISION(replica, TRUE, TRUE);
+            ENTITY::FREEZE_ENTITY_POSITION(replica, TRUE);
             // The peer replica is a visual/targetable stand-in. Local bullets
             // may hit it, but health authority always remains remote.
             ENTITY::SET_ENTITY_CAN_BE_DAMAGED(replica, FALSE);
@@ -9051,7 +9131,48 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
     animGraphPreviousLocomotionMode_ = state.locomotionMode;
     animGraphLocomotionModeInitialized_ = true;
 
-    const bool observedPhysicalAnimation =
+    auto observedPhysicalAnimation =
+        PED::IS_PED_FALLING(handle) != FALSE ||
+        PED::IS_PED_JUMPING(handle) != FALSE ||
+        PED::IS_PED_CLIMBING(handle) != FALSE;
+    const bool expectedTraversalAnimation =
+        state.locomotionMode == PlayerLocomotionMode::Traversal ||
+        state.locomotionMode == PlayerLocomotionMode::Airborne;
+    constexpr auto kJumping = static_cast<std::uint32_t>(
+        PlayerStateFlag::Jumping);
+    constexpr auto kClimbing = static_cast<std::uint32_t>(
+        PlayerStateFlag::Climbing);
+    const bool traversalRecoveryDue =
+        expectedTraversalAnimation && !observedPhysicalAnimation &&
+        !mounted &&
+        (animGraphPreviousTraversalRecoveryMs_ == 0U ||
+         now < animGraphPreviousTraversalRecoveryMs_ ||
+         now - animGraphPreviousTraversalRecoveryMs_ >= 350U);
+    if (traversalRecoveryDue) {
+        if ((state.flags & kClimbing) != 0U) {
+            AI::TASK_CLIMB(handle, TRUE);
+            ++animGraphTraversalClimbTaskStarts_;
+        } else if ((state.flags & kJumping) != 0U ||
+                   state.locomotionMode ==
+                       PlayerLocomotionMode::Traversal) {
+            AI::TASK_JUMP(handle, TRUE);
+            ++animGraphTraversalJumpTaskStarts_;
+        }
+        ENTITY::SET_ENTITY_VELOCITY(
+            handle,
+            state.velocity.x,
+            state.velocity.y,
+            state.velocity.z);
+        PED::SET_PED_KEEP_TASK(handle, TRUE);
+        remoteTraversalTaskGuardUntilMs_ = now + 500U;
+        animGraphPreviousTraversalRecoveryMs_ = now;
+        animGraphVisualTaskActive_ = false;
+        animGraphVisualTaskStartedMs_ = 0U;
+    }
+    if (!expectedTraversalAnimation) {
+        animGraphPreviousTraversalRecoveryMs_ = 0U;
+    }
+    observedPhysicalAnimation =
         PED::IS_PED_FALLING(handle) != FALSE ||
         PED::IS_PED_JUMPING(handle) != FALSE ||
         PED::IS_PED_CLIMBING(handle) != FALSE;
@@ -9061,10 +9182,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         observedPhysicalAnimation || traversalStarted ||
         airborneLaunched || ragdollStarted ||
         now < remoteTraversalTaskGuardUntilMs_ ||
-        state.locomotionMode == PlayerLocomotionMode::Ragdoll;
-    const bool expectedTraversalAnimation =
-        state.locomotionMode == PlayerLocomotionMode::Traversal ||
-        state.locomotionMode == PlayerLocomotionMode::Airborne;
+        state.locomotionMode == PlayerLocomotionMode::Ragdoll ||
+        expectedTraversalAnimation;
     if (expectedTraversalAnimation) {
         ++animGraphTraversalExpectedTicks_;
         if (observedPhysicalAnimation) {
@@ -9073,24 +9192,14 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
             ++animGraphTraversalMissingTicks_;
         }
     }
-    const bool applyVisualRoot =
-        ShouldApplyAnimGraphDirectRootCorrection(
+    const bool visualControllerAllowed =
+        ShouldRunAnimGraphVisualController(
             mounted,
             physicalAnimation);
-    const bool applyPhysicalRootLeash =
-        ShouldApplyDirectReplicaPhysicalRootLeash(
-            mounted,
-            physicalAnimation,
-            positionError);
-    const bool applyCoordinateRoot =
-        applyVisualRoot || applyPhysicalRootLeash;
-    if (!mounted && !applyVisualRoot) {
+    if (!mounted && !visualControllerAllowed) {
         ++animGraphPhysicalRootYieldTicks_;
     }
-    if (applyPhysicalRootLeash) {
-        ++animGraphPhysicalRootLeashCorrections_;
-    }
-    if (applyVisualRoot &&
+    if (visualControllerAllowed &&
         animGraphReplicaPreparedEntity_ != state.entityId) {
         AI::CLEAR_PED_TASKS(handle, TRUE, TRUE);
         AI::TASK_SET_BLOCKING_OF_NON_TEMPORARY_EVENTS(handle, TRUE);
@@ -9098,7 +9207,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         PED::SET_PED_CAN_PLAY_AMBIENT_ANIMS(handle, TRUE);
         PED::SET_PED_CAN_PLAY_AMBIENT_BASE_ANIMS(handle, TRUE);
         // Allow RDR2's own locomotion/weapon graph to solve feet, hands,
-        // torso and look pose after each authoritative root correction.
+        // torso and look pose while its native task owns ordinary movement.
         // These switches do not fabricate exact sender IK targets; they keep
         // the native ground and weapon solvers available on the replica.
         PED::SET_PED_CAN_ARM_IK(handle, TRUE);
@@ -9110,29 +9219,59 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         animGraphVisualTaskActive_ = false;
         animGraphVisualTaskStartedMs_ = 0U;
         Log(
-            "[INFO][ANIMGRAPH_REPLICA] remote ped prepared; direct root with native visual locomotion driver, navmesh disabled");
-    } else if (!applyVisualRoot) {
+            "[INFO][ANIMGRAPH_REPLICA] remote ped prepared; animation-driven locomotion with bounded root recovery");
+    } else if (!visualControllerAllowed) {
         // Never replace a ragdoll, traversal, lasso, fall or mount task. Mark
         // the visual driver stale so a fresh gait task is issued only after
         // the protected physical animation yields ownership.
         animGraphVisualTaskActive_ = false;
         animGraphVisualTaskStartedMs_ = 0U;
     }
-    if (applyCoordinateRoot &&
-        positionError >= kAnimGraphReplicaCoordinateDeadZoneMeters) {
-        // The three legacy flags map to keepTasks, keepIK and doWarp on this
-        // native hash. Clearing the first two on every network correction
-        // repeatedly destroyed the locomotion graph and caused the observed
-        // 99% T-pose/flicker even though FORCE_PED_MOTION_STATE returned true.
+    const bool hardResyncCooldownActive =
+        now < remoteHardResyncCooldownUntilMs_;
+    const bool hardResyncEligible =
+        visualControllerAllowed && !hardResyncCooldownActive &&
+        positionError >= kRemoteMotionHardResyncDistanceMeters;
+    if (hardResyncEligible) {
+        if (remoteHardResyncErrorStartedMs_ == 0U ||
+            now < remoteHardResyncErrorStartedMs_) {
+            remoteHardResyncErrorStartedMs_ = now;
+        }
+    } else {
+        remoteHardResyncErrorStartedMs_ = 0U;
+    }
+    const auto hardResyncSustainedForMs =
+        remoteHardResyncErrorStartedMs_ == 0U ||
+                now < remoteHardResyncErrorStartedMs_
+            ? 0U
+            : now - remoteHardResyncErrorStartedMs_;
+    const bool boundedRootRecovery =
+        ShouldApplyRemoteHardResync(
+            positionError,
+            hardResyncSustainedForMs,
+            hardResyncCooldownActive,
+            physicalAnimation,
+            mounted,
+            false);
+    if (boundedRootRecovery) {
+        const auto safe = GroundSafePedPosition(
+            state.position,
+            ENTITY::GET_ENTITY_MODEL(handle));
         ENTITY::SET_ENTITY_COORDS_NO_OFFSET(
             handle,
-            state.position.x,
-            state.position.y,
-            state.position.z,
+            safe.x,
+            safe.y,
+            safe.z,
             TRUE,
             TRUE,
             FALSE);
         ++animGraphReplicaCorrections_;
+        ++remoteMotionHardResyncs_;
+        remoteHardResyncCooldownUntilMs_ =
+            now + kRemoteMotionHardResyncCooldownMs;
+        remoteHardResyncErrorStartedMs_ = 0U;
+        animGraphVisualTaskActive_ = false;
+        animGraphVisualTaskStartedMs_ = 0U;
     }
     const auto currentVisualHeading =
         ENTITY::GET_ENTITY_HEADING(handle);
@@ -9149,14 +9288,18 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         static_cast<std::uint32_t>(PlayerStateFlag::Swimming) |
         static_cast<std::uint32_t>(PlayerStateFlag::SwimmingUnderwater);
     const bool nativeIdleTurnRequested =
-        applyVisualRoot &&
+        visualControllerAllowed &&
         state.locomotionMode == PlayerLocomotionMode::Grounded &&
         state.desiredMoveBlend < 0.10F &&
         std::hypot(state.velocity.x, state.velocity.y) < 0.20F &&
         (state.flags & idleTurnBlockingFlags) == 0U &&
         visualHeadingError >=
             kDirectReplicaTurnInPlaceHeadingDegrees;
-    if (applyVisualRoot && !nativeIdleTurnRequested &&
+    const bool senderMoving =
+        state.desiredMoveBlend >= 0.10F ||
+        std::hypot(state.velocity.x, state.velocity.y) >= 0.20F;
+    if (visualControllerAllowed && !senderMoving &&
+        !nativeIdleTurnRequested &&
         visualHeadingError >=
             kAnimGraphReplicaHeadingDeadZoneDegrees) {
         ENTITY::SET_ENTITY_HEADING(handle, state.heading);
@@ -9510,7 +9653,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         }
     }
 
-    if (applyVisualRoot && !meleeTaskOwnsGraph &&
+    if (visualControllerAllowed && !meleeTaskOwnsGraph &&
         !visualFireGraphOwnsTask && !requestedCover) {
         std::uint32_t motionState{};
         constexpr auto kStateHashValid = static_cast<std::uint32_t>(
@@ -9564,6 +9707,23 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                     now >= animGraphVisualTaskStartedMs_
                 ? now - animGraphVisualTaskStartedMs_
                 : std::numeric_limits<std::uint64_t>::max();
+        const auto desiredVisualDestination =
+            ComputeDirectReplicaVisualTaskDestination(
+                state.position,
+                state.velocity,
+                state.movementHeading,
+                visualLocomotion);
+        const bool visualDestinationChanged =
+            visualLocomotion != RemoteLocomotion::Idle &&
+            taskAgeMs >= kDirectReplicaVisualTaskMinimumRefreshMs &&
+            Distance(
+                animGraphVisualTaskDestination_,
+                desiredVisualDestination) >= 4.0F;
+        const auto directMoveRate = std::clamp(
+            1.0F +
+                std::max(positionError - 0.30F, 0.0F) * 0.05F,
+            1.0F,
+            kRemoteMotionCatchUpMaximumMoveRate);
         const bool aimTargetChanged =
             requestedAiming &&
             Distance(previousRemoteAimTarget_, state.aimTarget) >=
@@ -9588,7 +9748,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                             : state.movementHeading),
                     animGraphVisualDirection_,
                     visualDirection}) ||
-            aimTargetChanged || aimRefreshExpired;
+            aimTargetChanged || aimRefreshExpired ||
+            visualDestinationChanged;
         if (refreshVisualTask) {
             const bool replacingTask = animGraphVisualTaskActive_;
             const bool directionChanged =
@@ -9608,11 +9769,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                 ++animGraphAimIdleTaskStarts_;
             } else if (requestedAiming) {
                 animGraphVisualTaskDestination_ =
-                    ComputeDirectReplicaVisualTaskDestination(
-                        state.position,
-                        state.velocity,
-                        state.movementHeading,
-                        visualLocomotion);
+                    desiredVisualDestination;
                 animGraphAimTaskDestination_ =
                     animGraphVisualTaskDestination_;
                 // One native task owns both the lower-body path and the
@@ -9626,7 +9783,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                     state.aimTarget.x,
                     state.aimTarget.y,
                     state.aimTarget.z,
-                    DirectReplicaVisualTaskSpeed(visualLocomotion),
+                    DirectReplicaVisualTaskSpeed(visualLocomotion) *
+                        directMoveRate,
                     FALSE,
                     0.05F,
                     0.05F,
@@ -9654,21 +9812,21 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                 animGraphVisualTaskDestination_ = state.position;
             } else {
                 animGraphVisualTaskDestination_ =
-                    ComputeDirectReplicaVisualTaskDestination(
-                        state.position,
-                        state.velocity,
-                        state.movementHeading,
-                        visualLocomotion);
-                AI::TASK_GO_STRAIGHT_TO_COORD(
+                    desiredVisualDestination;
+                AI::SET_PED_PATH_CAN_USE_CLIMBOVERS(handle, TRUE);
+                AI::SET_PED_PATH_CAN_USE_LADDERS(handle, TRUE);
+                AI::SET_PED_PATH_CAN_DROP_FROM_HEIGHT(handle, FALSE);
+                AI::TASK_FOLLOW_NAV_MESH_TO_COORD(
                     handle,
                     animGraphVisualTaskDestination_.x,
                     animGraphVisualTaskDestination_.y,
                     animGraphVisualTaskDestination_.z,
-                    DirectReplicaVisualTaskSpeed(visualLocomotion),
+                    DirectReplicaVisualTaskSpeed(visualLocomotion) *
+                        directMoveRate,
                     kAnimGraphVisualTaskTimeoutMilliseconds,
-                    state.movementHeading,
                     kAnimGraphVisualTaskStoppingRangeMeters,
-                    0);
+                    TRUE,
+                    0.0F);
             }
             PED::SET_PED_KEEP_TASK(handle, TRUE);
             animGraphVisualLocomotion_ = visualLocomotion;
@@ -9700,9 +9858,9 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                 std::max(state.desiredMoveBlend, 1.0F),
                 1.0F,
                 3.0F));
-        // RDR2 restores move rate itself, so this neutral override is asserted
-        // each game tick. Unlike the old motor it is never used for catch-up.
-        PED::SET_PED_MOVE_RATE_OVERRIDE(handle, 1.0F);
+        // A bounded supported move-rate closes ordinary network drift without
+        // separating the model root from the native foot-placement graph.
+        PED::SET_PED_MOVE_RATE_OVERRIDE(handle, directMoveRate);
         ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(handle, FALSE);
         ++animGraphReplicaStateApplies_;
 
@@ -9952,8 +10110,6 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
             std::to_string(animGraphAirborneLaunches_) +
             ", physical-root-yield-ticks=" +
             std::to_string(animGraphPhysicalRootYieldTicks_) +
-            ", physical-root-leash-corrections=" +
-            std::to_string(animGraphPhysicalRootLeashCorrections_) +
             ", ragdoll-task-starts=" +
             std::to_string(animGraphRagdollTaskStarts_) +
             ", stealth-expected-ticks=" +
@@ -10048,7 +10204,6 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         animGraphTraversalClimbTaskStarts_ = 0U;
         animGraphAirborneLaunches_ = 0U;
         animGraphPhysicalRootYieldTicks_ = 0U;
-        animGraphPhysicalRootLeashCorrections_ = 0U;
         animGraphRagdollTaskStarts_ = 0U;
         animGraphStealthExpectedTicks_ = 0U;
         animGraphStealthObservedTicks_ = 0U;
@@ -10429,6 +10584,29 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
     // hide a mission-owned MetaPed after it has already spawned.
     ENTITY::SET_ENTITY_VISIBLE(*handle, TRUE);
     ENTITY::RESET_ENTITY_ALPHA(*handle);
+    STREAMING::REQUEST_COLLISION_AT_COORD(
+        state.position.x,
+        state.position.y,
+        state.position.z);
+    if (!remotePlayerCollisionReady_ &&
+        (replicatedMounted ||
+         ENTITY::HAS_COLLISION_LOADED_AROUND_ENTITY(*handle) != FALSE)) {
+        remotePlayerCollisionReady_ = true;
+        ENTITY::FREEZE_ENTITY_POSITION(*handle, FALSE);
+        ENTITY::SET_ENTITY_HAS_GRAVITY(*handle, TRUE);
+    }
+    ENTITY::SET_ENTITY_COLLISION(*handle, TRUE, TRUE);
+    if (!remotePlayerCollisionReady_) {
+        // A peer can join while its marker lies on a tile that has not yet
+        // streamed on this PC. Hold the model-aware spawn root until terrain
+        // collision exists; otherwise gravity can drop the replica through
+        // the map before its first locomotion task starts.
+        ENTITY::FREEZE_ENTITY_POSITION(*handle, TRUE);
+        ENTITY::SET_ENTITY_HAS_GRAVITY(*handle, FALSE);
+        return true;
+    }
+    ENTITY::FREEZE_ENTITY_POSITION(*handle, FALSE);
+    ENTITY::SET_ENTITY_HAS_GRAVITY(*handle, TRUE);
     if (remoteWeaponHash_ != 0U &&
         (previousRemoteWeaponVisualMs_ == 0U ||
          now < previousRemoteWeaponVisualMs_ ||
@@ -11125,7 +11303,9 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
         authoritativeDiscontinuity);
     const auto hardResyncPosition =
         hardResyncRequested
-            ? GroundSafePosition(state.position)
+            ? GroundSafePedPosition(
+                  state.position,
+                  ENTITY::GET_ENTITY_MODEL(*handle))
             : state.position;
     const auto hardResyncCorrectionDistance =
         hardResyncRequested
@@ -11301,7 +11481,9 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
             replicatedMounted);
     const auto safeRecoveryPosition =
         navigationSafeRecoveryRequested
-            ? GroundSafePosition(safeRecoveryDestination)
+            ? GroundSafePedPosition(
+                  safeRecoveryDestination,
+                  ENTITY::GET_ENTITY_MODEL(*handle))
             : safeRecoveryDestination;
     const auto safeRecoveryCorrectionDistance =
         navigationSafeRecoveryRequested
@@ -12080,7 +12262,9 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
         }
         case RemoteMotionMode::Snap: {
             const auto safePosition =
-                GroundSafePosition(step.snapPosition);
+                GroundSafePedPosition(
+                    step.snapPosition,
+                    ENTITY::GET_ENTITY_MODEL(*handle));
             ENTITY::SET_ENTITY_COORDS_NO_OFFSET(
                 *handle,
                 safePosition.x,
@@ -13401,6 +13585,7 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
             previousRemoteMountTransformMs_ = 0U;
             previousRemoteMountTaskDestination_ = {};
             remoteMountMoving_ = false;
+            remoteMountCollisionReady_ = false;
         }
         const auto model =
             static_cast<Hash>(state.modelHash);
@@ -13415,11 +13600,13 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
             if (STREAMING::HAS_MODEL_LOADED(model) == FALSE) {
                 return true;
             }
+            const auto spawnPosition =
+                GroundSafePedPosition(state.position, model);
             auto mount = PED::CREATE_PED(
                 model,
-                state.position.x,
-                state.position.y,
-                state.position.z,
+                spawnPosition.x,
+                spawnPosition.y,
+                spawnPosition.z,
                 state.heading,
                 FALSE,
                 FALSE,
@@ -13439,8 +13626,9 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
             ENTITY::SET_ENTITY_LOAD_COLLISION_FLAG(
                 mount,
                 TRUE);
-            ENTITY::SET_ENTITY_HAS_GRAVITY(mount, TRUE);
+            ENTITY::SET_ENTITY_HAS_GRAVITY(mount, FALSE);
             ENTITY::SET_ENTITY_COLLISION(mount, TRUE, TRUE);
+            ENTITY::FREEZE_ENTITY_POSITION(mount, TRUE);
             ENTITY::SET_ENTITY_CAN_BE_DAMAGED(mount, FALSE);
             ENTITY::SET_ENTITY_VISIBLE(mount, TRUE);
             ENTITY::RESET_ENTITY_ALPHA(mount);
@@ -13473,6 +13661,23 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
         ENTITY::SET_ENTITY_VISIBLE(mount, TRUE);
         ENTITY::RESET_ENTITY_ALPHA(mount);
         ENTITY::SET_ENTITY_COLLISION(mount, TRUE, TRUE);
+        STREAMING::REQUEST_COLLISION_AT_COORD(
+            state.position.x,
+            state.position.y,
+            state.position.z);
+        if (!remoteMountCollisionReady_ &&
+            ENTITY::HAS_COLLISION_LOADED_AROUND_ENTITY(mount) != FALSE) {
+            remoteMountCollisionReady_ = true;
+            ENTITY::FREEZE_ENTITY_POSITION(mount, FALSE);
+            ENTITY::SET_ENTITY_HAS_GRAVITY(mount, TRUE);
+        }
+        if (!remoteMountCollisionReady_) {
+            ENTITY::FREEZE_ENTITY_POSITION(mount, TRUE);
+            ENTITY::SET_ENTITY_HAS_GRAVITY(mount, FALSE);
+            return true;
+        }
+        ENTITY::FREEZE_ENTITY_POSITION(mount, FALSE);
+        ENTITY::SET_ENTITY_HAS_GRAVITY(mount, TRUE);
         const auto current = ToBridgeVector(
             ENTITY::GET_ENTITY_COORDS(
                 mount,
@@ -13503,41 +13708,11 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
         const bool moving =
             std::isfinite(horizontalSpeed) &&
             horizontalSpeed > 0.20F;
-        const auto correctionThreshold =
-            moving
-                ? kRemoteMountMovingCorrectionMeters
-                : kRemoteMountIdleCorrectionMeters;
-        if (std::isfinite(error) &&
-            std::isfinite(horizontalError) &&
-            (horizontalError >= correctionThreshold ||
-             error >= kRemoteMountHardCorrectionMeters)) {
-            Vec3 corrected = state.position;
-            if (error < kRemoteMountHardCorrectionMeters) {
-                const auto elapsedSeconds =
-                    previousRemoteMountTransformMs_ == 0U ||
-                            now <= previousRemoteMountTransformMs_
-                        ? 0.05F
-                        : std::clamp(
-                              static_cast<float>(
-                                  now - previousRemoteMountTransformMs_) /
-                                  1'000.0F,
-                              0.001F,
-                              0.10F);
-                const auto alpha = 1.0F - std::exp(
-                    -(moving ? 4.5F : 9.0F) * elapsedSeconds);
-                corrected = {
-                    current.x +
-                        (state.position.x - current.x) *
-                            alpha,
-                    current.y +
-                        (state.position.y - current.y) *
-                            alpha,
-                    // Let the local horse/navmesh own ground height and hoof
-                    // IK. Per-frame Z warps caused the visible slope hops.
-                    current.z};
-            } else {
-                ++remoteMountHardCorrections_;
-            }
+        if (ShouldApplyRemoteMountHardCorrection(
+                error,
+                horizontalError)) {
+            const auto corrected =
+                GroundSafePedPosition(state.position, model);
             ENTITY::SET_ENTITY_COORDS_NO_OFFSET(
                 mount,
                 corrected.x,
@@ -13547,21 +13722,22 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
                 TRUE,
                 FALSE);
             ++remoteMountCorrections_;
+            ++remoteMountHardCorrections_;
+            previousRemoteMountTaskMs_ = 0U;
         }
         previousRemoteMountTransformMs_ = now;
-        const Vec3 taskDestination{
-            state.position.x + state.velocity.x * 0.70F,
-            state.position.y + state.velocity.y * 0.70F,
-            state.position.z + state.velocity.z * 0.70F};
-        const auto movementHeading =
+        const auto lookAheadMeters =
             moving
-                ? NormalizeHeading(
-                      static_cast<float>(
-                          std::atan2(
-                              -state.velocity.x,
-                              state.velocity.y) *
-                          (180.0 / std::numbers::pi)))
-                : state.heading;
+                ? std::clamp(horizontalSpeed * 2.0F, 3.0F, 12.0F)
+                : 0.0F;
+        const auto inverseSpeed =
+            moving ? 1.0F / horizontalSpeed : 0.0F;
+        const Vec3 taskDestination{
+            state.position.x +
+                state.velocity.x * inverseSpeed * lookAheadMeters,
+            state.position.y +
+                state.velocity.y * inverseSpeed * lookAheadMeters,
+            state.position.z};
         const bool firstOrClockReset =
             previousRemoteMountTaskMs_ == 0U ||
             now < previousRemoteMountTaskMs_;
@@ -13570,8 +13746,6 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
                 ? 0U
                 : now - previousRemoteMountTaskMs_;
         const bool taskChangeRequested =
-            (moving &&
-             taskAge >= kRemoteMountTaskRefreshMilliseconds) ||
             Distance(
                 previousRemoteMountTaskDestination_,
                 taskDestination) >=
@@ -13583,16 +13757,18 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
              taskChangeRequested);
         if (mountTaskRefresh) {
             if (moving) {
-                AI::TASK_GO_STRAIGHT_TO_COORD(
+                AI::SET_PED_PATH_CAN_USE_CLIMBOVERS(mount, TRUE);
+                AI::SET_PED_PATH_CAN_DROP_FROM_HEIGHT(mount, FALSE);
+                AI::TASK_FOLLOW_NAV_MESH_TO_COORD(
                     mount,
                     taskDestination.x,
                     taskDestination.y,
                     taskDestination.z,
-                    std::clamp(horizontalSpeed, 1.0F, 12.0F),
-                    3'000,
-                    movementHeading,
-                    0.2F,
-                    0);
+                    std::clamp(horizontalSpeed, 0.75F, 12.0F),
+                    -1,
+                    0.35F,
+                    TRUE,
+                    0.0F);
             } else {
                 AI::TASK_STAND_STILL(mount, 1'250);
                 ENTITY::SET_ENTITY_HEADING(
@@ -13759,6 +13935,7 @@ void ScriptHookSdkFacade::ClearRemoteMount() noexcept {
     previousRemoteMountTaskDestination_ = {};
     remotePlayerMountHandle_ = 0;
     remoteMountMoving_ = false;
+    remoteMountCollisionReady_ = false;
     remotePlayerMounted_ = false;
     remotePlayerMountBorrowed_ = false;
 }
@@ -13861,9 +14038,11 @@ void ScriptHookSdkFacade::DespawnWorldEntityProxy(
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         WorldEntityKind kind{WorldEntityKind::Ped};
+        bool borrowedLocalEntity{};
         const auto entry = worldProxyEntries_.find(entityId);
         if (entry != worldProxyEntries_.end()) {
             kind = entry->second.state.kind;
+            borrowedLocalEntity = entry->second.borrowedLocalEntity;
             STREAMING::SET_MODEL_AS_NO_LONGER_NEEDED(
                 static_cast<Hash>(
                     entry->second.state.modelHash));
@@ -13877,7 +14056,13 @@ void ScriptHookSdkFacade::DespawnWorldEntityProxy(
         auto entity = static_cast<Entity>(*handle);
         (void)worldEntityReplicas_.Remove(entityId);
         if (ENTITY::DOES_ENTITY_EXIST(entity) != FALSE) {
-            if (kind == WorldEntityKind::Object) {
+            if (borrowedLocalEntity) {
+                ENTITY::SET_ENTITY_VISIBLE(entity, TRUE);
+                ENTITY::RESET_ENTITY_ALPHA(entity);
+                ENTITY::SET_ENTITY_COLLISION(entity, TRUE, TRUE);
+                ENTITY::SET_ENTITY_HAS_GRAVITY(entity, TRUE);
+                ENTITY::FREEZE_ENTITY_POSITION(entity, FALSE);
+            } else if (kind == WorldEntityKind::Object) {
                 auto object = static_cast<Object>(entity);
                 OBJECT::DELETE_OBJECT(&object);
             } else {
@@ -14057,16 +14242,28 @@ void ScriptHookSdkFacade::CleanupWorldEntityProxies() noexcept {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         std::unordered_map<LocalEntityHandle, WorldEntityKind>
             kindsByHandle;
+        std::unordered_set<LocalEntityHandle> borrowedHandles;
         for (const auto& [entityId, entry] : worldProxyEntries_) {
             const auto handle = worldEntityReplicas_.FindLocal(entityId);
             if (handle.has_value()) {
                 kindsByHandle.emplace(*handle, entry.state.kind);
+                if (entry.borrowedLocalEntity) {
+                    borrowedHandles.insert(*handle);
+                }
             }
         }
         for (const auto handle : worldEntityReplicas_.Drain()) {
             auto entity = static_cast<Entity>(handle);
             if (entity != 0 &&
                 ENTITY::DOES_ENTITY_EXIST(entity) != FALSE) {
+                if (borrowedHandles.contains(handle)) {
+                    ENTITY::SET_ENTITY_VISIBLE(entity, TRUE);
+                    ENTITY::RESET_ENTITY_ALPHA(entity);
+                    ENTITY::SET_ENTITY_COLLISION(entity, TRUE, TRUE);
+                    ENTITY::SET_ENTITY_HAS_GRAVITY(entity, TRUE);
+                    ENTITY::FREEZE_ENTITY_POSITION(entity, FALSE);
+                    continue;
+                }
                 const auto kind = kindsByHandle.find(handle);
                 if (kind != kindsByHandle.end() &&
                     kind->second == WorldEntityKind::Object) {
@@ -14105,7 +14302,8 @@ bool ScriptHookSdkFacade::IsOwnedHybridAnimSceneEntity(
 void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
     const bool active,
     const bool authoritativePopulationReady,
-    const float radiusMeters) noexcept {
+    const float radiusMeters,
+    const bool preserveSameProcessSourceActors) noexcept {
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         if (!active ||
@@ -14174,6 +14372,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 ENTITY::DOES_ENTITY_EXIST(*handle) == FALSE) {
                 (void)worldEntityReplicas_.Remove(entityId);
                 handle.reset();
+                entry.borrowedLocalEntity = false;
+                entry.collisionReady = false;
                 entry.requestedAtMs = now;
                 entry.weaponHash = 0U;
                 entry.aiming = false;
@@ -14185,6 +14385,86 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             const auto model =
                 static_cast<Hash>(
                     entry.state.modelHash);
+            constexpr auto kScriptOwnedFlag =
+                static_cast<std::uint8_t>(
+                    WorldEntityStateFlag::ScriptOwned);
+            if (!handle.has_value() &&
+                !preserveSameProcessSourceActors &&
+                entry.state.kind == WorldEntityKind::Ped &&
+                entry.state.taskKind == WorldTaskKind::Scenario &&
+                (entry.state.flags & kScriptOwnedFlag) != 0U) {
+                // Deterministic Story/camp actors usually already exist on the
+                // guest at the same scenario point. Reusing that actor retains
+                // RDR2's exact scenario graph, phase, IK and attached props.
+                // Only a tight model/position match is accepted; randomized
+                // ambient population remains an independent host proxy.
+                constexpr float kScenarioActorMatchRadiusMeters = 1.25F;
+                Ped bestMatch{};
+                auto bestDistance =
+                    kScenarioActorMatchRadiusMeters;
+                const auto localPlayer = PLAYER::PLAYER_PED_ID();
+                const auto remotePlayer = replicas_.FindLocal(remotePlayerId_);
+                const auto consider = [&](const Ped candidate) {
+                    if (candidate == 0 || candidate == localPlayer ||
+                        (remotePlayer.has_value() &&
+                         candidate == *remotePlayer) ||
+                        ENTITY::DOES_ENTITY_EXIST(candidate) == FALSE ||
+                        PED::IS_PED_A_PLAYER(candidate) != FALSE ||
+                        static_cast<std::uint32_t>(
+                            ENTITY::GET_ENTITY_MODEL(candidate)) !=
+                            entry.state.modelHash ||
+                        replicas_.FindNetwork(candidate).has_value() ||
+                        remoteMountReplicas_.FindNetwork(candidate).has_value() ||
+                        worldEntityReplicas_.FindNetwork(candidate).has_value()) {
+                        return;
+                    }
+                    const auto candidatePosition = ToBridgeVector(
+                        ENTITY::GET_ENTITY_COORDS(candidate, TRUE, FALSE));
+                    const auto candidateDistance = Distance(
+                        candidatePosition,
+                        entry.state.position);
+                    if (IsFinite(candidatePosition) &&
+                        std::isfinite(candidateDistance) &&
+                        candidateDistance <= bestDistance) {
+                        bestDistance = candidateDistance;
+                        bestMatch = candidate;
+                    }
+                };
+                std::array<int, kWorldPedPoolCapacity> localPeds{};
+                const auto localPedCount = std::clamp(
+                    worldGetAllPeds(
+                        localPeds.data(),
+                        static_cast<int>(localPeds.size())),
+                    0,
+                    static_cast<int>(localPeds.size()));
+                for (int index = 0; index < localPedCount; ++index) {
+                    consider(static_cast<Ped>(
+                        localPeds[static_cast<std::size_t>(index)]));
+                }
+                for (const auto& [hiddenHandle, hiddenEntry] :
+                     hiddenAmbientPeds_) {
+                    (void)hiddenEntry;
+                    consider(static_cast<Ped>(hiddenHandle));
+                }
+                if (bestMatch != 0 &&
+                    worldEntityReplicas_.Bind(
+                        entityId,
+                        static_cast<LocalEntityHandle>(bestMatch))) {
+                    handle = static_cast<LocalEntityHandle>(bestMatch);
+                    entry.borrowedLocalEntity = true;
+                    entry.spawnDisposition =
+                        WorldProxySpawnDisposition::Spawned;
+                    hiddenAmbientPeds_.erase(*handle);
+                    ENTITY::SET_ENTITY_VISIBLE(bestMatch, TRUE);
+                    ENTITY::RESET_ENTITY_ALPHA(bestMatch);
+                    ENTITY::SET_ENTITY_COLLISION(bestMatch, TRUE, TRUE);
+                    ENTITY::SET_ENTITY_HAS_GRAVITY(bestMatch, TRUE);
+                    ENTITY::FREEZE_ENTITY_POSITION(bestMatch, FALSE);
+                    Log(
+                        "[WORLD_SCENARIO_RECONCILE] reused local Story actor for exact scenario entity " +
+                        std::to_string(entityId.Value()));
+                }
+            }
             if (!handle.has_value()) {
                 if (entry.spawnDisposition ==
                     WorldProxySpawnDisposition::PermanentFailure) {
@@ -14244,13 +14524,16 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
 
                 const bool objectKind =
                     entry.state.kind == WorldEntityKind::Object;
+                const auto spawnPosition = objectKind
+                    ? entry.state.position
+                    : GroundSafePedPosition(entry.state.position, model);
                 auto entity = objectKind
                                   ? static_cast<Entity>(
                                         OBJECT::CREATE_OBJECT(
                                             model,
-                                            entry.state.position.x,
-                                            entry.state.position.y,
-                                            entry.state.position.z,
+                                            spawnPosition.x,
+                                            spawnPosition.y,
+                                            spawnPosition.z,
                                             FALSE,
                                             FALSE,
                                             TRUE,
@@ -14259,9 +14542,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                                   : static_cast<Entity>(
                                         PED::CREATE_PED(
                                             model,
-                                            entry.state.position.x,
-                                            entry.state.position.y,
-                                            entry.state.position.z,
+                                            spawnPosition.x,
+                                            spawnPosition.y,
+                                            spawnPosition.z,
                                             entry.state.heading,
                                             FALSE,
                                             FALSE,
@@ -14307,14 +14590,18 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 ENTITY::SET_ENTITY_LOAD_COLLISION_FLAG(
                     entity,
                     TRUE);
-                ENTITY::SET_ENTITY_HAS_GRAVITY(entity, objectKind ? FALSE : TRUE);
+                ENTITY::SET_ENTITY_HAS_GRAVITY(entity, FALSE);
                 ENTITY::SET_ENTITY_COLLISION(entity, objectKind ? FALSE : TRUE, TRUE);
                 ENTITY::SET_ENTITY_CAN_BE_DAMAGED(entity, FALSE);
                 ENTITY::SET_ENTITY_VISIBLE(entity, TRUE);
                 ENTITY::RESET_ENTITY_ALPHA(entity);
                 if (!objectKind) {
+                    ENTITY::FREEZE_ENTITY_POSITION(ped, TRUE);
                     PED::SET_BLOCKING_OF_NON_TEMPORARY_EVENTS(ped, TRUE);
                     PED::SET_PED_KEEP_TASK(ped, TRUE);
+                    ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(
+                        ped,
+                        FALSE);
                 }
                 if (!worldEntityReplicas_.Bind(
                         entityId,
@@ -14355,10 +14642,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             const auto entity = static_cast<Entity>(*handle);
             ENTITY::SET_ENTITY_VISIBLE(entity, TRUE);
             ENTITY::RESET_ENTITY_ALPHA(entity);
-            ENTITY::SET_ENTITY_COLLISION(
-                entity,
-                entry.state.kind == WorldEntityKind::Object ? FALSE : TRUE,
-                TRUE);
+            if (entry.state.kind == WorldEntityKind::Object) {
+                ENTITY::SET_ENTITY_COLLISION(entity, FALSE, TRUE);
+            }
             if (IsOwnedHybridAnimSceneEntity(*handle)) {
                 // Preserve visibility/collision, but never layer proxy
                 // locomotion, heading snaps, health rewrites or semantic tasks
@@ -14383,6 +14669,19 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 continue;
             }
             const auto ped = static_cast<Ped>(entity);
+            if (entry.borrowedLocalEntity &&
+                entry.state.taskKind == WorldTaskKind::Scenario) {
+                // The local Story VM/scenario manager is the exact animation
+                // owner. Generic transforms or tasks would destroy its clip,
+                // phase, prop and IK state.
+                ENTITY::SET_ENTITY_VISIBLE(ped, TRUE);
+                ENTITY::RESET_ENTITY_ALPHA(ped);
+                ENTITY::SET_ENTITY_COLLISION(ped, TRUE, TRUE);
+                ENTITY::SET_ENTITY_HAS_GRAVITY(ped, TRUE);
+                ENTITY::FREEZE_ENTITY_POSITION(ped, FALSE);
+                ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(ped, FALSE);
+                continue;
+            }
             const auto currentPosition = ToBridgeVector(
                 ENTITY::GET_ENTITY_COORDS(
                     ped,
@@ -14400,8 +14699,24 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             const bool mountedRelationReady =
                 mounted &&
                 parentMount.has_value() &&
-                ENTITY::DOES_ENTITY_EXIST(
-                    *parentMount) != FALSE;
+                    ENTITY::DOES_ENTITY_EXIST(
+                        *parentMount) != FALSE;
+            constexpr float kScenarioReplayRadiusMeters = 1.25F;
+            const bool scenarioPointAvailable =
+                entry.state.taskKind == WorldTaskKind::Scenario &&
+                AI::DOES_SCENARIO_EXIST_IN_AREA(
+                    entry.state.position.x,
+                    entry.state.position.y,
+                    entry.state.position.z,
+                    kScenarioReplayRadiusMeters,
+                    TRUE,
+                    0,
+                    FALSE) != FALSE;
+            const bool stableIdleRoot =
+                !mountedRelationReady &&
+                (entry.state.taskKind == WorldTaskKind::Idle ||
+                 (entry.state.taskKind == WorldTaskKind::Scenario &&
+                  !scenarioPointAvailable));
             const auto ageSeconds =
                 now >= entry.receivedAtMs
                     ? std::min(
@@ -14415,8 +14730,29 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                     entry.state.velocity.x * ageSeconds,
                 entry.state.position.y +
                     entry.state.velocity.y * ageSeconds,
-                entry.state.position.z +
-                    entry.state.velocity.z * ageSeconds};
+                    entry.state.position.z +
+                        entry.state.velocity.z * ageSeconds};
+            STREAMING::REQUEST_COLLISION_AT_COORD(
+                predicted.x,
+                predicted.y,
+                predicted.z);
+            if (!entry.collisionReady &&
+                ENTITY::HAS_COLLISION_LOADED_AROUND_ENTITY(ped) != FALSE) {
+                entry.collisionReady = true;
+                ENTITY::FREEZE_ENTITY_POSITION(ped, FALSE);
+                ENTITY::SET_ENTITY_HAS_GRAVITY(ped, TRUE);
+            }
+            ENTITY::SET_ENTITY_COLLISION(ped, TRUE, TRUE);
+            if (!entry.collisionReady) {
+                // Do not let gravity advance through an unloaded terrain tile.
+                // The authoritative spawn remains frozen only until collision
+                // is present, then ordinary ped/horse physics owns grounding.
+                ENTITY::FREEZE_ENTITY_POSITION(ped, TRUE);
+                ENTITY::SET_ENTITY_HAS_GRAVITY(ped, FALSE);
+                continue;
+            }
+            ENTITY::FREEZE_ENTITY_POSITION(ped, FALSE);
+            ENTITY::SET_ENTITY_HAS_GRAVITY(ped, TRUE);
             const auto error =
                 Distance(currentPosition, predicted);
             const bool cinematicEntity =
@@ -14436,17 +14772,13 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                     TaskDismountAnimal(ped);
                 }
                 entry.mounted = false;
-                const bool idleLike =
-                    entry.state.taskKind ==
-                        WorldTaskKind::Idle ||
-                    entry.state.taskKind ==
-                        WorldTaskKind::Scenario;
                 if (std::isfinite(error) &&
                     ((cinematicEntity && error >= 0.03F) ||
                      error >=
                          kWorldProxySnapDistanceMeters ||
-                     (idleLike && error >= 0.12F))) {
-                    Vec3 corrected = predicted;
+                     (stableIdleRoot && error >= 1.0F))) {
+                    Vec3 corrected =
+                        GroundSafePedPosition(predicted, model);
                     const auto hardCorrectionDistance =
                         cinematicEntity
                             ? 3.0F
@@ -14457,7 +14789,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                             std::exp(
                                 -(cinematicEntity ? 8.0F : 10.0F) *
                                 elapsedSeconds);
-                        corrected = {
+                        corrected = GroundSafePedPosition({
                             currentPosition.x +
                                 (predicted.x -
                                  currentPosition.x) *
@@ -14469,15 +14801,15 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                             currentPosition.z +
                                 (predicted.z -
                                  currentPosition.z) *
-                                    alpha};
+                                    alpha}, model);
                     }
                     ENTITY::SET_ENTITY_COORDS_NO_OFFSET(
                         ped,
                         corrected.x,
                         corrected.y,
                         corrected.z,
-                        FALSE,
-                        FALSE,
+                        TRUE,
+                        TRUE,
                         FALSE);
                     if (cinematicEntity) {
                         ENTITY::SET_ENTITY_VELOCITY(
@@ -14519,7 +14851,13 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             if (heading < 0.0F) {
                 heading += 360.0F;
             }
-            if (!mountedRelationReady) {
+            const bool navigationOwnsHeading =
+                entry.state.taskKind == WorldTaskKind::Locomotion ||
+                entry.state.taskKind == WorldTaskKind::Fleeing ||
+                entry.state.taskKind == WorldTaskKind::Scenario;
+            if (!mountedRelationReady &&
+                !navigationOwnsHeading &&
+                std::abs(headingDelta) >= 1.0F) {
                 ENTITY::SET_ENTITY_HEADING(ped, heading);
             }
 
@@ -14600,13 +14938,17 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             const bool taskChanged =
                 entry.previousTaskKind !=
                     entry.state.taskKind;
+            const bool scenarioTaskActive =
+                entry.state.taskKind == WorldTaskKind::Scenario &&
+                AI::PED_HAS_USE_SCENARIO_TASK(ped) != FALSE;
             const bool taskRefreshExpired =
                 entry.previousTaskMs == 0U ||
                 now < entry.previousTaskMs ||
-                now - entry.previousTaskMs >=
-                    (cinematicEntity
-                         ? 250U
-                         : kWorldSemanticTaskRefreshMilliseconds);
+                (entry.state.taskKind == WorldTaskKind::Scenario
+                     ? (!scenarioTaskActive &&
+                        now - entry.previousTaskMs >= 2'000U)
+                     : (cinematicEntity &&
+                        now - entry.previousTaskMs >= 250U));
             const bool taskTargetChanged =
                 Distance(
                     entry.previousTaskTarget,
@@ -14630,25 +14972,41 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 switch (entry.state.taskKind) {
                     case WorldTaskKind::Locomotion:
                     case WorldTaskKind::Fleeing:
-                        AI::TASK_GO_STRAIGHT_TO_COORD(
+                        AI::TASK_FOLLOW_NAV_MESH_TO_COORD(
                             ped,
                             entry.state.taskTarget.x,
                             entry.state.taskTarget.y,
                             entry.state.taskTarget.z,
                             std::clamp(
                                 speed,
-                                1.0F,
+                                0.35F,
                                 6.0F),
-                            2'500,
-                            entry.state.heading,
-                            0.2F,
-                            0);
+                            -1,
+                            0.35F,
+                            TRUE,
+                            0.0F);
                         break;
                     case WorldTaskKind::Scenario:
+                        if (scenarioPointAvailable) {
+                            AI::TASK_USE_NEAREST_SCENARIO_TO_COORD_WARP(
+                                ped,
+                                entry.state.position.x,
+                                entry.state.position.y,
+                                entry.state.position.z,
+                                kScenarioReplayRadiusMeters,
+                                static_cast<Any>(-1),
+                                FALSE,
+                                FALSE,
+                                FALSE,
+                                FALSE);
+                        } else {
+                            AI::TASK_STAND_STILL(ped, -1);
+                        }
+                        break;
                     case WorldTaskKind::Idle:
                         AI::TASK_STAND_STILL(
                             ped,
-                            1'250);
+                            -1);
                         break;
                     case WorldTaskKind::Cinematic:
                         if (speed > 0.20F) {
@@ -14677,6 +15035,11 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 entry.previousTaskTarget =
                     entry.state.taskTarget;
                 entry.previousTaskMs = now;
+            }
+            if (stableIdleRoot) {
+                ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(
+                    ped,
+                    FALSE);
             }
 
             const auto aiming =
@@ -14912,13 +15275,20 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                            ENTITY::IS_ENTITY_A_MISSION_ENTITY(ped) != FALSE;
                 })()) {
                 // Story/mission scripts can restore visibility and collision
-                // after our first write. Reassert the non-destructive guest
-                // world mask on every tick while host authority owns it.
-                ENTITY::SET_ENTITY_VISIBLE(ped, FALSE);
-                ENTITY::SET_ENTITY_ALPHA(ped, 0, FALSE);
+                // after our first write. In a real guest process the local
+                // population is fully masked. The one-PC view must retain the
+                // source actors' collision/physics or gravity makes the very
+                // host samples feeding the guest proxies fall through terrain.
+                ENTITY::SET_ENTITY_VISIBLE(
+                    ped,
+                    preserveSameProcessSourceActors ? TRUE : FALSE);
+                ENTITY::SET_ENTITY_ALPHA(
+                    ped,
+                    preserveSameProcessSourceActors ? 32 : 0,
+                    FALSE);
                 ENTITY::SET_ENTITY_COLLISION(
                     ped,
-                    FALSE,
+                    preserveSameProcessSourceActors ? TRUE : FALSE,
                     TRUE);
                 ++iterator;
                 continue;
@@ -14953,14 +15323,21 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                             ped)),
                     ENTITY::IS_ENTITY_VISIBLE(ped) != FALSE ||
                         ENTITY::GET_ENTITY_ALPHA(ped) > 0});
-            ENTITY::SET_ENTITY_VISIBLE(ped, FALSE);
-            ENTITY::SET_ENTITY_ALPHA(ped, 0, FALSE);
+            ENTITY::SET_ENTITY_VISIBLE(
+                ped,
+                preserveSameProcessSourceActors ? TRUE : FALSE);
+            ENTITY::SET_ENTITY_ALPHA(
+                ped,
+                preserveSameProcessSourceActors ? 32 : 0,
+                FALSE);
             ENTITY::SET_ENTITY_COLLISION(
                 ped,
-                FALSE,
+                preserveSameProcessSourceActors ? TRUE : FALSE,
                 TRUE);
         }
-        MaintainHiddenPedAttachments();
+        if (!preserveSameProcessSourceActors) {
+            MaintainHiddenPedAttachments();
+        }
         if (previousWorldMirrorDiagnosticsMs_ == 0U ||
             now < previousWorldMirrorDiagnosticsMs_ ||
             now - previousWorldMirrorDiagnosticsMs_ >=
@@ -14970,8 +15347,12 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             std::size_t pendingDependency{};
             std::size_t retryableFailure{};
             std::size_t permanentFailure{};
+            std::size_t borrowedScenarioActors{};
             for (const auto& [entityId, entry] : worldProxyEntries_) {
                 (void)entityId;
+                if (entry.borrowedLocalEntity) {
+                    ++borrowedScenarioActors;
+                }
                 switch (entry.spawnDisposition) {
                     case WorldProxySpawnDisposition::PendingModel:
                         ++pendingModel;
@@ -14994,6 +15375,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 std::to_string(worldProxyEntries_.size()) +
                 ", spawned=" +
                 std::to_string(worldEntityReplicas_.Size()) +
+                ", exact-local-scenario=" +
+                std::to_string(borrowedScenarioActors) +
                 ", pending-model=" +
                 std::to_string(pendingModel) +
                 ", pending-dependency=" +
@@ -15016,12 +15399,17 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 (authoritativePopulationReady
                      ? std::string{"true"}
                      : std::string{"false"}) +
+                ", same-process-source-preserved=" +
+                (preserveSameProcessSourceActors
+                     ? std::string{"true"}
+                     : std::string{"false"}) +
                 ", guest-owned-horse-preserved=true");
         }
 #else
         (void)active;
         (void)authoritativePopulationReady;
         (void)radiusMeters;
+        (void)preserveSameProcessSourceActors;
 #endif
     } catch (...) {
         // Restore local world state immediately after any mirror failure.
@@ -15153,8 +15541,9 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
             observedVanillaPickups_.clear();
         }
         // Keep the bridge thread alive inside the real RDR2 frontend. Escape
-        // is blocked before consensus; after both votes we inject the normal
-        // frontend-pause control on both PCs so each opens the game's own
+        // becomes an explicit synchronized pause/resume request; once the
+        // host publishes that state we inject the normal frontend-pause
+        // control on both PCs so each opens the game's own
         // menu. Never fall back to SET_GAME_PAUSED(TRUE): opening the native
         // frontend can suspend the ScriptHook fiber long enough for that
         // timeout to expire after the player has already closed the menu,
@@ -15260,7 +15649,7 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
                 if (UI::IS_PAUSE_MENU_ACTIVE() != FALSE) {
                     if (frontendPauseTogglePending_) {
                         Log(
-                            "native RDR2 pause frontend opened after coop consensus");
+                            "native RDR2 pause frontend opened after synchronized request");
                     }
                     frontendPauseTogglePending_ = false;
                     // The real menu is open, but a single physical Escape
@@ -15363,7 +15752,7 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
                         UI::DISABLE_FRONTEND_THIS_FRAME();
                         if (!pauseOverrideActive_) {
                             Log(
-                                "vanilla pause blocked until both coop players vote");
+                                "vanilla pause intercepted for synchronized co-op state");
                         }
                         pauseOverrideActive_ = true;
                     } else {
