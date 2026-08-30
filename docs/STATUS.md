@@ -16,7 +16,7 @@ while failing closed when an exact local state cannot be verified.
 | Downed/revive | Experimental, native live gate | Normal hold-to-revive prompt, 4 s hold, 2 m range, host validation, and 35% local health restore. A retry is never automatic. |
 | Mission authority and companion presentation | Experimental | The host publishes mission phase, anchor, objective, camera, and cinematic state. A guest outside a matching instance is kept companion-only and is returned through guarded presentation barriers. |
 | Matching MissionData barrier | Implemented, two-PC validation needed | The host offers an exact mission ID. A guest may use only its own identical, incomplete, startable vanilla prompt during the 45 s window. Any conflict, refusal, or timeout stays companion-only. |
-| Mission completion/progression | Implemented, two-PC persistence validation needed | For an eligible matching run, the guest can receive verified MissionData completion/rating, bounded positive cash delta, and only reviewed idempotent rewards. The catalog covers the 80 registered Story MissionData entries; item/entitlement writes remain explicitly allow-listed. |
+| Mission completion/progression | Guarded, two-PC persistence validation needed | Only an exact guest instance that crossed the released start barrier may receive MissionData completion/rating. All 80 registered Story MissionData entries are enabled; extra item/weapon/entitlement writes remain limited to the 17 source-reviewed reward mappings. Cash replication is disabled until an authoritative mission receipt exists. |
 | Mission dialogue coordination | Experimental | The host samples admitted local dialogue roots/lines, sends epoch- and checkpoint-scoped cues, and waits for guest readiness. A matching guest keeps its own vanilla playback; a companion-only guest can use the small reviewed bridge-owned audio presentation. Unmapped dialogue remains local. |
 | Ambient encounters | Implemented tester coverage, two-PC validation needed | 94 reviewed action-script detections map to five host-owned profiles: 65 hostile roadside actions, 15 rescues, 6 wagon defenses, 3 animal attacks, and 5 camp clear-outs. The host owns phases/outcome/cleanup; guest combat contributes through validated intent. Non-action ambient vignettes remain visible through the world mirror without inventing combat or rewards. |
 | Capability/pickup journal | Guarded and deny-by-default | Reviewed entitlements and collection telemetry are idempotent; unsupported record shapes are rejected. Corpse/container/plant/document inventory is not synchronized. |
@@ -27,15 +27,15 @@ The guest never receives a host save or a generic "complete this mission"
 command. A completion can be applied only when all of the following are true:
 
 1. The host and guest use the same exact catalog MissionData entry.
-2. The guest proved that entry incomplete and locally startable before the
-   mission began.
+2. The guest proved that entry incomplete, then actually entered the exact
+   local instance and received the host's barrier release.
 3. The completion references that same approved mission epoch and event ID.
 4. The guest verifies its own MissionData completion write.
 5. Any item, weapon, document, recipe, or shop entitlement has a specific
    reviewed idempotent catalog mapping.
 
-Ratings and a capped positive mission-run cash delta use the same identity and
-are applied at most once. Unknown rewards, temporary equipment, horse state,
+Completion transactions are journaled before delivery and replayed until the
+guest acknowledgement. Unknown rewards, cash, temporary equipment, horse state,
 Honor, optional pickups, and world loot are not synthesized. The detailed
 two-save procedure and current explicit rewards are in
 [MISSION_PROGRESSION_TEST_MATRIX.md](MISSION_PROGRESSION_TEST_MATRIX.md).

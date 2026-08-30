@@ -164,6 +164,21 @@ public sealed record SidecarConfig
     public string ExpandedProfilePath => ExpandPath(ProfilePath);
 
     public string ExpandedCapabilityJournalPath => ExpandPath(CapabilityJournalPath);
+
+    public string ExpandedMissionProgressionJournalPath(string sessionFingerprint)
+    {
+        if (string.IsNullOrWhiteSpace(sessionFingerprint) ||
+            sessionFingerprint.Length > 32 ||
+            sessionFingerprint.Any(static character => !char.IsAsciiHexDigit(character)))
+        {
+            throw new ArgumentException("Session fingerprint is invalid.",
+                nameof(sessionFingerprint));
+        }
+        var capabilityPath = ExpandedCapabilityJournalPath;
+        return Path.Combine(
+            Path.GetDirectoryName(capabilityPath) ?? ".",
+            $"mission-progression-{sessionFingerprint}.json");
+    }
     public string ExpandedPickupClaimStatePath => ExpandPath(PickupClaimStatePath);
 
     public string ExpandedLogPath => ExpandPath(LogPath);

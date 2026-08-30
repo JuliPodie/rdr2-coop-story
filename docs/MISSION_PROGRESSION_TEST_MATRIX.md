@@ -49,11 +49,15 @@ release as campaign-co-op completion.
 The catalog contains every one of the 79 MissionData Story entries registered
 by the pinned game's `init_all_sp` script, plus `RABI1` (the separately
 registered Fisher of Men entry): 80 exact mission IDs in total. Completion and
-rating replication therefore cover the full game-owned Story MissionData
-registry; the explicit rows below identify the entries that also need a direct
-item or retail-entitlement write because MissionData alone cannot award it.
+rating writes and MissionData-derived unlocks are enabled for all 80 after an
+exact released guest instance. This includes vanilla chapter, activity,
+encounter, recipe-availability, and shop gates which query the completed
+MissionData record. The 17 source-reviewed entries below additionally apply their concrete
+idempotent item, weapon, document, or retail-entitlement records. The other 63
+never synthesize an extra direct reward beyond MissionData completion/rating
+and its derived unlocks.
 
-For every row, capture both players' Mission Replay rating and cash before the
+For every row, capture both players' Mission Replay rating before the
 host accepts the mission. After completion, wait for the guest bridge log to
 contain `MISSION_PROGRESSION` and save/reload both games before recording the
 result.
@@ -76,6 +80,7 @@ result.
 | `DST5` Goodbye, Dear Friend | Carcano Rifle; Litchfield Repeater shop entitlement | Guest owns the Carcano and can purchase the Litchfield. |
 | `SAD3` Uncle's Bad Day | Carcano Rifle | Guest owns it. |
 | `AB21` The Tool Box | Sadie's telegram | Document appears in guest inventory. |
+| `MAR8` American Venom | Binoculars fallback | Guest owns Binoculars if the item was absent. |
 
 ## Latest live evidence
 
@@ -110,14 +115,14 @@ proven to award that recipe outright.
 
 - Host and guest ratings match exactly: `2` normal, `3` bronze, `4` silver, or
   `5` gold.
-- The guest receives the host's positive cash-balance delta from that mission
-  once only. Reconnect/reload must not duplicate it.
+- Guest cash does not change. Total-wallet movement is not an authoritative
+  mission reward receipt and is never replicated.
 - The host retries the same completion transaction until it receives the
   guest's `Applied` acknowledgement. A lost completion or acknowledgement
   therefore cannot silently skip a guest save update; every replay retains
   the same event ID and remains idempotent.
-- Repeating the already-consumed completion event changes no guest inventory,
-  entitlement, or cash value.
+- Repeating the already-consumed completion event changes no guest inventory
+  or entitlement.
 - If the guest cannot start the same mission, their save receives no MissionData
   update, money, item, weapon, or unlock. The session remains companion-only.
 - World/corpse loot, horse state, general inventory, and unrelated free-roam
@@ -125,7 +130,7 @@ proven to award that recipe outright.
 
 ## Failure capture
 
-Attach both bridge logs, the exact mission ID, host/guest pre/post cash, host
+Attach both bridge logs, the exact mission ID, host and guest ratings,
 and guest ratings, and screenshots of the relevant inventory or gunsmith page.
 Do not edit the `.sav` files while investigating; use copies from
 `RDR2-CoopSaveTest` instead.

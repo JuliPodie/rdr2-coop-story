@@ -2067,7 +2067,7 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
         constexpr auto kMissionRatingIncomplete = 0;
         const auto definition = FindCampaignMission(missionId);
         if (!definition.has_value() ||
-            !HasVerifiedCampaignCompletionMapping(missionId)) {
+            !PropagatesCampaignMissionDerivedUnlocks(missionId)) {
             Log("[MISSION_PROGRESSION] completion mapping rejected: mission is not catalog-bound");
             return false;
         }
@@ -2313,13 +2313,14 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
             }
         }
         // MissionData completion/rating was verified before this reward loop.
-        // This separate native updates the guest's vanilla UI-log entry only
-        // after every explicit companion reward has succeeded. If a reward
-        // fails, a later replay can still finish it without acknowledging the
-        // transaction as durable. The documented UI native is idempotent for
-        // an already-completed mission.
+        // This separate native refreshes the guest's vanilla mission-log
+        // entry. Vanilla chapter, activity, encounter, recipe and shop gates
+        // which query MissionData therefore see the same completed record and
+        // rating as the host. It runs after every explicit direct reward has
+        // succeeded; a failed reward keeps the transaction retryable. The
+        // documented UI native is idempotent for an already-completed mission.
         (void)::invoke<Any>(0xDE31D66D1E54C471ULL, missionId);
-        Log("[MISSION_PROGRESSION] MissionData completion mapping " +
+        Log("[MISSION_PROGRESSION] MissionData rating and derived unlock mapping " +
             std::string{definition->scriptName} + " result=" +
             std::to_string(completed ? 1 : 0) + ", rating=" +
             std::to_string(completionRating));
@@ -2351,33 +2352,13 @@ std::optional<std::int32_t> ScriptHookSdkFacade::QueryLocalCashBalance()
 bool ScriptHookSdkFacade::ApplyCampaignMissionCashAward(
     const std::uint64_t completionEventId,
     const std::int32_t amount) noexcept {
-    constexpr std::int32_t kMaximumMissionCashAward = 10'000'000;
-    if (completionEventId == 0U || amount <= 0 ||
-        amount > kMaximumMissionCashAward) {
-        return false;
-    }
-#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
-    try {
-        constexpr Hash kAddReasonAwards = 0xB784AD1EU;
-        const auto before = ::invoke<int>(0x0C02DABFA3B98176ULL);
-        if (before < 0 || ::invoke<BOOL>(
-                0xBC3422DC91667621ULL, amount, kAddReasonAwards) == FALSE) {
-            return false;
-        }
-        const auto after = ::invoke<int>(0x0C02DABFA3B98176ULL);
-        const bool applied = after >= before && after - before == amount;
-        Log("[MISSION_REWARD] cash event=" +
-            std::to_string(completionEventId) + ", amount=" +
-            std::to_string(amount) + ", result=" +
-            std::to_string(applied ? 1 : 0));
-        return applied;
-    } catch (...) {
-        Log("[MISSION_REWARD] guest cash award raised an exception");
-    }
-#else
     (void)completionEventId;
     (void)amount;
-#endif
+    // There is no public, authoritative per-mission cash receipt available to
+    // this bridge. A total-wallet delta includes purchases, loot and unrelated
+    // script activity and cannot be applied exactly once after a crash. Fail
+    // closed until a concrete mission-owned reward record is mapped.
+    Log("[MISSION_REWARD] cash replication disabled: no authoritative mission cash receipt");
     return false;
 }
 

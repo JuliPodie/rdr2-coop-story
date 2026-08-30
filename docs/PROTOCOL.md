@@ -68,13 +68,16 @@ and authority before a payload reaches game-facing logic.
 
 The host publishes an exact MissionData ID, mission epoch, phase, safe anchor,
 and bounded objective/camera presentation. A guest may use its own matching
-vanilla mission prompt only through the short exact-ID barrier, after proving
-that same incomplete mission is locally startable. An unavailable, mismatched,
+vanilla mission prompt only through the short exact-ID barrier. The initial
+MissionData/global-start probe is only a candidate check; save authority is
+created only after the exact local instance starts and the host releases it. An unavailable, mismatched,
 or timed-out guest remains companion-only and receives no save change.
 
-Completion replication is deny-by-default. It carries a host rating and bounded
-positive cash delta only for a matching, eligible run, and the guest applies
-only the reviewed idempotent MissionData/reward records in the catalog. This
+Completion replication is deny-by-default. It carries a host rating only for a
+matching released run, and the guest applies only the reviewed idempotent
+MissionData/reward records in the catalog. Cash is not inferred from total
+wallet movement. Pending completion events are durably journaled for reconnect
+replay until acknowledgement. This
 does not synchronize Rockstar's mission VM, checkpoints, AI, or save files.
 
 Dialogue cues identify only catalogue-owned roots and an observed line. A

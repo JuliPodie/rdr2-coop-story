@@ -143,12 +143,16 @@ and may send its completion event. The catalog contains the supplied Story
 mission script list, including `FUD1` (**The New South**) and `HNT1` (**Exit
 Pursued by a Bruised Ego**). The F9 **Arm FUD1** and **Arm HNT1** commands are
 optional controlled test paths for those two missions, not required for normal
-catalog detection. A matching eligible guest receives only MissionData's
+catalog detection. All 80 catalog entries can write their MissionData
+completion/rating; only the 17 entries with explicit reward tables synthesize
+additional permanent items, weapons, documents, or entitlements. A matching
+guest that actually entered the exact local
+instance and received the host's barrier release receives only MissionData's
 host's actual MissionData rating (normal completion, bronze, silver, or gold),
-then `MISSIONDATA_WAS_COMPLETED` is verified. The positive cash-balance delta
-over that exact host mission run is also transferred, capped at $100,000 and
-applied once only after the guest completion succeeds. Explicit catalogue
-records are then applied idempotently: `HNT1` grants the Legendary Animals map
+then `MISSIONDATA_WAS_COMPLETED` is verified. Cash replication is disabled:
+the public native surface exposes a total wallet, not a trustworthy
+mission-owned receipt. Explicit catalogue records are applied idempotently:
+`HNT1` grants the Legendary Animals map
 plus its challenge unlock, while `FUD1` grants the permanent Fishing Rod. The
 guest catalogue also includes the permanent `SAD3` Carcano and `MAR8`
 Binoculars fallback grants plus the `AB21` Sadie telegram. The fishing rod
@@ -157,9 +161,10 @@ permanent weapon reward. The
 inventory path uses the public Character-GUID/slot grant sequence and verifies
 the resulting item count. Horses and any weapon, unlock, document, or recipe
 without an exact tested mission mapping are not copied. The guest retains its
-own preflight decision locally: a completion can be applied only when it
-matches that offer and positive local decision, and an accepted completion
-event is applied at most once.
+own preflight and exact-instance decision locally: a completion can be applied
+only when it matches that offer and a released local mission instance. The host
+sidecar journals a pending completion before delivery and replays it after a
+peer reconnect until the guest acknowledges the idempotent transaction.
 
 The deterministic revive state machine enforces a 4 s hold, 2 m range and 35%
 restored health. When an alive player is near a downed peer, the native HUD

@@ -9,6 +9,7 @@
 #include "coopstory/bridge/RemoteMotion.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -686,7 +687,6 @@ bool BridgeRuntime::Start(
     nextMissionObjectiveSampleMs_ = 0U;
     localMissionProgressionOffer_.reset();
     localMissionProgressionCompletion_.reset();
-    localMissionProgressionStartingCash_.reset();
     remoteMissionProgressionOffer_.reset();
     localMissionStartBarrier_.reset();
     remoteMissionStartBarrier_.reset();
@@ -697,6 +697,7 @@ bool BridgeRuntime::Start(
     remoteMissionStartBarrierGuestStarted_ = false;
     remoteMissionStartBarrierReleased_ = false;
     remoteMissionStartBarrierRejected_ = false;
+    remoteMissionProgressionParticipated_ = false;
     nextGuestMissionInstanceStartedRetryMs_ = 0U;
     remoteMissionProgressionEligible_ = false;
     remoteMissionProgressionAppliedEventId_.reset();
@@ -3766,18 +3767,9 @@ void BridgeRuntime::TickMissionAuthority(
                 completedMissionProbe->wasCompleted
             ? completedMissionProbe->rating
             : 0U;
-        const auto completionCash = facade_.QueryLocalCashBalance();
-        // Money native values are cents; cap an individual transfer at
-        // $100,000 while preserving the exact in-game delta below that.
-        constexpr std::int32_t kMaximumMissionCashAward = 10'000'000;
-        const auto completionCashAward = completionCash.has_value() &&
-                localMissionProgressionStartingCash_.has_value()
-            ? std::clamp(
-                  *completionCash - *localMissionProgressionStartingCash_,
-                  0, kMaximumMissionCashAward)
-            : 0;
         const auto completionFlags = guestMissionProgressionEligible_ &&
-                HasVerifiedCampaignCompletionMapping(offer.missionId) &&
+                localMissionStartBarrierGuestStarted_ &&
+                PropagatesCampaignMissionDerivedUnlocks(offer.missionId) &&
                 completionRating >= 2U && completionRating <= 5U
             ? static_cast<std::uint8_t>(
                   MissionProgressionFlag::VerifiedCompletionMapping)
@@ -3787,7 +3779,7 @@ void BridgeRuntime::TickMissionAuthority(
             MissionProgressionPhase::Completion, completionFlags,
             static_cast<std::uint8_t>(
                 completionFlags != 0U ? completionRating : 0U),
-            completionFlags != 0U ? completionCashAward : 0});
+            0});
         const auto completionPayload = DecodeMissionProgression(
             completion.payload);
         SendBestEffort(std::move(completion));
@@ -3805,7 +3797,6 @@ void BridgeRuntime::TickMissionAuthority(
                 ? "[MISSION_PROGRESSION] " + std::string{name} + " completion sent as audit-only; verified save mapping disabled"
                 : "[MISSION_PROGRESSION] " + std::string{name} + " completed with no eligible guest; companion-only retained");
         localProgressionMissionId_ = 0U;
-        localMissionProgressionStartingCash_.reset();
     }
     if (missionStarted || checkpointChanged) {
         // MissionState is queued first. The guest can therefore quarantine a
@@ -3860,8 +3851,17 @@ void BridgeRuntime::TickMissionProgression(
             localProgressionMissionId_ = probe->missionId;
             if (!localMissionProgressionOffer_.has_value() ||
                 localMissionProgressionOffer_->missionEpoch != localMissionEpoch_) {
+                const auto unixMilliseconds = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count());
+                // Mission epochs restart with the bridge process, so they are
+                // not a durable transaction identity. Keep wall-clock time in
+                // the high bits and a mission/epoch discriminator below it.
                 const auto eventId =
-                    (static_cast<std::uint64_t>(localMissionEpoch_) << 32U) | 1U;
+                    ((unixMilliseconds & 0x0000FFFFFFFFFFFFULL) << 16U) |
+                    static_cast<std::uint64_t>(
+                        (probe->missionId ^ localMissionEpoch_) & 0xFFFFU);
                 MissionProgressionPayload offer{
                     probe->missionId, localMissionEpoch_, eventId,
                     MissionProgressionPhase::Offer, 0U};
@@ -3872,8 +3872,6 @@ void BridgeRuntime::TickMissionProgression(
                 frame.payload = EncodeMissionProgression(offer);
                 SendBestEffort(std::move(frame));
                 localMissionProgressionOffer_ = offer;
-                localMissionProgressionStartingCash_ =
-                    facade_.QueryLocalCashBalance();
                 guestMissionProgressionEligible_ = false;
                 localMissionStartBarrier_.reset();
                 localMissionStartBarrierDeadlineMs_ = 0U;
@@ -3923,6 +3921,8 @@ void BridgeRuntime::TickMissionProgression(
             SendBestEffort(std::move(abort));
             localMissionStartBarrier_.reset();
             localMissionStartBarrierDeadlineMs_ = 0U;
+            guestMissionProgressionEligible_ = false;
+            localMissionStartBarrierGuestStarted_ = false;
             facade_.Log("[MISSION_START_BARRIER] guest did not enter the exact mission before timeout; companion-only retained");
         }
         return;
@@ -3946,6 +3946,8 @@ void BridgeRuntime::TickMissionProgression(
             MissionProgressionPhase::GuestInstanceRejected, 0U});
         SendBestEffort(std::move(rejection));
         remoteMissionStartBarrierRejected_ = true;
+        remoteMissionProgressionEligible_ = false;
+        remoteMissionProgressionParticipated_ = false;
         facade_.Log(std::string{"[MISSION_START_BARRIER] guest rejected matching mission instance: "} + reason);
     };
     if (remoteMissionStartBarrierDeadlineMs_ == 0U ||
@@ -3966,6 +3968,10 @@ void BridgeRuntime::TickMissionProgression(
     if (!exactInstanceActive) {
         if (remoteMissionStartBarrierGuestStarted_ &&
             remoteMissionStartBarrierReleased_) {
+            if (!exactProbe.has_value() || !exactProbe->wasCompleted) {
+                sendRejection("matching local mission ended without completion");
+                return;
+            }
             remoteMissionStartBarrier_.reset();
             remoteMissionStartBarrierDeadlineMs_ = 0U;
             remoteMissionStartBarrierPromptArmedAtMs_ = 0U;
@@ -4036,6 +4042,7 @@ void BridgeRuntime::HandleRemoteMissionProgression(
                 !probe->active;
             remoteMissionProgressionOffer_ = payload;
             remoteMissionProgressionEligible_ = eligible;
+            remoteMissionProgressionParticipated_ = false;
             remoteMissionProgressionAppliedEventId_.reset();
             Frame reply;
             reply.header.type = MessageType::MissionProgression;
@@ -4069,6 +4076,8 @@ void BridgeRuntime::HandleRemoteMissionProgression(
                         payload.missionId, payload.missionEpoch, payload.eventId,
                         MissionProgressionPhase::GuestInstanceRejected, 0U});
                 SendBestEffort(std::move(rejection));
+                remoteMissionProgressionEligible_ = false;
+                remoteMissionProgressionParticipated_ = false;
                 facade_.Log("[MISSION_START_BARRIER] refused host start window: exact mission is no longer locally startable");
             } else {
                 remoteMissionStartBarrier_ = payload;
@@ -4090,6 +4099,7 @@ void BridgeRuntime::HandleRemoteMissionProgression(
                 remoteMissionStartBarrier_->eventId == payload.eventId;
             if (matched && remoteMissionStartBarrierGuestStarted_) {
                 remoteMissionStartBarrierReleased_ = true;
+                remoteMissionProgressionParticipated_ = true;
                 facade_.Log("[MISSION_START_BARRIER] host acknowledged matching guest mission instance");
             }
         } else if (payload.phase == MissionProgressionPhase::StartBarrierAborted) {
@@ -4104,6 +4114,8 @@ void BridgeRuntime::HandleRemoteMissionProgression(
                 remoteMissionStartBarrierGuestStarted_ = false;
                 remoteMissionStartBarrierReleased_ = false;
                 remoteMissionStartBarrierRejected_ = true;
+                remoteMissionProgressionEligible_ = false;
+                remoteMissionProgressionParticipated_ = false;
                 facade_.Log("[MISSION_START_BARRIER] host closed start window; companion-only mission isolation restored");
             }
         } else if (payload.phase == MissionProgressionPhase::Completion) {
@@ -4112,7 +4124,9 @@ void BridgeRuntime::HandleRemoteMissionProgression(
                 remoteMissionProgressionOffer_->missionEpoch == payload.missionEpoch &&
                 remoteMissionProgressionOffer_->eventId == payload.eventId;
             if (!matched || !remoteMissionProgressionEligible_ ||
-                (payload.flags & kVerifiedMapping) == 0U) {
+                !remoteMissionProgressionParticipated_ ||
+                (payload.flags & kVerifiedMapping) == 0U ||
+                payload.completionCashAward != 0) {
                 facade_.Log("[MISSION_PROGRESSION] completion retained as audit-only; no verified guest save mapping");
             } else if (remoteMissionProgressionAppliedEventId_.has_value() &&
                        *remoteMissionProgressionAppliedEventId_ ==
@@ -4180,6 +4194,7 @@ void BridgeRuntime::HandleRemoteMissionProgression(
         localMissionStartBarrier_.reset();
         localMissionStartBarrierDeadlineMs_ = 0U;
         localMissionStartBarrierGuestStarted_ = false;
+        guestMissionProgressionEligible_ = false;
         facade_.Log("[MISSION_START_BARRIER] guest rejected matching mission instance; companion-only retained");
     } else if (payload.phase == MissionProgressionPhase::Applied &&
         localMissionProgressionCompletion_.has_value() &&
@@ -9645,7 +9660,6 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
             return;
         }
         localMissionProgressionOffer_.reset();
-        localMissionProgressionStartingCash_.reset();
         localMissionStartBarrier_.reset();
         localMissionStartBarrierDeadlineMs_ = 0U;
         localMissionStartBarrierGuestStarted_ = false;

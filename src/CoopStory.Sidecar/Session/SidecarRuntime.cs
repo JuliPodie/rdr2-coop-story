@@ -84,9 +84,12 @@ public sealed class SidecarRuntime : IAsyncDisposable
         _animSceneDefinitionCache = new();
     private readonly CapabilityJournal _capabilityJournal = new();
     private readonly CapabilityJournalStore _capabilityJournalStore = new();
+    private readonly MissionProgressionJournal _missionProgressionJournal = new();
+    private readonly MissionProgressionJournalStore _missionProgressionJournalStore = new();
     private readonly PlayerInventoryRegistry _pickupClaims = new();
     private readonly InventoryStateStore _pickupClaimStateStore = new();
     private readonly SemaphoreSlim _capabilityJournalPersistenceGate = new(1, 1);
+    private readonly SemaphoreSlim _missionProgressionJournalPersistenceGate = new(1, 1);
     private readonly GuestReconnectResyncGate
         _guestReconnectResyncGate = new();
     private readonly PeerControlSendGate _peerControlSendGate = new();
@@ -191,6 +194,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         await RestoreCapabilityJournalAsync(cancellationToken).ConfigureAwait(false);
+        await RestoreMissionProgressionJournalAsync(cancellationToken).ConfigureAwait(false);
         await RestorePickupClaimsAsync(cancellationToken).ConfigureAwait(false);
         if (!_config.InGameMenuEnabled)
         {
@@ -304,6 +308,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         await _bridge.DisposeAsync().ConfigureAwait(false);
         _bridgeSessionGenerationGate.Dispose();
         _capabilityJournalPersistenceGate.Dispose();
+        _missionProgressionJournalPersistenceGate.Dispose();
     }
 
     private async Task RestoreCapabilityJournalAsync(CancellationToken cancellationToken)
@@ -365,6 +370,62 @@ public sealed class SidecarRuntime : IAsyncDisposable
         finally
         {
             _capabilityJournalPersistenceGate.Release();
+        }
+    }
+
+    private async Task RestoreMissionProgressionJournalAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_config.Role != SessionRole.Host) return;
+        if (string.IsNullOrEmpty(_sessionFingerprint)) return;
+        var path = _config.ExpandedMissionProgressionJournalPath(
+            _sessionFingerprint);
+        try
+        {
+            var restored = await _missionProgressionJournalStore.LoadAsync(
+                path, cancellationToken).ConfigureAwait(false);
+            _missionProgressionJournal.Restore(restored.CaptureState());
+            await _logger.InfoAsync(
+                "campaign.progression-journal-restored",
+                "Restored mission completion transactions for reconnect replay.",
+                new Dictionary<string, object?>
+                {
+                    ["path"] = path,
+                    ["pendingCount"] = _missionProgressionJournal.CapturePending().Count
+                }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (
+            exception is IOException or JsonException or ArgumentException)
+        {
+            await _logger.WarningAsync(
+                "campaign.progression-journal-unavailable",
+                "Could not restore the mission progression journal; progression retries start empty.",
+                new Dictionary<string, object?>
+                {
+                    ["path"] = path,
+                    ["error"] = exception.Message
+                }, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task PersistMissionProgressionJournalAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_config.Role != SessionRole.Host ||
+            string.IsNullOrEmpty(_sessionFingerprint)) return;
+        await _missionProgressionJournalPersistenceGate.WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+        try
+        {
+            await _missionProgressionJournalStore.SaveAsync(
+                _config.ExpandedMissionProgressionJournalPath(
+                    _sessionFingerprint),
+                _missionProgressionJournal,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _missionProgressionJournalPersistenceGate.Release();
         }
     }
 
@@ -698,6 +759,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             _sessionFingerprint =
                 activation.Credentials.SessionId.ToString("N")[..12];
             await RestoreCapabilityJournalAsync(cancellationToken)
+                .ConfigureAwait(false);
+            await RestoreMissionProgressionJournalAsync(cancellationToken)
                 .ConfigureAwait(false);
             var network = CreateNetwork(
                 activation.Config,
@@ -1552,6 +1615,16 @@ public sealed class SidecarRuntime : IAsyncDisposable
                         grant.GrantedAtUnixMilliseconds));
                 _ = await SendPeerControlAsync(
                         network, peer, MessageType.CampaignCapability,
+                        payload, unchecked((ulong)Environment.TickCount64),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            foreach (var completion in _missionProgressionJournal.CapturePending())
+            {
+                var payload = BinaryPayloadCodec.EncodeMissionProgression(
+                    completion.ToPayload());
+                _ = await SendPeerControlAsync(
+                        network, peer, MessageType.MissionProgression,
                         payload, unchecked((ulong)Environment.TickCount64),
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -2794,6 +2867,23 @@ public sealed class SidecarRuntime : IAsyncDisposable
             }
         }
         if (_config.Role == SessionRole.Host &&
+            envelope.Type == MessageType.MissionProgression)
+        {
+            var progression = BinaryPayloadCodec.DecodeMissionProgression(
+                envelope.Payload.Span);
+            if (progression.Phase == MissionProgressionPhase.Completion &&
+                progression.Flags ==
+                    MissionProgressionFlags.VerifiedCompletionMapping &&
+                _missionProgressionJournal.Record(
+                    progression,
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+            {
+                // Commit the retry record before attempting network delivery.
+                await PersistMissionProgressionJournalAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        if (_config.Role == SessionRole.Host &&
             envelope.Type == MessageType.PickupCollected)
         {
             var pickup = BinaryPayloadCodec.DecodePickupCollected(envelope.Payload.Span);
@@ -3479,6 +3569,20 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 await PersistCapabilityJournalAsync(cancellationToken).ConfigureAwait(false);
             }
             return;
+        }
+        if (_config.Role == SessionRole.Host &&
+            envelope.Type == MessageType.MissionProgression)
+        {
+            var progression = BinaryPayloadCodec.DecodeMissionProgression(
+                envelope.Payload.Span);
+            if (progression.Phase == MissionProgressionPhase.Applied &&
+                _missionProgressionJournal.Acknowledge(
+                    progression,
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+            {
+                await PersistMissionProgressionJournalAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
         if (_config.Role == SessionRole.Host &&
             envelope.Type == MessageType.PickupCollected)
@@ -6241,6 +6345,11 @@ public sealed class SidecarRuntime : IAsyncDisposable
         {
             var progression = BinaryPayloadCodec.DecodeMissionProgression(
                 envelope.Payload.Span);
+            if (progression.Phase == MissionProgressionPhase.Completion &&
+                progression.CompletionCashAward != 0)
+            {
+                return false;
+            }
             return localRole switch
             {
                 SessionRole.Host => progression.Phase is MissionProgressionPhase.Eligibility or MissionProgressionPhase.Applied or MissionProgressionPhase.GuestInstanceStarted or MissionProgressionPhase.GuestInstanceRejected,
@@ -6456,6 +6565,11 @@ public sealed class SidecarRuntime : IAsyncDisposable
         {
             var progression = BinaryPayloadCodec.DecodeMissionProgression(
                 envelope.Payload.Span);
+            if (progression.Phase == MissionProgressionPhase.Completion &&
+                progression.CompletionCashAward != 0)
+            {
+                return false;
+            }
             return localRole switch
             {
                 SessionRole.Host => progression.Phase is MissionProgressionPhase.Offer or MissionProgressionPhase.Completion or MissionProgressionPhase.StartBarrierOpen or MissionProgressionPhase.StartBarrierReleased or MissionProgressionPhase.StartBarrierAborted,

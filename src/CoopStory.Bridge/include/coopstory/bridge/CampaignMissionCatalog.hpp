@@ -29,11 +29,13 @@ namespace coopstory::bridge {
 
 enum class CampaignCompletionBinding : std::uint8_t {
     None = 0,
-    // MissionData completion followed immediately by MISSIONDATA_WAS_COMPLETED
-    // and rating verification. The generic progression pipeline may then
-    // apply only this mission's explicit, idempotent reward records plus its
-    // observed cash award; it never mirrors arbitrary inventory changes.
-    MissionDataNormalComplete = 1,
+    // MissionData completion and the exact host rating, followed by the
+    // vanilla mission-log refresh that exposes every chapter, activity, shop,
+    // recipe and encounter gate derived from that MissionData record. The
+    // generic progression pipeline may then apply only this mission's
+    // explicit, idempotent direct reward records. Cash is deliberately
+    // excluded: a wallet delta is not a mission reward receipt.
+    MissionDataRatingAndDerivedUnlocks = 1,
 };
 
 // Mission scripts award concrete records through distinct native systems. The
@@ -173,8 +175,8 @@ inline constexpr CampaignMissionReward kAb21MissionRewards[]{
 // below. These are durable weapon awards, not optional battlefield pickups:
 // SEN1 / The First Shall Be the Last awards the Tomahawk; DST1 / Paying a
 // Social Call awards the Double-Barreled Shotgun and Throwing Knife. Their
-// fixed cash rewards are carried by the mission-scoped cash-delta field
-// instead of being duplicated here.
+// Cash is not inferred from wallet movement; no authoritative mission-owned
+// cash receipt is available through the current public-native surface.
 inline constexpr CampaignMissionReward kSen1MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_THROWN_TOMAHAWK"), 1U},
@@ -268,7 +270,7 @@ inline constexpr std::array<CampaignMissionDialogueRoot, 8U>
 // Canonical Story registry transcribed from init_all_sp's func_282 entries.
 // Unknown/non-registry scripts remain companion-only.
 #define COOPSTORY_STORY_MISSION(id, runtime, title) \
-    {CampaignMissionId(id), id, runtime, title, CampaignCompletionBinding::MissionDataNormalComplete}
+    {CampaignMissionId(id), id, runtime, title, CampaignCompletionBinding::MissionDataRatingAndDerivedUnlocks}
 inline constexpr CampaignMissionDefinition kCampaignMissionCatalog[]{
     COOPSTORY_STORY_MISSION("WNT1", "winter1", "Outlaws from the West"),
     COOPSTORY_STORY_MISSION("WNT2", "winter2", "Enter, Pursued by a Memory"),
@@ -366,7 +368,15 @@ FindCampaignMission(const std::uint32_t missionId) noexcept {
     const auto definition = FindCampaignMission(missionId);
     return definition.has_value() &&
         definition->completionBinding ==
-            CampaignCompletionBinding::MissionDataNormalComplete;
+            CampaignCompletionBinding::MissionDataRatingAndDerivedUnlocks;
+}
+
+// Unlocks which vanilla derives from a Story MissionData completion are part
+// of every admitted mapping. Direct item/weapon entitlements remain in the
+// per-mission reward span because they are not derivable from MissionData.
+[[nodiscard]] constexpr bool PropagatesCampaignMissionDerivedUnlocks(
+    const std::uint32_t missionId) noexcept {
+    return HasVerifiedCampaignCompletionMapping(missionId);
 }
 
 [[nodiscard]] constexpr std::span<const CampaignMissionReward>

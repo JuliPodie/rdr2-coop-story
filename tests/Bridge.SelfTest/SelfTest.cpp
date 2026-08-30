@@ -337,6 +337,7 @@ void CampaignMissionCatalogIsExplicitAndBound() {
         CHECK(definition.missionId == CampaignMissionId(definition.scriptName));
         CHECK(!definition.runtimeScriptName.empty());
         CHECK(HasVerifiedCampaignCompletionMapping(definition.missionId));
+        CHECK(PropagatesCampaignMissionDerivedUnlocks(definition.missionId));
         CHECK(HasCampaignMissionDialogueProfile(
             definition.missionId,
             CampaignMissionDialogueProfileId(definition.missionId)));
@@ -373,6 +374,7 @@ void CampaignMissionCatalogIsExplicitAndBound() {
         kHunt1MissionId, CampaignMissionId("FUD1_FISHTALK1")));
     CHECK(CampaignMissionDialogueRoots(CampaignMissionId("WNT1")).empty());
     CHECK(!FindCampaignMission(0xFFFFFFFFU).has_value());
+    CHECK(!PropagatesCampaignMissionDerivedUnlocks(0xFFFFFFFFU));
 }
 
 void PlayerActionEpochPolicy() {
@@ -6577,7 +6579,7 @@ void RuntimeHunt1MissionProgressionHandshake() {
     CHECK((completion->flags & static_cast<std::uint8_t>(
         MissionProgressionFlag::VerifiedCompletionMapping)) != 0U);
     CHECK(completion->completionRating == 4U);
-    CHECK(completion->completionCashAward == 140);
+    CHECK(completion->completionCashAward == 0);
 
     // A dropped completion is retried until the guest records the exact
     // transaction. The retry reuses the event identity, so it is safe.
@@ -6588,9 +6590,8 @@ void RuntimeHunt1MissionProgressionHandshake() {
     CHECK(retransmittedCompletion.has_value());
     CHECK(*retransmittedCompletion == *completion);
 
-    // A future allow-listed save mapping is still constrained by the guest's
-    // own preflight evidence and is exactly-once even if the completion is
-    // retransmitted after a reconnect.
+    // Even an otherwise matching completion cannot smuggle a total-wallet
+    // delta into the guest save.
     guestFacade.applyCampaignMissionCompletionResult = true;
     Frame mappedCompletion;
     mappedCompletion.header.type = MessageType::MissionProgression;
@@ -6601,15 +6602,28 @@ void RuntimeHunt1MissionProgressionHandshake() {
         MissionProgressionPhase::Completion,
         static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping),
         4U, 140});
+    guestTransport.sent.clear();
+    guestTransport.inbound.push_back(mappedCompletion);
+    guest.Tick();
+    CHECK(guestFacade.campaignMissionCompletionApplyCount == 0U);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 0U);
+    CHECK(!LastSentMissionProgression(guestTransport).has_value());
+
+    // The cash-free, allow-listed save mapping remains constrained by the
+    // guest's exact released local instance and is exactly-once on replay.
+    mappedCompletion.header.sequence = ++guestTransport.inboundSequence;
+    mappedCompletion.payload = EncodeMissionProgression(MissionProgressionPayload{
+        offer->missionId, offer->missionEpoch, offer->eventId,
+        MissionProgressionPhase::Completion,
+        static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping),
+        4U, 0});
     guestTransport.inbound.push_back(mappedCompletion);
     guest.Tick();
     CHECK(guestFacade.campaignMissionCompletionApplyCount == 1U);
     CHECK(guestFacade.appliedCampaignMissionId == kHunt1);
     CHECK(guestFacade.appliedCampaignMissionEventId == offer->eventId);
     CHECK(guestFacade.appliedCampaignMissionRating == 4U);
-    CHECK(guestFacade.campaignMissionCashApplyCount == 1U);
-    CHECK(guestFacade.appliedCampaignMissionCashEventId == offer->eventId);
-    CHECK(guestFacade.appliedCampaignMissionCashAmount == 140);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 0U);
     const auto applied = LastSentMissionProgression(guestTransport);
     CHECK(applied.has_value());
     CHECK(applied->phase == MissionProgressionPhase::Applied);
@@ -6633,47 +6647,7 @@ void RuntimeHunt1MissionProgressionHandshake() {
     guestTransport.inbound.push_back(std::move(mappedCompletion));
     guest.Tick();
     CHECK(guestFacade.campaignMissionCompletionApplyCount == 1U);
-    CHECK(guestFacade.campaignMissionCashApplyCount == 1U);
-
-    // A cash write failure does not consume the event. Completion/reward
-    // application is safe to repeat; the next delivery retries the missing
-    // cash award rather than falsely recording a complete result.
-    const MissionProgressionPayload retryOffer{
-        kHunt1, offer->missionEpoch + 2U, offer->eventId + 2U,
-        MissionProgressionPhase::Offer, 0U};
-    guestFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, false, true, false, 0U};
-    Frame retryOfferFrame;
-    retryOfferFrame.header.type = MessageType::MissionProgression;
-    retryOfferFrame.header.sequence = ++guestTransport.inboundSequence;
-    retryOfferFrame.header.tick = guestFacade.tick;
-    retryOfferFrame.payload = EncodeMissionProgression(retryOffer);
-    guestTransport.inbound.push_back(std::move(retryOfferFrame));
-    guest.Tick();
-    guestFacade.applyCampaignMissionCashAwardResult = false;
-    Frame retryCompletion;
-    retryCompletion.header.type = MessageType::MissionProgression;
-    retryCompletion.header.sequence = ++guestTransport.inboundSequence;
-    retryCompletion.header.tick = guestFacade.tick;
-    retryCompletion.payload = EncodeMissionProgression(MissionProgressionPayload{
-        retryOffer.missionId, retryOffer.missionEpoch, retryOffer.eventId,
-        MissionProgressionPhase::Completion,
-        static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping),
-        4U, 140});
-    guestTransport.inbound.push_back(retryCompletion);
-    guestTransport.sent.clear();
-    guest.Tick();
-    CHECK(guestFacade.campaignMissionCompletionApplyCount == 2U);
-    CHECK(guestFacade.campaignMissionCashApplyCount == 2U);
-    CHECK(!LastSentMissionProgression(guestTransport).has_value());
-    guestFacade.applyCampaignMissionCashAwardResult = true;
-    retryCompletion.header.sequence = ++guestTransport.inboundSequence;
-    guestTransport.inbound.push_back(std::move(retryCompletion));
-    guest.Tick();
-    CHECK(guestFacade.campaignMissionCompletionApplyCount == 3U);
-    CHECK(guestFacade.campaignMissionCashApplyCount == 3U);
-    const auto retriedApplied = LastSentMissionProgression(guestTransport);
-    CHECK(retriedApplied.has_value());
-    CHECK(retriedApplied->phase == MissionProgressionPhase::Applied);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 0U);
 
     guestFacade.sampledCampaignMission = CampaignMissionProbe{kHunt1, false, false, false, 0U};
     const MissionProgressionPayload ineligibleOffer{
@@ -6695,11 +6669,11 @@ void RuntimeHunt1MissionProgressionHandshake() {
         ineligibleOffer.missionId, ineligibleOffer.missionEpoch,
         ineligibleOffer.eventId, MissionProgressionPhase::Completion,
         static_cast<std::uint8_t>(MissionProgressionFlag::VerifiedCompletionMapping),
-        4U, 140});
+        4U, 0});
     guestTransport.inbound.push_back(std::move(rejectedCompletion));
     guest.Tick();
-    CHECK(guestFacade.campaignMissionCompletionApplyCount == 3U);
-    CHECK(guestFacade.campaignMissionCashApplyCount == 3U);
+    CHECK(guestFacade.campaignMissionCompletionApplyCount == 1U);
+    CHECK(guestFacade.campaignMissionCashApplyCount == 0U);
 }
 
 void RuntimeMissionStartBarrierRejectsPreArmedGuestInstance() {
@@ -6747,6 +6721,139 @@ void RuntimeMissionStartBarrierRejectsPreArmedGuestInstance() {
     CHECK(rejection->phase == MissionProgressionPhase::GuestInstanceRejected);
     CHECK(!facade.expectedLocalMissionInstanceAllowed);
     CHECK(HasLog(facade, "already entering before the host barrier armed"));
+
+    facade.sample.missionActive = false;
+    facade.sampledCampaignMission = CampaignMissionProbe{
+        kHunt1, false, true, false, 0U};
+    facade.applyCampaignMissionCompletionResult = true;
+    pushProgression(MissionProgressionPayload{
+        kHunt1, kEpoch, kEvent, MissionProgressionPhase::Completion,
+        static_cast<std::uint8_t>(
+            MissionProgressionFlag::VerifiedCompletionMapping),
+        4U, 0});
+    CHECK(facade.campaignMissionCompletionApplyCount == 0U);
+    CHECK(facade.campaignMissionCashApplyCount == 0U);
+}
+
+void RuntimeMissionStartBarrierTimeoutCannotAuthorizeCompletion() {
+    constexpr std::uint32_t kHunt1 = kHunt1MissionId;
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+
+    TestFacade facade;
+    facade.sample.missionActive = true;
+    facade.sampledCampaignMission = CampaignMissionProbe{
+        kHunt1, true, false, false, 0U};
+    TestTransport transport;
+    transport.acknowledgementPayload = {
+        static_cast<std::uint8_t>(PlayerSlot::Host)};
+    BridgeRuntime runtime{facade, transport};
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+    const auto offer = LastSentMissionProgression(transport);
+    CHECK(offer.has_value());
+    CHECK(offer->phase == MissionProgressionPhase::Offer);
+
+    Frame eligibility;
+    eligibility.header.type = MessageType::MissionProgression;
+    eligibility.header.sequence = ++transport.inboundSequence;
+    eligibility.header.tick = facade.tick;
+    eligibility.payload = EncodeMissionProgression(MissionProgressionPayload{
+        offer->missionId, offer->missionEpoch, offer->eventId,
+        MissionProgressionPhase::Eligibility,
+        static_cast<std::uint8_t>(MissionProgressionFlag::GuestCanStart)});
+    transport.inbound.push_back(std::move(eligibility));
+    runtime.Tick();
+    CHECK(LastSentMissionProgression(transport)->phase ==
+        MissionProgressionPhase::StartBarrierOpen);
+
+    transport.sent.clear();
+    facade.tick += 46'000U;
+    runtime.Tick();
+    const auto aborted = LastSentMissionProgression(transport);
+    CHECK(aborted.has_value());
+    CHECK(aborted->phase == MissionProgressionPhase::StartBarrierAborted);
+
+    transport.sent.clear();
+    facade.sample.missionActive = false;
+    facade.sampledCampaignMission = CampaignMissionProbe{
+        kHunt1, false, false, true, 4U};
+    facade.tick += 16U;
+    runtime.Tick();
+    const auto completion = LastSentMissionProgression(transport);
+    CHECK(completion.has_value());
+    CHECK(completion->phase == MissionProgressionPhase::Completion);
+    CHECK((completion->flags & static_cast<std::uint8_t>(
+        MissionProgressionFlag::VerifiedCompletionMapping)) == 0U);
+    CHECK(completion->completionCashAward == 0);
+}
+
+void RuntimeAbortedReleasedGuestMissionRevokesCompletion() {
+    constexpr std::uint32_t kHunt1 = kHunt1MissionId;
+    const GameIdentity supported{
+        std::string{kSupportedExecutableName},
+        std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    TestFacade facade;
+    facade.sampledCampaignMission = CampaignMissionProbe{
+        kHunt1, false, true, false, 0U};
+    TestTransport transport;
+    transport.acknowledgementPayload = {
+        static_cast<std::uint8_t>(PlayerSlot::Guest)};
+    BridgeRuntime runtime{facade, transport};
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+
+    constexpr std::uint32_t kEpoch = 21U;
+    constexpr std::uint64_t kEvent = 0x123456789ABCUL;
+    const auto pushProgression = [&](const MissionProgressionPayload& payload) {
+        Frame frame;
+        frame.header.type = MessageType::MissionProgression;
+        frame.header.sequence = ++transport.inboundSequence;
+        frame.header.tick = facade.tick;
+        frame.payload = EncodeMissionProgression(payload);
+        transport.inbound.push_back(std::move(frame));
+        runtime.Tick();
+    };
+    pushProgression(MissionProgressionPayload{
+        kHunt1, kEpoch, kEvent, MissionProgressionPhase::Offer, 0U});
+    pushProgression(MissionProgressionPayload{
+        kHunt1, kEpoch, kEvent, MissionProgressionPhase::StartBarrierOpen, 0U});
+    facade.tick += 250U;
+    runtime.Tick();
+    facade.sample.missionActive = true;
+    facade.sampledCampaignMission = CampaignMissionProbe{
+        kHunt1, true, false, false, 0U};
+    facade.tick += 16U;
+    runtime.Tick();
+    CHECK(LastSentMissionProgression(transport)->phase ==
+        MissionProgressionPhase::GuestInstanceStarted);
+    pushProgression(MissionProgressionPayload{
+        kHunt1, kEpoch, kEvent,
+        MissionProgressionPhase::StartBarrierReleased, 0U});
+
+    transport.sent.clear();
+    facade.sample.missionActive = false;
+    facade.sampledCampaignMission = CampaignMissionProbe{
+        kHunt1, false, true, false, 0U};
+    facade.tick += 16U;
+    runtime.Tick();
+    const auto rejection = LastSentMissionProgression(transport);
+    CHECK(rejection.has_value());
+    CHECK(rejection->phase == MissionProgressionPhase::GuestInstanceRejected);
+    CHECK(HasLog(facade, "ended without completion"));
+
+    facade.applyCampaignMissionCompletionResult = true;
+    pushProgression(MissionProgressionPayload{
+        kHunt1, kEpoch, kEvent, MissionProgressionPhase::Completion,
+        static_cast<std::uint8_t>(
+            MissionProgressionFlag::VerifiedCompletionMapping),
+        4U, 0});
+    CHECK(facade.campaignMissionCompletionApplyCount == 0U);
 }
 
 void RuntimeHostDebouncesScriptedControlPresentation() {
@@ -11599,6 +11706,10 @@ int main() {
          RuntimeHunt1MissionProgressionHandshake},
         {"RuntimeMissionStartBarrierRejectsPreArmedGuestInstance",
          RuntimeMissionStartBarrierRejectsPreArmedGuestInstance},
+        {"RuntimeMissionStartBarrierTimeoutCannotAuthorizeCompletion",
+         RuntimeMissionStartBarrierTimeoutCannotAuthorizeCompletion},
+        {"RuntimeAbortedReleasedGuestMissionRevokesCompletion",
+         RuntimeAbortedReleasedGuestMissionRevokesCompletion},
         {"RuntimeHostDebouncesScriptedControlPresentation",
          RuntimeHostDebouncesScriptedControlPresentation},
         {"RuntimeHostSpectatesMinigamesImmediately",

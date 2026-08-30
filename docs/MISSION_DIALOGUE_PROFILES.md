@@ -92,6 +92,6 @@ all pending cues and readiness.
 
 | Mission | Segment | Root | Roles | Lines | Build proof | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| Every catalogued Story mission | Automatic exact-ID offer, guest startability check, matching-instance barrier, completion/reward mapping | — | — | — | automated protocol coverage; live validation still needed |
+| Every catalogued Story mission | Automatic exact-ID offer, candidate preflight, matching-instance barrier, completion/rating write after exact release | — | — | — | automated protocol coverage; live validation still needed |
 | `HNT1` | host-only source-mapped presentation prototype | `RH1_TRACK_CHAT`, `RH1_TRK_FND1`–`RH1_TRK_FND3` | Arthur/Hosea | native line index | pending two-PC validation |
 | `FUD1` | host-only source-mapped presentation prototype | `FUD1_FISHTALK1`–`FUD1_FISHTALK4` | Arthur/Dutch/Hosea | native line index | pending two-PC validation |

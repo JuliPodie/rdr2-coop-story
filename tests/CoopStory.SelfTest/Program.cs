@@ -56,6 +56,8 @@ internal static class Program
             PickupCollectionProtocolAsync),
         ("campaign capability journal is idempotent and recovers atomically",
             CapabilityJournalRecoveryAsync),
+        ("mission progression journal persists pending completion exactly once",
+            MissionProgressionJournalRecoveryAsync),
         ("atomic guest profile write and backup recovery", ProfileRecoveryAsync),
         ("downed and revive state machine", DownedStateAsync),
         ("deterministic network impairment primitives", NetworkImpairmentAsync),
@@ -3881,10 +3883,26 @@ internal static class Program
             MissionProgressionPhase.Completion,
             MissionProgressionFlags.VerifiedCompletionMapping,
             CompletionRating: 4,
-            CompletionCashAward: 140);
+            CompletionCashAward: 0);
         var decodedCompletionProgression = BinaryPayloadCodec.DecodeMissionProgression(
             BinaryPayloadCodec.EncodeMissionProgression(completionProgression));
         Check.Equal(completionProgression, decodedCompletionProgression);
+        var completionEnvelope = new ProtocolEnvelope(
+            MessageType.MissionProgression, 2, 3,
+            BinaryPayloadCodec.EncodeMissionProgression(completionProgression));
+        Check.True(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, completionEnvelope));
+        Check.True(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest, completionEnvelope));
+        var forgedCashEnvelope = completionEnvelope with
+        {
+            Payload = BinaryPayloadCodec.EncodeMissionProgression(
+                completionProgression with { CompletionCashAward = 140 })
+        };
+        Check.False(SidecarRuntime.IsLocalBridgeEnvelopeAuthorized(
+            SessionRole.Host, forgedCashEnvelope));
+        Check.False(SidecarRuntime.IsPeerEnvelopeAuthorized(
+            SessionRole.Guest, forgedCashEnvelope));
         var appliedProgression = new MissionProgressionPayload(
             0x2C3469ED,
             7,
@@ -4707,6 +4725,55 @@ internal static class Program
             var empty = await store.LoadAsync(Path.Combine(root, "missing.json"))
                 .ConfigureAwait(false);
             Check.Equal(0, empty.CaptureState().Count);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static async Task MissionProgressionJournalRecoveryAsync()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(), "CoopStory.SelfTest", Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(root, "mission-progression.json");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var completion = new MissionProgressionPayload(
+                0x12345678U, 9U, 0xABCDEF01UL,
+                MissionProgressionPhase.Completion,
+                MissionProgressionFlags.VerifiedCompletionMapping,
+                4, 0);
+            var journal = new MissionProgressionJournal();
+            Check.True(journal.Record(completion, 1_700_000_000_000L));
+            Check.False(journal.Record(completion, 1_700_000_000_001L));
+            Check.Equal(1, journal.CapturePending().Count);
+            Check.Throws<ArgumentException>(() => journal.Record(
+                completion with { CompletionCashAward = 100 },
+                1_700_000_000_002L));
+            Check.Throws<ArgumentException>(() => journal.Record(
+                completion with { CompletionRating = 5 },
+                1_700_000_000_003L));
+
+            var store = new MissionProgressionJournalStore();
+            await store.SaveAsync(path, journal).ConfigureAwait(false);
+            var restored = await store.LoadAsync(path).ConfigureAwait(false);
+            Check.Equal(completion, restored.CapturePending().Single().ToPayload());
+
+            var applied = completion with
+            {
+                Phase = MissionProgressionPhase.Applied,
+                Flags = MissionProgressionFlags.None,
+                CompletionRating = 0
+            };
+            Check.True(restored.Acknowledge(applied, 1_700_000_000_100L));
+            Check.False(restored.Acknowledge(applied, 1_700_000_000_101L));
+            Check.Equal(0, restored.CapturePending().Count);
+            await store.SaveAsync(path, restored).ConfigureAwait(false);
+            var acknowledged = await store.LoadAsync(path).ConfigureAwait(false);
+            Check.Equal(0, acknowledged.CapturePending().Count);
+            Check.Equal(1, acknowledged.CaptureState().Count);
         }
         finally
         {

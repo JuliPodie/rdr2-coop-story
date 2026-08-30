@@ -381,7 +381,6 @@ private:
     // bounded retransmission until the guest explicitly acknowledges that
     // its local transaction completed.
     std::optional<MissionProgressionPayload> localMissionProgressionCompletion_{};
-    std::optional<std::int32_t> localMissionProgressionStartingCash_{};
     std::optional<MissionProgressionPayload> remoteMissionProgressionOffer_{};
     // The host opens this only after the guest has confirmed the exact
     // MissionData entry. It is a bounded permission to use the guest's own
@@ -398,6 +397,9 @@ private:
     bool remoteMissionStartBarrierGuestStarted_{};
     bool remoteMissionStartBarrierReleased_{};
     bool remoteMissionStartBarrierRejected_{};
+    // Set only after the host releases an exact matching local mission
+    // instance. Eligibility alone never authorizes a save mutation.
+    bool remoteMissionProgressionParticipated_{};
     std::uint64_t nextGuestMissionInstanceStartedRetryMs_{};
     // This is calculated locally when the guest receives the offer.  A host
     // completion frame may never substitute for that local-save evidence.
