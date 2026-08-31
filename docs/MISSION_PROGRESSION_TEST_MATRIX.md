@@ -130,7 +130,7 @@ proven to award that recipe outright.
 
 ## Failure capture
 
-Attach both bridge logs, the exact mission ID, host and guest ratings,
-and guest ratings, and screenshots of the relevant inventory or gunsmith page.
+Attach both bridge logs, the exact mission ID, host and guest ratings, and
+screenshots of the relevant inventory or gunsmith page.
 Do not edit the `.sav` files while investigating; use copies from
 `RDR2-CoopSaveTest` instead.

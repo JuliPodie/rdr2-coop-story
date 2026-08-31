@@ -144,7 +144,8 @@ mission script list, including `FUD1` (**The New South**) and `HNT1` (**Exit
 Pursued by a Bruised Ego**). The F9 **Arm FUD1** and **Arm HNT1** commands are
 optional controlled test paths for those two missions, not required for normal
 catalog detection. All 80 catalog entries can write their MissionData
-completion/rating; only the 17 entries with explicit reward tables synthesize
+completion/rating and activate vanilla unlocks derived from that completion;
+only the 17 entries with explicit reward tables synthesize
 additional permanent items, weapons, documents, or entitlements. A matching
 guest that actually entered the exact local
 instance and received the host's barrier release receives only MissionData's

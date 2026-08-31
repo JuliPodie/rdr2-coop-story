@@ -16,7 +16,7 @@ while failing closed when an exact local state cannot be verified.
 | Downed/revive | Experimental, native live gate | Normal hold-to-revive prompt, 4 s hold, 2 m range, host validation, and 35% local health restore. A retry is never automatic. |
 | Mission authority and companion presentation | Experimental | The host publishes mission phase, anchor, objective, camera, and cinematic state. A guest outside a matching instance is kept companion-only and is returned through guarded presentation barriers. |
 | Matching MissionData barrier | Implemented, two-PC validation needed | The host offers an exact mission ID. A guest may use only its own identical, incomplete, startable vanilla prompt during the 45 s window. Any conflict, refusal, or timeout stays companion-only. |
-| Mission completion/progression | Guarded, two-PC persistence validation needed | Only an exact guest instance that crossed the released start barrier may receive MissionData completion/rating. All 80 registered Story MissionData entries are enabled; extra item/weapon/entitlement writes remain limited to the 17 source-reviewed reward mappings. Cash replication is disabled until an authoritative mission receipt exists. |
+| Mission completion/progression | Guarded, two-PC persistence validation needed | Only an exact guest instance that crossed the released start barrier may receive MissionData completion/rating. All 80 registered Story MissionData entries activate their vanilla MissionData-derived unlock gates; extra item/weapon/entitlement writes remain limited to the 17 source-reviewed direct reward mappings. Cash replication is disabled until an authoritative mission receipt exists. |
 | Mission dialogue coordination | Experimental | The host samples admitted local dialogue roots/lines, sends epoch- and checkpoint-scoped cues, and waits for guest readiness. A matching guest keeps its own vanilla playback; a companion-only guest can use the small reviewed bridge-owned audio presentation. Unmapped dialogue remains local. |
 | Ambient encounters | Implemented tester coverage, two-PC validation needed | 94 reviewed action-script detections map to five host-owned profiles: 65 hostile roadside actions, 15 rescues, 6 wagon defenses, 3 animal attacks, and 5 camp clear-outs. The host owns phases/outcome/cleanup; guest combat contributes through validated intent. Non-action ambient vignettes remain visible through the world mirror without inventing combat or rewards. |
 | Capability/pickup journal | Guarded and deny-by-default | Reviewed entitlements and collection telemetry are idempotent; unsupported record shapes are rejected. Corpse/container/plant/document inventory is not synchronized. |
@@ -75,10 +75,10 @@ eligibility preflight but follows the same generic-local-loot policy.
 
 ## Latest verification
 
-The Protocol 32 source and tester package were built on 2026-08-30.
+The Protocol 32 source and tester package were built on 2026-08-31.
 
 - Native ASI build and `ctest`: **1/1 passed**.
-- Managed protocol/sidecar self-test: **49/49 passed**.
+- Managed protocol/sidecar self-test: **51/51 passed**.
 - Launcher self-test: **28/28 passed**.
 - Package validation: **471 files**, no forbidden archive entries, active
   native-binding marker present.
