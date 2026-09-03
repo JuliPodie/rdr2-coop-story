@@ -134,6 +134,7 @@ using UniqueFile = std::unique_ptr<void, FileCloser>;
     const std::wstring& path,
     std::string& digest,
     std::string& error) {
+    // Hash the actual executable in chunks so VersionGate can compare a stable identity before version-sensitive native bindings are used.
     BCRYPT_ALG_HANDLE algorithm{};
     BCRYPT_HASH_HANDLE hash{};
     auto status = ::BCryptOpenAlgorithmProvider(
@@ -243,6 +244,7 @@ using UniqueFile = std::unique_ptr<void, FileCloser>;
 }  // namespace
 
 GameIdentityProbeResult ProbeCurrentGameIdentity() {
+    // Gather filename, version and content hash separately; an incomplete probe is returned to VersionGate as a safe denial instead of throwing into RDR2.
     GameIdentityProbeResult result;
     std::wstring path;
     if (!CurrentModulePath(path, result.error)) {

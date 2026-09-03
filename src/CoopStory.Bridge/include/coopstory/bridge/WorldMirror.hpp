@@ -12,8 +12,8 @@
 
 namespace coopstory::bridge {
 
-// Host-only admission priority. This metadata never crosses IPC or the LAN
-// boundary; it only decides which nearby entities occupy the bounded graph.
+// Host-only admission priority.
+// This metadata never crosses IPC or the LAN boundary; it only decides which nearby entities occupy the bounded graph.
 enum class HostWorldEntityPriority : std::uint8_t {
     Ambient = 0U,
     Scenario = 1U,
@@ -22,9 +22,8 @@ enum class HostWorldEntityPriority : std::uint8_t {
     ScriptOwned = 4U,
 };
 
-// A process-local observation made by the authoritative host. The local
-// handle is deliberately kept outside WorldEntityStatePayload and must never
-// cross IPC or the LAN boundary.
+// A process-local observation made by the authoritative host.
+// The local handle is deliberately kept outside WorldEntityStatePayload and must never cross IPC or the LAN boundary.
 struct HostWorldEntitySample final {
     LocalEntityHandle localHandle{};
     std::uint32_t modelHash{};
@@ -45,12 +44,15 @@ struct HostWorldEntitySample final {
     float selectionDistanceMeters{};
 };
 
+// These tell the game what to do with an NPC/object copy: make it, update it, or remove it.
 enum class WorldMirrorSignalKind {
     Spawn,
     Update,
     Despawn,
 };
 
+// One NPC/object change.
+// The revision numbers help ignore old changes.
 struct WorldMirrorSignal final {
     WorldMirrorSignalKind kind{WorldMirrorSignalKind::Update};
     WorldEntityStatePayload state{};
@@ -58,6 +60,8 @@ struct WorldMirrorSignal final {
     std::uint32_t entityRevision{};
 };
 
+// Numbers shown in logs.
+// They help tell whether NPC problems came from limits, old messages, or normal child cleanup.
 struct WorldMirrorGraphStats final {
     std::size_t nodeCount{};
     std::size_t activeCount{};
@@ -74,6 +78,7 @@ struct WorldMirrorGraphStats final {
     std::size_t graceRetained{};
 };
 
+// The host picks a limited number of nearby NPCs/objects to share with the guest, gives them IDs, and tells the guest when they change.
 class WorldMirrorHost final {
 public:
     explicit WorldMirrorHost(
@@ -85,15 +90,13 @@ public:
         std::span<const HostWorldEntitySample> samples,
         std::uint64_t nowMs);
     // Re-emits the retained graph parent-first without allocating new IDs.
-    // Used after a sidecar/pipe reconnect so a fresh cache can be rebuilt
-    // before a replayed AnimSceneDefinition references the same actors.
+    // Used after a sidecar/pipe reconnect so a fresh cache can be rebuilt before a replayed AnimSceneDefinition references the same actors.
     [[nodiscard]] std::vector<WorldMirrorSignal> ReplayStableSpawns();
     [[nodiscard]] std::vector<WorldMirrorSignal> Reset();
     [[nodiscard]] std::optional<LocalEntityHandle> FindLocal(
         NetEntityId entityId) const noexcept;
-    // Process-local reverse lookup used to translate captured AnimScene role
-    // bindings into stable network identities. Local handles never cross the
-    // wire and are not persisted in the scene-definition cache.
+    // Process-local reverse lookup used to translate captured AnimScene role bindings into stable network identities.
+    // Local handles never cross the wire and are not persisted in the scene-definition cache.
     [[nodiscard]] std::optional<NetEntityId> FindNetwork(
         LocalEntityHandle localHandle) const noexcept;
     [[nodiscard]] std::optional<WorldEntityStatePayload> FindState(
@@ -135,10 +138,9 @@ private:
     std::size_t graceRetained_{};
 };
 
-// Client-side desired-state graph. Network state is accepted independently
-// of local RDR2 handles, so an update can safely arrive before its reliable
-// spawn. Mounted riders remain pending until the authoritative parent mount
-// exists; parent removal cascades child-first to prevent floating replicas.
+// Client-side desired-state graph.
+// Network state is accepted independently of local RDR2 handles, so an update can safely arrive before its reliable spawn.
+// Mounted riders remain pending until the authoritative parent mount exists; parent removal cascades child-first to prevent floating replicas.
 class WorldMirrorGuestGraph final {
 public:
     explicit WorldMirrorGuestGraph(

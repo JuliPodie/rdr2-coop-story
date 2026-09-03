@@ -9,22 +9,20 @@
 
 namespace coopstory::bridge {
 
-// These entries are a reviewed discovery catalog for build 1.0.1491.50.  An
-// entry admits only a bridge-owned replacement scene; it never authorizes
-// execution, reward handling, Honor, law state, or save progress from the
-// matching Rockstar script.  Keep an unfamiliar script local until it is
-// classified here and exercised with the two-player test checklist.
+// Approved free-roam encounter replacements owned by this mod.
+// The list keeps unknown Rockstar events local instead of trying to replicate unsafe scripts.
+// These entries are a reviewed discovery catalog for build 1.0.1491.50.
+// An entry admits only a bridge-owned replacement scene; it never authorizes execution, reward handling, Honor, law state, or save progress from the matching Rockstar script.
+// Keep an unfamiliar script local until it is classified here and exercised with the two-player test checklist.
 struct BridgeOwnedEncounterDefinition final {
     std::uint32_t scriptId{};
     const char* scriptName{};
     AmbientEncounterProfile profile{AmbientEncounterProfile::RoadsideAmbush};
 };
 
-// The catalog is intentionally broader than the one exact-ID adaptation in
-// ExactEncounterCatalog.hpp.  Every record below maps into one of five bounded
-// bridge profiles and therefore has the same host-owned outcome and cleanup
-// rules.  The source script remains private and is only used as local evidence
-// that it is time to offer a replacement scene.
+// The catalog is intentionally broader than the one exact-ID adaptation in ExactEncounterCatalog.hpp.
+// Every record below maps into one of five bounded bridge profiles and therefore has the same host-owned outcome and cleanup rules.
+// The source script remains private and is only used as local evidence that it is time to offer a replacement scene.
 inline constexpr std::array<BridgeOwnedEncounterDefinition, 94U>
     kBridgeOwnedEncounterCatalog{{
         {CampaignMissionId("ambush_bnd_cliff1"), "ambush_bnd_cliff1", AmbientEncounterProfile::RoadsideAmbush},

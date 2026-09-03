@@ -3,6 +3,8 @@ using System.Text;
 
 namespace CoopStory.Protocol;
 
+// Holds the shared secret created by the host and supplied in the invite.
+// The secret authenticates peers and UDP datagrams; it is not player/game state.
 public sealed class SessionCredentials
 {
     private const int SecretLength = 32;
@@ -16,12 +18,15 @@ public sealed class SessionCredentials
 
     public Guid SessionId { get; }
 
+    // A new host session gets both a public session ID and a random 32-byte secret.
+    // The ID helps identify the session; the secret proves membership.
     public static SessionCredentials Generate()
     {
         var secret = RandomNumberGenerator.GetBytes(SecretLength);
         return new SessionCredentials(Guid.NewGuid(), secret);
     }
 
+    // Parse the shareable "session-id.secret" form, validating it before the caller opens any socket with these credentials.
     public static SessionCredentials ParseToken(string token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
@@ -58,6 +63,7 @@ public sealed class SessionCredentials
     public string ExportToken() =>
         $"{SessionId:N}.{Base64UrlEncode(_secret)}";
 
+    // Challenge-response proofs bind the current process instance, role, and fresh nonce to the shared secret, preventing a replay from another join.
     public string CreateClientProof(
         Guid instanceId,
         SessionRole role,
@@ -94,6 +100,7 @@ public sealed class SessionCredentials
     public static string CreateNonce() =>
         Base64UrlEncode(RandomNumberGenerator.GetBytes(16));
 
+    // UDP has no connected stream to authenticate it, so every datagram carries a truncated HMAC over its sender ID and framed payload.
     internal byte[] ComputeAuthenticationTag(ReadOnlySpan<byte> data)
     {
         var fullTag = HMACSHA256.HashData(_secret, data);
@@ -149,6 +156,8 @@ public sealed class SessionCredentials
     }
 }
 
+// Wraps a normal protocol frame with a sender-instance ID and authentication tag.
+// UdpPeerBinding later supplies endpoint and sequence/replay validation.
 public static class AuthenticatedDatagramCodec
 {
     public const int SenderInstanceIdSize = 16;
@@ -199,6 +208,8 @@ public static class AuthenticatedDatagramCodec
         Guid senderInstanceId)
     {
         ArgumentNullException.ThrowIfNull(credentials);
+        // Encode the normal frame first, then authenticate exactly the bytes the receiver will inspect.
+        // Enforcing the MTU-safe limit avoids IP-level fragmentation for realtime movement traffic.
         var frame = ProtocolCodec.Encode(envelope);
         var totalLength = checked(
             ProtocolConstants.AuthenticationTagSize +
@@ -251,6 +262,7 @@ public static class AuthenticatedDatagramCodec
             throw new ProtocolException("Authenticated UDP datagram has an invalid length.");
         }
 
+        // Verify the tag before parsing the contained frame, then ensure the sender instance still matches the TCP-authenticated peer generation.
         var suppliedTag = datagram[..ProtocolConstants.AuthenticationTagSize];
         var authenticatedBody = datagram[ProtocolConstants.AuthenticationTagSize..];
         var expectedTag = credentials.ComputeAuthenticationTag(authenticatedBody);

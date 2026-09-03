@@ -3,6 +3,8 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Ipc;
 
+// A monotonically changing capability for one native-bridge pipe connection.
+// It prevents delayed work from an old game session being sent to a new one.
 public readonly record struct BridgePipeConnectionToken(long Generation)
 {
     public bool IsValid => Generation != 0;
@@ -13,6 +15,8 @@ public delegate ValueTask BridgePipeEnvelopeReceivedHandler(
     BridgePipeConnectionToken receiveConnection,
     CancellationToken cancellationToken);
 
+// Hosts the local named pipe between the external C# sidecar and the in-game native bridge.
+// It is local IPC, not a multiplayer network listener.
 public sealed class BridgePipeServer : IAsyncDisposable
 {
     private readonly object _connectionSync = new();
@@ -27,6 +31,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
 
     public BridgePipeServer(string baseName)
     {
+        // Add the Windows user identity so another local user cannot connect to a predictable global pipe name.
         PipeName = PipeNameResolver.ResolveForCurrentUser(baseName);
     }
 
@@ -47,6 +52,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
             cancellationToken,
             _stop.Token);
 
+        // A game reload recreates the client pipe; keep accepting replacements until the sidecar itself is stopped.
         while (!linked.IsCancellationRequested)
         {
             await using var pipe = CreatePipe();
@@ -57,6 +63,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
                 lock (_connectionSync)
                 {
                     _connection = pipe;
+                    // A new pipe is a new authority boundary for queued sends and in-flight callbacks from the previous bridge.
                     _connectionGeneration = NextConnectionGeneration();
                 }
                 opened = true;
@@ -83,6 +90,8 @@ public sealed class BridgePipeServer : IAsyncDisposable
                     UnauthorizedAccessException or
                     ObjectDisposedException)
             {
+                // Ordinary game unloads and pipe breaks land here.
+                // Surface them to the session coordinator, then return to accepting a pipe.
                 if (ConnectionFaulted is { } faulted)
                 {
                     await faulted(exception).ConfigureAwait(false);
@@ -120,6 +129,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
                 return false;
             }
 
+            // Capture the generation together with the connection; callers use it later to ensure their message still targets this game session.
             connectionToken = new BridgePipeConnectionToken(
                 _connectionGeneration);
             return true;
@@ -143,10 +153,8 @@ public sealed class BridgePipeServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Invalidates every token captured for the current pipe without closing
-    /// the pipe. The rotation is serialized with complete frame writes, so a
-    /// frame that already started finishes before the authority boundary and
-    /// a queued sender holding the previous token fails after it.
+    /// Invalidates every token captured for the current pipe without closing the pipe.
+    /// The rotation is serialized with complete frame writes, so a frame that already started finishes before the authority boundary and a queued sender holding the previous token fails after it.
     /// </summary>
     public async ValueTask<BridgePipeConnectionToken?>
         RotateConnectionTokenAsync(
@@ -158,6 +166,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
         {
             return null;
         }
+        // Rotation waits for any complete write so an old and new logical session cannot share a partially written protocol frame.
         await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -204,6 +213,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        // The pipe is a byte stream, so serialize full protocol-frame writes.
         await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -231,6 +241,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
                 }
             }
 
+            // A disconnected/replaced bridge is not an error for the network layer; the caller can cache or drop this non-current delivery.
             if (connection is null || generation == 0)
             {
                 return false;
@@ -238,10 +249,9 @@ public sealed class BridgePipeServer : IAsyncDisposable
 
             try
             {
-                // Once a frame starts, cancellation must not leave a partial
-                // frame on a connection that remains usable. The caller token
-                // only cancels the wait for the serialized send gate. A stuck
-                // write is released by aborting its owning pipe generation.
+                // Once a frame starts, cancellation must not leave a partial frame on a connection that remains usable.
+                // The caller token only cancels the wait for the serialized send gate.
+                // A stuck write is released by aborting its owning pipe generation.
                 await ProtocolCodec.WriteAsync(
                         connection,
                         envelope,
@@ -278,6 +288,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
 
     public async ValueTask StopAsync()
     {
+        // Tell the accept loop to stop before disposing the active stream.
         await _stop.CancelAsync().ConfigureAwait(false);
         _ = AbortCurrentConnection();
     }
@@ -293,14 +304,14 @@ public sealed class BridgePipeServer : IAsyncDisposable
         }
 
         // Closing the connection releases an un-cancelled full-frame write.
-        // Any partial bytes belong to this discarded stream and cannot poison
-        // the next bridge connection.
+        // Any partial bytes belong to this discarded stream and cannot poison the next bridge connection.
         connection?.Dispose();
         return connection is not null;
     }
 
     private long NextConnectionGeneration()
     {
+        // Keep zero reserved as the invalid/default token, even after overflow.
         var generation = unchecked(++_nextConnectionGeneration);
         if (generation == 0)
         {
@@ -314,6 +325,7 @@ public sealed class BridgePipeServer : IAsyncDisposable
         out long generation,
         out long activeMilliseconds)
     {
+        // This watchdog is deliberately explicit: a stuck game process must lose this pipe rather than block all later sidecar-to-game traffic.
         if (minimumActiveMilliseconds <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -345,8 +357,8 @@ public sealed class BridgePipeServer : IAsyncDisposable
             _connectionGeneration = 0;
         }
 
-        // Close only the pipe generation that owns the stalled write. A new
-        // connection cannot be aborted while an older SendAsync unwinds.
+        // Close only the pipe generation that owns the stalled write.
+        // A new connection cannot be aborted while an older SendAsync unwinds.
         connection.Dispose();
         return true;
     }
@@ -374,9 +386,8 @@ public sealed class BridgePipeServer : IAsyncDisposable
                      PipeOptions.WriteThrough |
                      PipeOptions.CurrentUserOnly,
             inBufferSize: 64 * 1024,
-            // Network snapshots are already coalesced before this pipe. A
-            // small output quota limits the amount of stale state Windows can
-            // buffer while the game script is paused or loading.
+            // Network snapshots are already coalesced before this pipe.
+            // A small output quota limits the amount of stale state Windows can buffer while the game script is paused or loading.
             outBufferSize: 4 * 1024);
 
     private async Task ReceiveLoopAsync(
@@ -385,12 +396,9 @@ public sealed class BridgePipeServer : IAsyncDisposable
     {
         while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
         {
-            // Capture before ReadAsync so a logical rotation that happens while
-            // this read is pending cannot relabel an already in-flight frame as
-            // belonging to the replacement session. Later reads capture the new
-            // generation. Hello/session-menu frames remain explicit boundaries;
-            // the native bridge clears its role before it emits Hello and does
-            // not publish gameplay state again until the matching HelloAck.
+            // Capture before ReadAsync so a logical rotation that happens while this read is pending cannot relabel an already in-flight frame as belonging to the replacement session.
+            // Later reads capture the new generation.
+            // Hello/session-menu frames remain explicit boundaries; the native bridge clears its role before it emits Hello and does not publish gameplay state again until the matching HelloAck.
             BridgePipeConnectionToken receiveConnection;
             lock (_connectionSync)
             {

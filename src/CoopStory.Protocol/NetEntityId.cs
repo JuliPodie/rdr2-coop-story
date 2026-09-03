@@ -2,6 +2,8 @@ using System.Globalization;
 
 namespace CoopStory.Protocol;
 
+// Stable cross-machine entity identity.
+// It combines a session/recreation epoch with an increasing counter, unlike a local RDR2 handle that exists on only one PC and may be recycled by the game.
 public readonly record struct NetEntityId(ulong Value) : ISpanFormattable
 {
     public uint Epoch => (uint)(Value >> 32);
@@ -29,6 +31,7 @@ public readonly record struct NetEntityId(ulong Value) : ISpanFormattable
         return new NetEntityId(((ulong)epoch << 32) | counter);
     }
 
+    // Diagnostics use hexadecimal "epoch:counter" text so the two lifetime components remain visible when investigating an entity recreation.
     public static bool TryParse(string? value, out NetEntityId entityId)
     {
         entityId = default;
@@ -76,6 +79,8 @@ public readonly record struct NetEntityId(ulong Value) : ISpanFormattable
         Value.TryFormat(destination, out charsWritten, format, provider);
 }
 
+// Host-side allocator.
+// Advancing the epoch on a rebuilt authority graph ensures a delayed old-world message cannot name an entity in the new graph.
 public sealed class NetEntityIdAllocator
 {
     private readonly uint _epoch;
@@ -92,6 +97,7 @@ public sealed class NetEntityIdAllocator
         _counter = initialCounter;
     }
 
+    // Counter zero is reserved, so wrap advances the epoch before issuing the next identity instead of silently producing an invalid/reused ID.
     public NetEntityId Next()
     {
         var next = unchecked(++_counter);

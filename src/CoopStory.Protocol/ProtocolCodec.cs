@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 
 namespace CoopStory.Protocol;
 
+// Binary frame format shared by named pipes, TCP control, and UDP snapshots.
+// The fixed header makes stream reads unambiguous and bounds allocations before a payload is accepted by higher-level game logic.
 public static class ProtocolCodec
 {
     public static byte[] Encode(ProtocolEnvelope envelope)
@@ -9,6 +11,8 @@ public static class ProtocolCodec
         ArgumentNullException.ThrowIfNull(envelope);
         ValidateEnvelope(envelope);
 
+        // Serialize a fixed little-endian header followed by opaque message-type payload bytes.
+        // Payload-specific codecs own the bytes after the header.
         var bytes = new byte[ProtocolConstants.HeaderSize + envelope.Payload.Length];
         var header = bytes.AsSpan(0, ProtocolConstants.HeaderSize);
         BinaryPrimitives.WriteUInt32LittleEndian(header, ProtocolConstants.Magic);
@@ -48,6 +52,8 @@ public static class ProtocolCodec
     {
         ArgumentNullException.ThrowIfNull(stream);
 
+        // TCP/named pipes may return fewer bytes than requested.
+        // Read the whole header first, learn the checked payload size, then read that payload.
         var header = new byte[ProtocolConstants.HeaderSize];
         var hasFrame = await ReadExactlyAsync(
             stream,
@@ -88,6 +94,7 @@ public static class ProtocolCodec
         ReadOnlySpan<byte> header,
         ReadOnlyMemory<byte> payload)
     {
+        // Message type is validated before construction so callers never switch on an undefined numeric value from a peer.
         var version = BinaryPrimitives.ReadUInt16LittleEndian(header[4..]);
         var typeValue = BinaryPrimitives.ReadUInt16LittleEndian(header[6..]);
         if (!Enum.IsDefined(typeof(MessageType), typeValue))
@@ -107,6 +114,8 @@ public static class ProtocolCodec
 
     private static int ValidateAndReadPayloadLength(ReadOnlySpan<byte> header)
     {
+        // Validate framing/version/size before allocating or decoding payload fields.
+        // This is the first protocol boundary against malformed input.
         var magic = BinaryPrimitives.ReadUInt32LittleEndian(header);
         if (magic != ProtocolConstants.Magic)
         {
@@ -157,6 +166,7 @@ public static class ProtocolCodec
         CancellationToken cancellationToken)
     {
         var offset = 0;
+        // Keep reading until a complete frame part arrives; a partial stream read is normal transport behavior, not a partial protocol message.
         while (offset < destination.Length)
         {
             var read = await stream.ReadAsync(destination[offset..], cancellationToken)

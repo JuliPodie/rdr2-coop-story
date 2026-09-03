@@ -8,6 +8,7 @@
 namespace coopstory::bridge {
 namespace {
 
+// Animation data is optional visual detail; tight bounds make malformed native sampling data fail closed instead of destabilizing the replica task graph.
 inline constexpr float kMaximumAbsolutePlaybackRate = 8.0F;
 
 inline constexpr std::uint32_t kKnownCapabilities =
@@ -54,6 +55,7 @@ struct RawIntegral<T, true> final {
 template <typename T>
     requires(std::is_integral_v<T> || std::is_enum_v<T>)
 void AppendLittleEndian(std::vector<std::uint8_t>& bytes, const T value) {
+    // The C++ bridge and C# protocol share fixed little-endian binary layouts.
     using Raw = typename RawIntegral<T>::Type;
     using Unsigned = std::make_unsigned_t<Raw>;
     auto remaining = static_cast<Unsigned>(value);
@@ -147,6 +149,8 @@ template <typename T>
 
 [[nodiscard]] bool IsValid(
     const PlayerAnimationStatePayload& payload) noexcept {
+    // Capability bits say which optional fields are meaningful.
+    // Every validity bit is checked against them so a partial sampler cannot invent data.
     const auto graphValid =
         HasFlag(payload, PlayerAnimationStateFlag::GraphHashValid);
     const auto stateValid =
@@ -298,6 +302,7 @@ std::vector<std::uint8_t> EncodePlayerAnimationState(
             "PlayerAnimationState contains invalid fields");
     }
 
+    // Write every field in the documented fixed order; there is no JSON or platform-dependent struct packing on this realtime visual message.
     std::vector<std::uint8_t> bytes;
     bytes.reserve(kPlayerAnimationStatePayloadSize);
     AppendLittleEndian(bytes, payload.entityId.Value());
@@ -364,6 +369,7 @@ std::optional<PlayerAnimationStatePayload> DecodePlayerAnimationState(
         ReadLittleEndian<std::uint8_t>(bytes, offset);
     const auto reservedWord =
         ReadLittleEndian<std::uint16_t>(bytes, offset);
+    // Reserved fields must remain zero, catching incompatible writers before their bytes can be mistaken for a newer animation schema.
     if (reservedByte != 0U || reservedWord != 0U || !IsValid(payload)) {
         return std::nullopt;
     }

@@ -3,6 +3,7 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Networking;
 
+// Delivers a validated control or snapshot frame together with the connection generation that was current when the sidecar accepted it.
 public delegate ValueTask EnvelopeReceivedHandler(
     ProtocolEnvelope envelope,
     ControlPeerToken peer,
@@ -16,6 +17,8 @@ public delegate ValueTask PeerConnectionChangedHandler(
     bool connected,
     CancellationToken cancellationToken);
 
+// Capability for the currently authenticated TCP peer.
+// Queued work must carry it so a reconnect cannot accidentally mutate the replacement peer's state.
 public readonly record struct ControlPeerToken(
     Guid SessionInstanceId,
     ulong Generation)
@@ -24,6 +27,8 @@ public readonly record struct ControlPeerToken(
         SessionInstanceId != Guid.Empty && Generation != 0;
 }
 
+// Shared contract for host and guest transport.
+// TCP is the reliable control lane; UDP is the lossy/latest-state snapshot lane.
 public interface ILanSession : IAsyncDisposable
 {
     bool IsConnected { get; }
@@ -42,6 +47,7 @@ public interface ILanSession : IAsyncDisposable
 
     bool IsControlPeerCurrent(ControlPeerToken peer);
 
+    // Runs a synchronous cache change only if this is still the same peer.
     bool TryRunForControlPeer(ControlPeerToken peer, Action operation);
 
     ValueTask<bool> SendControlAsync(
@@ -64,6 +70,7 @@ public interface ILanSession : IAsyncDisposable
         CancellationToken cancellationToken = default);
 }
 
+// Monotonic local time carried in frames for interpolation and age checks, not wall-clock time (which can jump when a computer adjusts its clock).
 internal static class NetworkClock
 {
     public static ulong Tick => unchecked((ulong)Environment.TickCount64);

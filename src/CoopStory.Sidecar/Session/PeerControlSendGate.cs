@@ -1,8 +1,8 @@
 namespace CoopStory.Sidecar.Session;
 
 /// <summary>
-/// Serializes reliable peer control operations. Callers may keep cache
-/// mutation, snapshot capture and a multi-frame send in one atomic lane.
+/// Serializes reliable peer control operations.
+/// Callers may keep cache mutation, snapshot capture and a multi-frame send in one atomic lane.
 /// </summary>
 internal sealed class PeerControlSendGate
 {
@@ -13,6 +13,8 @@ internal sealed class PeerControlSendGate
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operation);
+        // Keep cache changes and related multi-frame TCP sends in their chosen order.
+        // This prevents a resync snapshot interleaving a normal spawn.
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {

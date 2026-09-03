@@ -40,11 +40,9 @@ namespace coopstory::bridge::sdk {
 namespace {
 
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
-// Present in the build-1491.50 command dump but absent from the older SDK
-// header. This is still an ordinary ScriptHook typed native invocation: no
-// pattern scanning or process-memory access. The native declares an opaque
-// output structure, so give it bounded local storage rather than a null
-// pointer.
+// Present in the build-1491.50 command dump but absent from the older SDK header.
+// This is still an ordinary ScriptHook typed native invocation: no pattern scanning or process-memory access.
+// The native declares an opaque output structure, so give it bounded local storage rather than a null pointer.
 [[nodiscard]] Hash QueryEntityScriptHash(const Entity entity) noexcept {
     std::array<Any, 16U> argumentStorage{};
     return invoke<Hash>(0x2A08A32B6D49906FULL, entity,
@@ -93,10 +91,9 @@ constexpr std::uint64_t kAmbientEncounterCollisionTimeoutMs = 10'000U;
     return "unknown";
 }
 
-// Shared capabilities are intentionally opt-in.  A valid wire record is not
-// enough authority to alter a Story save: each native mapping has to be
-// manually proven against this game build first.  Add records here only with a
-// matching guarded in-game probe and automated protocol coverage.
+// Shared capabilities are intentionally opt-in.
+// A valid wire record is not enough authority to alter a Story save: each native mapping has to be manually proven against this game build first.
+// Add records here only with a matching guarded in-game probe and automated protocol coverage.
 constexpr std::uint32_t kRepeatingShotgunWeaponHash = 1'674'213'418U;
 constexpr std::uint32_t kPoisonThrowingKnifePamphletHash = 0x366089E7U;
 
@@ -115,18 +112,15 @@ constexpr std::uint32_t kPoisonThrowingKnifePamphletHash = 0x366089E7U;
 }
 
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
-// The bundled 1207 SDK exposes the UNLOCK family but omits the name of this
-// read-only resolver. rdr3-natives documents 0x865F36299079FB75 as
-// _GET_WEAPON_UNLOCK(Hash weaponHash) -> Hash. Keep it local instead of
-// editing vendored SDK headers.
+// The bundled 1207 SDK exposes the UNLOCK family but omits the name of this read-only resolver. rdr3-natives documents 0x865F36299079FB75 as _GET_WEAPON_UNLOCK(Hash weaponHash) -> Hash.
+// Keep it local instead of editing vendored SDK headers.
 [[nodiscard]] Hash GetWeaponUnlock(const Hash weaponHash) {
     return ::invoke<Hash>(0x865F36299079FB75ULL, weaponHash);
 }
 #endif
-// A movement task contains a fixed destination. Updating it only after three
-// metres made a walking replica reach an old point, stop, and then sprint to
-// the next one. Route intent can update roughly three times per second without
-// clearing the task graph, so the destination remains ahead at sprint speed.
+// A movement task contains a fixed destination.
+// Updating it only after three metres made a walking replica reach an old point, stop, and then sprint to the next one.
+// Route intent can update roughly three times per second without clearing the task graph, so the destination remains ahead at sprint speed.
 constexpr std::uint64_t kRemoteTaskRefreshMilliseconds = 8'000U;
 constexpr std::uint64_t kRemoteTaskMinimumRefreshMilliseconds = 500U;
 constexpr std::uint64_t kRemoteMotionDiagnosticsMilliseconds = 5'000U;
@@ -144,9 +138,7 @@ constexpr std::size_t kWorldPedPoolCapacity = 1'024U;
 constexpr std::uint64_t kWorldDamageIntentMinimumIntervalMilliseconds = 90U;
 constexpr float kWorldDamageIntentFixedDamage = 25.0F;
 // Ambient population remains bounded to the runtime's normal 80 m bubble.
-// Mission parties regularly spread farther apart while riding, so actors the
-// host script owns stay observable across the complete soft-bubble instead of
-// disappearing just when the guest falls behind.
+// Mission parties regularly spread farther apart while riding, so actors the host script owns stay observable across the complete soft-bubble instead of disappearing just when the guest falls behind.
 constexpr float kMissionScriptOwnedActorRadiusMeters = 300.0F;
 constexpr std::uint64_t kWorldModelLoadTimeoutMilliseconds = 5'000U;
 constexpr std::uint64_t kWorldAimTaskRefreshMilliseconds = 250U;
@@ -175,34 +167,27 @@ constexpr float kRemoteMoveRateFallPerSecond = 1.20F;
 constexpr std::uint64_t kRemoteWeaponGrantRetryMilliseconds = 5'000U;
 constexpr std::uint64_t kRemoteWeaponVisualRefreshMilliseconds = 200U;
 constexpr std::uint64_t kLocalKnownMountContinuityMilliseconds = 30'000U;
-// Scripted zero-damage bullets do not consistently emit a weapon report in
-// Story Mode. This built-in one-shot is used only as a spatial audio fallback
-// and is attached to the remote ped; no external audio asset is distributed.
+// Scripted zero-damage bullets do not consistently emit a weapon report in Story Mode.
+// This built-in one-shot is used only as a spatial audio fallback and is attached to the remote ped; no external audio asset is distributed.
 char kRemoteGunshotSoundName[] = "CarbineShotDistant";
 char kRemoteGunshotSoundSet[] = "REFC_Sounds";
-// A melee click is a discrete action edge, not a level that may stay true for
-// several seconds while the button is held. Keep the visual pulse alive long
-// enough for RDR2 to finish one strike, but never refresh it from PRESSED.
+// A melee click is a discrete action edge, not a level that may stay true for several seconds while the button is held.
+// Keep the visual pulse alive long enough for RDR2 to finish one strike, but never refresh it from PRESSED.
 constexpr std::uint64_t kLocalMeleeAttackLatchMilliseconds = 550U;
 constexpr std::uint64_t kLocalMeleeStateReleaseGraceMilliseconds = 180U;
-// The local proxy can enter ragdoll after the visible strike task has already
-// finished. Keep a short cause/effect window so that transition is still
-// published as one victim-owned knockdown instead of being lost between two
-// 20 Hz samples.
+// The local proxy can enter ragdoll after the visible strike task has already finished.
+// Keep a short cause/effect window so that transition is still published as one victim-owned knockdown instead of being lost between two 20 Hz samples.
 constexpr std::uint64_t kLocalPeerCombatEffectMemoryMilliseconds = 1'800U;
 constexpr std::uint64_t kLocalPeerKnockdownLatchMilliseconds = 1'800U;
 constexpr std::uint64_t kLocalPeerMountPullLatchMilliseconds = 550U;
 constexpr float kPeerMountPullMaximumDistanceMeters = 3.5F;
-// TASK_PUT_PED_DIRECTLY_INTO_MELEE is not a deterministic animation API: it
-// lets local AI choose a combo. We invoke it once per reliable attack Begin
-// and bound ownership tightly, so it can show one strike but can never refresh
-// into a local combo or survive the matching End.
+// TASK_PUT_PED_DIRECTLY_INTO_MELEE is not a deterministic animation API: it lets local AI choose a combo.
+// We invoke it once per reliable attack Begin and bound ownership tightly, so it can show one strike but can never refresh into a local combo or survive the matching End.
 constexpr std::uint64_t kRemoteMeleeVisualMaximumMilliseconds = 1'150U;
 constexpr std::uint64_t kRemotePeerDismountRetryMilliseconds = 650U;
 constexpr std::uint64_t kRemotePeerDismountTimeoutMilliseconds = 2'500U;
-// The local rope may need several streamed frames before it physically reaches
-// the peer proxy. Announce the throw first, then upgrade the same transaction
-// to a physical target effect once the local engine reports restraint.
+// The local rope may need several streamed frames before it physically reaches the peer proxy.
+// Announce the throw first, then upgrade the same transaction to a physical target effect once the local engine reports restraint.
 constexpr std::uint64_t kLocalPeerLassoIntentLatchMilliseconds = 1'800U;
 constexpr std::uint64_t kPeerCombatIsolationHoldMilliseconds = 2'500U;
 constexpr float kDownedLethalGuardHealthFraction = 0.05F;
@@ -211,9 +196,8 @@ constexpr float kGuestLocalHazardRestoreHealthFraction = 0.75F;
 constexpr std::uint64_t kReliablePlayerActionTimeoutMilliseconds = 2'500U;
 constexpr std::uint64_t kPeerKnockdownRagdollRefreshMilliseconds = 250U;
 constexpr int kPeerKnockdownRagdollDurationMilliseconds = 1'800;
-// Sustain packets refresh the authoritative lasso snapshot every ~500 ms. If
-// the terminal packet or its sidecar disappears, this lease is the final local
-// guarantee that neither real player nor proxy can remain ragdolled forever.
+// Sustain packets refresh the authoritative lasso snapshot every ~500 ms.
+// If the terminal packet or its sidecar disappears, this lease is the final local guarantee that neither real player nor proxy can remain ragdolled forever.
 constexpr std::uint64_t kAuthoritativeLassoLeaseMilliseconds = 3'500U;
 constexpr std::uint64_t kAuthoritativeRestraintRagdollRefreshMilliseconds =
     700U;
@@ -227,9 +211,8 @@ constexpr std::uint64_t kGuestMissionIsolationDiagnosticsMilliseconds = 5'000U;
 constexpr std::uint64_t kGuestMissionAnimSceneProbeBurstMilliseconds = 5'000U;
 constexpr std::uint64_t kGuestMissionAnimScenePeriodicProbeMilliseconds = 100U;
 constexpr float kMissionSpectatorPopulationRadiusMeters = 100.0F;
-// Reserve local Story interactions before the guest reaches the yellow
-// activation volume.  Eight metres was late enough for a queued local scene
-// to start underneath the host presentation in the V29 two-PC trace.
+// Reserve local Story interactions before the guest reaches the yellow activation volume.
+// Eight metres was late enough for a queued local scene to start underneath the host presentation in the V29 two-PC trace.
 constexpr float kGuestStoryInteractionGuardRadiusMeters = 20.0F;
 constexpr std::uint64_t kWorldMirrorDiagnosticsMilliseconds = 5'000U;
 constexpr float kEntityDivergenceThresholdMeters = 1.5F;
@@ -259,11 +242,9 @@ constexpr std::uint64_t kMissionCameraRenderAssertMilliseconds = 250U;
 constexpr std::uint64_t kMissionResumeStreamingWarmupMilliseconds = 250U;
 constexpr std::uint64_t kMissionResumeFallbackMilliseconds = 5'000U;
 constexpr float kMissionCinematicStreamingRadiusMeters = 120.0F;
-// The guest's hidden physical Story actor must not remain inside the same
-// proximity trigger that starts the host mission. Keeping it frozen in place
-// allowed the guest's private Story VM to arm during the host presentation
-// and play the same cutscene two minutes later. The rendered camera keeps its
-// own focus at the host scene while the invisible actor is staged vertically.
+// The guest's hidden physical Story actor must not remain inside the same proximity trigger that starts the host mission.
+// Keeping it frozen in place allowed the guest's private Story VM to arm during the host presentation and play the same cutscene two minutes later.
+// The rendered camera keeps its own focus at the host scene while the invisible actor is staged vertically.
 constexpr float kMissionSpectatorStoryTriggerSeparationMeters = 180.0F;
 constexpr int kAnimSceneMaximumProbeHandle = 4'096;
 constexpr int kAnimSceneProbeBatchSize = 128;
@@ -273,11 +254,9 @@ constexpr float kAnimScenePhaseCatchUpWindowSeconds = 0.75F;
 constexpr std::uint64_t kAnimSceneProbeLogMilliseconds = 1'000U;
 constexpr std::size_t kMetaPedMaximumShopComponents = 64U;
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
-// These RVAs were derived offline from the known ScriptHookRDR2 1.0.1491.17
-// file whose recorded SHA-256 starts 3AC29FBE and ends BF972A4C. Runtime does
-// not hash the on-disk DLL: it validates the loaded PE timestamp/image size,
-// exact export RVAs and known export stubs below. The inspector is read-only;
-// nativeCall is never executed and no code or registration entry is patched.
+// These RVAs were derived offline from the known ScriptHookRDR2 1.0.1491.17 file whose recorded SHA-256 starts 3AC29FBE and ends BF972A4C.
+// Runtime does not hash the on-disk DLL: it validates the loaded PE timestamp/image size, exact export RVAs and known export stubs below.
+// The inspector is read-only; nativeCall is never executed and no code or registration entry is patched.
 // Any loaded-layout mismatch disables inspection instead of guessing.
 constexpr std::uint32_t kPinnedScriptHookPeTimestamp = 0x63E4CB9AU;
 constexpr std::uint32_t kPinnedScriptHookImageSize = 0x00035000U;
@@ -400,8 +379,7 @@ public:
             AnimSceneRoleFlag::Required);
         if (existing == roles.end()) {
             if (roles.size() >= kMaximumAnimSceneDefinitionRoles) {
-                // Never silently publish an incomplete exact scene: a missing
-                // actor binding is less safe than the established fallback.
+                // Never silently publish an incomplete exact scene: a missing actor binding is less safe than the established fallback.
                 found->second.roleOverflow = true;
                 return;
             }
@@ -802,13 +780,10 @@ void WriteAbsoluteJump(
     destination[11] = 0xE0U;
 }
 
-// Trampolines must not destroy any register produced by the copied native
-// handler prefix. In particular, SET_ANIM_SCENE_ENTITY leaves the argument
-// array in RAX and consumes it immediately after the 12-byte prefix. The old
-// `mov rax, target; jmp rax` continuation replaced that live value with the
-// continuation address, so the original game handler received corrupt role
-// and entity arguments. An RIP-relative indirect jump is two bytes longer but
-// preserves every general-purpose register.
+// Trampolines must not destroy any register produced by the copied native handler prefix.
+// In particular, SET_ANIM_SCENE_ENTITY leaves the argument array in RAX and consumes it immediately after the 12-byte prefix.
+// The old `mov rax, target; jmp rax` continuation replaced that live value with the continuation address, so the original game handler received corrupt role and entity arguments.
+// An RIP-relative indirect jump is two bytes longer but preserves every general-purpose register.
 void WriteRegisterPreservingAbsoluteJump(
     std::uint8_t* destination,
     const void* target) noexcept {
@@ -1019,9 +994,8 @@ void RemoveAnimSceneCaptureHooks() noexcept {
     return true;
 }
 #endif
-// Context variants used by Story interaction prompts. They are disabled only
-// while the reversible guest mask has identified a nearby local mission actor;
-// movement, combat and interaction with replicated host entities remain live.
+// Context variants used by Story interaction prompts.
+// They are disabled only while the reversible guest mask has identified a nearby local mission actor; movement, combat and interaction with replicated host entities remain live.
 constexpr std::array<int, 5> kGuestStoryContextControls{
     static_cast<int>(0xCEFD9220U),
     static_cast<int>(0xC1989F95U),
@@ -1090,11 +1064,9 @@ constexpr std::uint64_t kRemoteVisualFireAmmoRestoreMilliseconds = 170U;
     pedType = PED::GET_PED_TYPE(ped);
     const bool nativeHuman =
         PED::IS_PED_HUMAN(ped) != FALSE;
-    // On the pinned Story Mode build IS_PED_HUMAN has been observed returning
-    // false for an entire valid pool of town residents. GET_PED_TYPE is the
-    // independent SDK-native discriminator: 4=male, 5=female, 28=animal.
-    // Keep IS_PED_HUMAN as the primary signal and use only the documented
-    // human values as a conservative fallback; wildlife is never promoted.
+    // On the pinned Story Mode build IS_PED_HUMAN has been observed returning false for an entire valid pool of town residents.
+    // GET_PED_TYPE is the independent SDK-native discriminator: 4=male, 5=female, 28=animal.
+    // Keep IS_PED_HUMAN as the primary signal and use only the documented human values as a conservative fallback; wildlife is never promoted.
     const bool pedTypeHuman = pedType == 4 || pedType == 5;
     usedPedTypeFallback = !nativeHuman && pedTypeHuman;
     return nativeHuman || pedTypeHuman;
@@ -1116,9 +1088,8 @@ constexpr std::uint64_t kRemoteVisualFireAmmoRestoreMilliseconds = 170U;
     return invoke<BOOL>(0x3AA24CCC0D451379, ped);
 }
 
-// RDR2's crouch locomotion is separate from the GTA-style stealth flag
-// exposed by the old SDK header. The sender and receiver both use the game's
-// native crouch graph so walking/sprinting while crouched remains visible.
+// RDR2's crouch locomotion is separate from the GTA-style stealth flag exposed by the old SDK header.
+// The sender and receiver both use the game's native crouch graph so walking/sprinting while crouched remains visible.
 [[nodiscard]] BOOL GetPedCrouchMovement(const Ped ped) {
     return invoke<BOOL>(0xD5FE956C70FF370B, ped);
 }
@@ -1183,8 +1154,7 @@ void TaskDismountAnimal(const Ped rider) {
 }
 
 // RDR2 does not initialize MetaPed components for every CREATE_PED result.
-// Without this native the entity can collide and leave footprints while its
-// body remains completely invisible.
+// Without this native the entity can collide and leave footprints while its body remains completely invisible.
 void SetRandomOutfitVariation(const Ped ped) {
     invoke<Void>(0x283978A15512B2FE, ped, FALSE);
 }
@@ -1192,9 +1162,8 @@ void SetRandomOutfitVariation(const Ped ped) {
 [[nodiscard]] Hash GetShopItemComponentAtIndex(
     const Ped ped,
     const int index) {
-    // Both output records are intentionally over-allocated. Their layout is
-    // private to MetaPed and is not placed on the wire; the native only needs
-    // valid writable storage while returning the portable shop-item hash.
+    // Both output records are intentionally over-allocated.
+    // Their layout is private to MetaPed and is not placed on the wire; the native only needs valid writable storage while returning the portable shop-item hash.
     std::array<std::uint64_t, 16> componentData{};
     std::array<std::uint64_t, 16> variationData{};
     return invoke<Hash>(
@@ -1392,11 +1361,8 @@ void DeleteAnimScene(const int scene) {
 
 [[nodiscard]] bool IsMirrorablePopulationType(
     const int populationType) noexcept {
-    // Pool observations across Story Mode builds include ordinary ambient
-    // residents under type 0 and script/mission peds under type 7. The host
-    // still filters players, local/remote mounts and every proxy registry, so
-    // accepting the complete native 0-7 ped range is safer than producing an
-    // empty authoritative world.
+    // Pool observations across Story Mode builds include ordinary ambient residents under type 0 and script/mission peds under type 7.
+    // The host still filters players, local/remote mounts and every proxy registry, so accepting the complete native 0-7 ped range is safer than producing an empty authoritative world.
     return populationType >= 0 && populationType <= 7;
 }
 
@@ -1597,9 +1563,9 @@ void AppendPersistentBridgeLog(
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
 
 // UNVERIFIED_NATIVE_BINDING:
-// The wrappers below are public SDK natives, but the SDK predates the pinned
-// 1491.50 executable. Runtime behavior must be verified on that exact build
-// before this opt-in is enabled. The default build compiles this block out.
+// The wrappers below are public SDK natives, but the SDK predates the pinned 1491.50 executable.
+// Runtime behavior must be verified on that exact build before this opt-in is enabled.
+// The default build compiles this block out.
 [[nodiscard]] bool IsExecutableProtection(
     const DWORD protection) noexcept {
     if ((protection & (PAGE_GUARD | PAGE_NOACCESS)) != 0U) {
@@ -1696,8 +1662,8 @@ FindPinnedScriptHookModule(std::string& reason) {
         ::GetProcAddress(
             module,
             "?getScriptHandleBaseAddress@@YAPEAEH@Z"));
-    // SDK import libraries have used both decorated and undecorated exports
-    // across releases. Fall back to the public names before rejecting.
+    // SDK import libraries have used both decorated and undecorated exports across releases.
+    // Fall back to the public names before rejecting.
     const auto resolvedNativeInit = nativeInitAddress != nullptr
                                         ? nativeInitAddress
                                         : reinterpret_cast<const std::uint8_t*>(
@@ -1803,8 +1769,7 @@ InspectNativeHandlerMemory(const void* handler) {
 }
 
 [[nodiscard]] Vec3 ToBridgeVector(const Vector3& value) noexcept {
-    // SDK Vector3 fields are individually ALIGN8; reading named fields avoids
-    // the incorrect packed-float assumption.
+    // SDK Vector3 fields are individually ALIGN8; reading named fields avoids the incorrect packed-float assumption.
     return {value.x, value.y, value.z};
 }
 
@@ -1854,9 +1819,8 @@ InspectNativeHandlerMemory(const void* handler) {
     Vector3 maximum{};
     GAMEPLAY::GET_MODEL_DIMENSIONS(model, &minimum, &maximum);
     // GET_ENTITY_COORDS reports the model origin, not the bottom of its feet.
-    // Placing that origin directly at terrain Z buries peds and horses by
-    // roughly half their height. Offset the terrain by the model's lower
-    // bound, while rejecting implausible floors/interior levels.
+    // Placing that origin directly at terrain Z buries peds and horses by roughly half their height.
+    // Offset the terrain by the model's lower bound, while rejecting implausible floors/interior levels.
     if (!std::isfinite(minimum.z) || !std::isfinite(maximum.z) ||
         minimum.z >= -0.05F || maximum.z <= minimum.z) {
         return position;
@@ -1878,8 +1842,7 @@ InspectNativeHandlerMemory(const void* handler) {
     }
 
     // GET_SAFE_COORD_FOR_PED is the engine's collision/navmesh-aware choice.
-    // Keep it tightly bounded: an interior or unloaded remote area may return
-    // a legitimate but distant coordinate, which is unsafe for co-op resume.
+    // Keep it tightly bounded: an interior or unloaded remote area may return a legitimate but distant coordinate, which is unsafe for co-op resume.
     STREAMING::REQUEST_COLLISION_AT_COORD(
         position.x,
         position.y,
@@ -1897,8 +1860,7 @@ InspectNativeHandlerMemory(const void* handler) {
             return safe;
         }
     }
-    // Keep the existing height-only correction as a conservative fallback
-    // while collision/navmesh data is still streaming.
+    // Keep the existing height-only correction as a conservative fallback while collision/navmesh data is still streaming.
     return GroundSafePosition(position);
 }
 
@@ -2023,13 +1985,9 @@ ScriptHookSdkFacade::ProbeCampaignMission(
                 std::string{definition->scriptName});
             return std::nullopt;
         }
-        // The public API has no mission-specific "can start" native. Build
-        // the strongest per-save preflight available from public MissionData:
-        // the exact record must be valid, required Story content, incomplete
-        // and unrated, in addition to RDR2 allowing this player to start a
-        // mission at all. This rejects a later-chapter guest who has already
-        // completed the offered mission instead of treating any open marker
-        // as eligibility for it.
+        // The public API has no mission-specific "can start" native.
+        // Build the strongest per-save preflight available from public MissionData: the exact record must be valid, required Story content, incomplete and unrated, in addition to RDR2 allowing this player to start a mission at all.
+        // This rejects a later-chapter guest who has already completed the offered mission instead of treating any open marker as eligibility for it.
         const bool missionValid =
             ::invoke<BOOL>(0xE54DC27571D5EDC5ULL, missionId) != FALSE;
         const bool requiredStoryMission = missionValid &&
@@ -2071,9 +2029,7 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
             Log("[MISSION_PROGRESSION] completion mapping rejected: mission is not catalog-bound");
             return false;
         }
-        // The header supplied for the pinned native study names these direct
-        // public hashes as MISSIONDATA_IS_VALID, MISSIONDATA_GET_RATING,
-        // MISSIONDATA_WAS_COMPLETED and _MISSIONDATA_SET_MISSION_RATING.
+        // The header supplied for the pinned native study names these direct public hashes as MISSIONDATA_IS_VALID, MISSIONDATA_GET_RATING, MISSIONDATA_WAS_COMPLETED and _MISSIONDATA_SET_MISSION_RATING.
         if (::invoke<BOOL>(0xE54DC27571D5EDC5ULL, missionId) == FALSE) {
             Log("[MISSION_PROGRESSION] completion mapping rejected: MissionData id is invalid");
             return false;
@@ -2088,9 +2044,8 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
             return false;
         }
         if (!alreadyCompleted) {
-            // The bundled ScriptHook SDK's invoke template cannot use void as
-            // a return type. MissionData's setter has no meaningful result,
-            // so receive its ABI-sized placeholder and deliberately discard it.
+            // The bundled ScriptHook SDK's invoke template cannot use void as a return type.
+            // MissionData's setter has no meaningful result, so receive its ABI-sized placeholder and deliberately discard it.
             (void)::invoke<Any>(
                 0xE824CE7D13FCB300ULL, missionId,
                 static_cast<int>(completionRating));
@@ -2109,12 +2064,8 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
             switch (reward.binding) {
                 case CampaignMissionRewardBinding::WeaponOwnership: {
                     const auto weapon = static_cast<Hash>(reward.recordHash);
-                    // The lasso is a permanent WNT4 reward but is a utility
-                    // weapon; IS_WEAPON_VALID can report false for it during
-                    // the prologue even though the same delayed-grant native
-                    // accepts it. Keep this narrow exception tied to the
-                    // explicit catalogue record rather than weakening the
-                    // validation for arbitrary reward hashes.
+                    // The lasso is a permanent WNT4 reward but is a utility weapon; IS_WEAPON_VALID can report false for it during the prologue even though the same delayed-grant native accepts it.
+                    // Keep this narrow exception tied to the explicit catalogue record rather than weakening the validation for arbitrary reward hashes.
                     const bool isKnownUtilityWeapon =
                         weapon == static_cast<Hash>(kWeaponLasso);
                     if (playerPed != 0 &&
@@ -2145,11 +2096,8 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
                     break;
                 }
                 case CampaignMissionRewardBinding::RecipeUnlock: {
-                    // RDR2 stores a recipe's availability separately from
-                    // the pamphlet held in inventory. The verified mission
-                    // catalogue therefore models this as an explicit second
-                    // reward record, rather than inferring it from a
-                    // document grant.
+                    // RDR2 stores a recipe's availability separately from the pamphlet held in inventory.
+                    // The verified mission catalogue therefore models this as an explicit second reward record, rather than inferring it from a document grant.
                     const auto unlock = static_cast<Hash>(reward.recordHash);
                     const bool visible =
                         UNLOCK::_0x8588A14B75AF096B(unlock) != FALSE;
@@ -2184,27 +2132,20 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
                     break;
                 }
                 case CampaignMissionRewardBinding::WeaponShopEligibility: {
-                    // Unlike a weapon ownership reward, this preserves the
-                    // guest's economy: the item becomes buyable through the
-                    // same local gunsmith path as vanilla Story Mode.
+                    // Unlike a weapon ownership reward, this preserves the guest's economy: the item becomes buyable through the same local gunsmith path as vanilla Story Mode.
                     rewardApplied = UnlockLocalWeaponEntitlement(
                         reward.recordHash);
                     break;
                 }
                 case CampaignMissionRewardBinding::InventoryItem: {
-                    // Story scripts create a CHARACTER parent GUID, resolve
-                    // any required container GUID, resolve the item's own
-                    // GUID/slot, then add the item. Follow that public-native
-                    // sequence exactly; a raw item hash without its parent
-                    // and compatible slot can corrupt or orphan inventory
-                    // records.
+                    // Story scripts create a CHARACTER parent GUID, resolve any required container GUID, resolve the item's own GUID/slot, then add the item.
+                    // Follow that public-native sequence exactly; a raw item hash without its parent and compatible slot can corrupt or orphan inventory records.
                     constexpr Hash kDefaultInventorySlot = 1084182731U;
                     constexpr Hash kWardrobeInventorySlot = 1034665895U;
                     constexpr Hash kKitCampInventorySlot =
                         static_cast<Hash>(-1311702610);
                     constexpr Hash kAddReasonAwards = 0xB784AD1EU;
-                    // joaat("CHARACTER") is deliberately calculated with
-                    // the same stable hash routine used by the catalogue.
+                    // joaat("CHARACTER") is deliberately calculated with the same stable hash routine used by the catalogue.
                     constexpr Hash kCharacter = static_cast<Hash>(
                         CampaignMissionId("CHARACTER"));
                     constexpr Hash kWardrobe = static_cast<Hash>(
@@ -2212,8 +2153,7 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
                     constexpr Hash kKitCamp = static_cast<Hash>(
                         CampaignMissionId("KIT_CAMP"));
                     const auto item = static_cast<Hash>(reward.recordHash);
-                    // These public inventory natives are named in the
-                    // supplied header but absent from the older bundled SDK.
+                    // These public inventory natives are named in the supplied header but absent from the older bundled SDK.
                     constexpr std::uint64_t kInventoryIdFromPed =
                         0x13D234A2A3F66E63ULL;
                     constexpr std::uint64_t kInventoryCountByItem =
@@ -2255,10 +2195,8 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
                             characterGuid.data()) == FALSE) {
                         break;
                     }
-                    // This mirrors the standard Story helper's compatible
-                    // slot selection. It makes documents, wardrobe records
-                    // and camp-kit records distinct instead of forcing every
-                    // reward into the CHARACTER/default slot.
+                    // This mirrors the standard Story helper's compatible slot selection.
+                    // It makes documents, wardrobe records and camp-kit records distinct instead of forcing every reward into the CHARACTER/default slot.
                     auto itemSlot = kDefaultInventorySlot;
                     auto parentGuid = characterGuid;
                     if (::invoke<BOOL>(kInventoryFitsSlotId, item,
@@ -2313,12 +2251,10 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCompletion(
             }
         }
         // MissionData completion/rating was verified before this reward loop.
-        // This separate native refreshes the guest's vanilla mission-log
-        // entry. Vanilla chapter, activity, encounter, recipe and shop gates
-        // which query MissionData therefore see the same completed record and
-        // rating as the host. It runs after every explicit direct reward has
-        // succeeded; a failed reward keeps the transaction retryable. The
-        // documented UI native is idempotent for an already-completed mission.
+        // This separate native refreshes the guest's vanilla mission-log entry.
+        // Vanilla chapter, activity, encounter, recipe and shop gates which query MissionData therefore see the same completed record and rating as the host.
+        // It runs after every explicit direct reward has succeeded; a failed reward keeps the transaction retryable.
+        // The documented UI native is idempotent for an already-completed mission.
         (void)::invoke<Any>(0xDE31D66D1E54C471ULL, missionId);
         Log("[MISSION_PROGRESSION] MissionData rating and derived unlock mapping " +
             std::string{definition->scriptName} + " result=" +
@@ -2338,8 +2274,8 @@ std::optional<std::int32_t> ScriptHookSdkFacade::QueryLocalCashBalance()
     noexcept {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
     try {
-        // MONEY::_MONEY_GET_CASH_BALANCE is public in the supplied native
-        // header. It is sampled as a delta only; the total is never sent.
+        // MONEY::_MONEY_GET_CASH_BALANCE is public in the supplied native header.
+        // It is sampled as a delta only; the total is never sent.
         const auto cash = ::invoke<int>(0x0C02DABFA3B98176ULL);
         return cash >= 0 ? std::optional<std::int32_t>{cash} : std::nullopt;
     } catch (...) {
@@ -2354,10 +2290,9 @@ bool ScriptHookSdkFacade::ApplyCampaignMissionCashAward(
     const std::int32_t amount) noexcept {
     (void)completionEventId;
     (void)amount;
-    // There is no public, authoritative per-mission cash receipt available to
-    // this bridge. A total-wallet delta includes purchases, loot and unrelated
-    // script activity and cannot be applied exactly once after a crash. Fail
-    // closed until a concrete mission-owned reward record is mapped.
+    // There is no public, authoritative per-mission cash receipt available to this bridge.
+    // A total-wallet delta includes purchases, loot and unrelated script activity and cannot be applied exactly once after a crash.
+    // Fail closed until a concrete mission-owned reward record is mapped.
     Log("[MISSION_REWARD] cash replication disabled: no authoritative mission cash receipt");
     return false;
 }
@@ -2426,11 +2361,9 @@ void ScriptHookSdkFacade::InspectAnimSceneHybridHandlers(
              index < kAnimSceneNativeInspectionTargets.size();
              ++index) {
             const auto& target = kAnimSceneNativeInspectionTargets[index];
-            // nativeInit only resolves and initializes ScriptHook's private
-            // call context. Deliberately do not push arguments or call the
-            // handler. Every ordinary SDK invoke starts with another
-            // nativeInit, so the temporary context cannot leak into the next
-            // bridge native call.
+            // nativeInit only resolves and initializes ScriptHook's private call context.
+            // Deliberately do not push arguments or call the handler.
+            // Every ordinary SDK invoke starts with another nativeInit, so the temporary context cannot leak into the next bridge native call.
             nativeInit(target.hash);
             const auto* handler = *handlerSlot;
             const auto memory = InspectNativeHandlerMemory(handler);
@@ -2615,8 +2548,7 @@ void ScriptHookSdkFacade::RestoreRemoteVisualFireAmmo(
         (void)force;
 #endif
     } catch (...) {
-        // EquipmentState will restore the authoritative total on its next
-        // normal update even if the cosmetic pulse cleanup native failed.
+        // EquipmentState will restore the authoritative total on its next normal update even if the cosmetic pulse cleanup native failed.
     }
     remoteVisualFireSuppressedWeaponHash_ = 0U;
     remoteVisualFireRestoreAmmo_ = 0U;
@@ -2676,12 +2608,9 @@ bool ScriptHookSdkFacade::StartRemoteVisualFirePulse(
                     : 0U;
         }
 
-        // TASK_SHOOT_AT_COORD is the only stable SDK task that advances the
-        // weapon AnimGraph into a firing/recoil branch. Empty both total and
-        // clip first, keep the task shorter than the ammo suppression lease,
-        // and render the actual report/projectile separately at zero damage.
-        // This gives the receiver a genuine weapon-graph pulse without ever
-        // allowing the local AI task to create a damaging duplicate bullet.
+        // TASK_SHOOT_AT_COORD is the only stable SDK task that advances the weapon AnimGraph into a firing/recoil branch.
+        // Empty both total and clip first, keep the task shorter than the ammo suppression lease, and render the actual report/projectile separately at zero damage.
+        // This gives the receiver a genuine weapon-graph pulse without ever allowing the local AI task to create a damaging duplicate bullet.
         WEAPON::SET_PED_AMMO(actor, currentWeapon, 0);
         (void)WEAPON::SET_AMMO_IN_CLIP(actor, currentWeapon, 0);
         AI::TASK_SHOOT_AT_COORD(
@@ -2779,10 +2708,8 @@ void ScriptHookSdkFacade::RefreshRemotePlayerActionDerivedState() noexcept {
         channelActive(PlayerActionKind::MeleeBlock);
     remoteActionGrappleActive_ =
         channelActive(PlayerActionKind::Grapple);
-    // Begin visual ownership as soon as the authenticated throw transaction
-    // exists. Waiting for PhysicalTargetEffect meant the receiver never ran
-    // TASK_LASSO_PED until after the sender had already caught its local
-    // proxy, so the remote screen could not show the wind-up, throw or rope.
+    // Begin visual ownership as soon as the authenticated throw transaction exists.
+    // Waiting for PhysicalTargetEffect meant the receiver never ran TASK_LASSO_PED until after the sender had already caught its local proxy, so the remote screen could not show the wind-up, throw or rope.
     remoteActionLassoActive_ =
         channelActive(PlayerActionKind::Lasso) ||
         channelActive(PlayerActionKind::Hogtie);
@@ -2807,10 +2734,8 @@ void ScriptHookSdkFacade::CancelRemoteMeleeVisual(
         if (actor != 0 &&
             ENTITY::DOES_ENTITY_EXIST(actor) != FALSE &&
             PED::IS_PED_ON_MOUNT(actor) == FALSE) {
-            // TASK_STAND_STILL(1) leaves the autonomous melee task alive in
-            // parts of RDR2's combat graph. An immediate primary/secondary
-            // cleanup is intentional at this transaction boundary; the
-            // locomotion driver reacquires the proxy on its next transform.
+            // TASK_STAND_STILL(1) leaves the autonomous melee task alive in parts of RDR2's combat graph.
+            // An immediate primary/secondary cleanup is intentional at this transaction boundary; the locomotion driver reacquires the proxy on its next transform.
             AI::CLEAR_PED_TASKS_IMMEDIATELY(actor, FALSE, TRUE);
             AI::CLEAR_PED_SECONDARY_TASK(actor);
             PED::SET_PED_KEEP_TASK(actor, FALSE);
@@ -3355,9 +3280,8 @@ void ScriptHookSdkFacade::ConsumeReachedRemoteWaypoints(
         const auto distance = HorizontalDistance(
             currentPosition,
             waypoint.position);
-        // Prefer the newest equally-close point. This is important when a
-        // route doubles back near itself: the puppet advances instead of
-        // selecting an older point behind its current progress.
+        // Prefer the newest equally-close point.
+        // This is important when a route doubles back near itself: the puppet advances instead of selecting an older point behind its current progress.
         if (std::isfinite(distance) &&
             distance <= closestDistance) {
             closestDistance = distance;
@@ -3589,6 +3513,7 @@ RuntimeMode ScriptHookSdkFacade::QueryRuntimeMode() noexcept {
 }
 
 std::optional<LocalPlayerSample>
+// Reads the local RDR2 player once per tick and turns it into the safe shared player snapshot that the Bridge can send to the multiplayer Sidecar.
 ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
     const auto ped = PLAYER::PLAYER_PED_ID();
@@ -3612,12 +3537,10 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
         (rawHealthFraction <= kGuestLocalHazardGuardHealthFraction ||
          localPedDeadOrDying) &&
         noTrackedPhysicalDamage) {
-        // A guest can still have chapter-specific boundary/weather scripts
-        // from its private save. They commonly write health/ragdoll directly
-        // and therefore have no ped/object/vehicle damage owner. Intercept the
-        // drain well above zero; the old 5% guard was too late for the Chapter
-        // 1 "weather too harsh" script and the checkpoint reload had already
-        // started. Physical ped/object/vehicle damage remains authoritative.
+        // A guest can still have chapter-specific boundary/weather scripts from its private save.
+        // They commonly write health/ragdoll directly and therefore have no ped/object/vehicle damage owner.
+        // Intercept the drain well above zero; the old 5% guard was too late for the Chapter 1 "weather too harsh" script and the checkpoint reload had already started.
+        // Physical ped/object/vehicle damage remains authoritative.
         if (localPedDeadOrDying || health <= 0.0F) {
             PED::RESURRECT_PED(ped);
             AI::CLEAR_PED_TASKS_IMMEDIATELY(
@@ -3655,10 +3578,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
         sample.desiredMoveBlendValid
             ? desiredMoveBlend
             : 0.0F;
-    // The spectator barrier parks the real Story ped above its saved point so
-    // it cannot enter the local mission trigger. That quarantine is strictly
-    // local: publishing it made the host see the guest exactly 180 metres
-    // away, fire the mission bubble and issue unnecessary rescue teleports.
+    // The spectator barrier parks the real Story ped above its saved point so it cannot enter the local mission trigger.
+    // That quarantine is strictly local: publishing it made the host see the guest exactly 180 metres away, fire the mission bubble and issue unnecessary rescue teleports.
     if (missionSpectatorActive_ &&
         IsFinite(missionSpectatorSavedPosition_) &&
         std::isfinite(missionSpectatorSavedHeading_)) {
@@ -3684,10 +3605,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
     sample.vehicleEntryTransition =
         PED::IS_PED_GETTING_INTO_A_VEHICLE(ped) != FALSE;
     sample.minigameActive = GAMEPLAY::IS_MINIGAME_IN_PROGRESS() != FALSE;
-    // Keep this signal limited to camera/fade presentation. Mission-owned
-    // locks, AnimScenes, QTEs, and scripted mounting are classified and
-    // debounced in BridgeRuntime, where they can be distinguished from a
-    // normal free-roam interaction.
+    // Keep this signal limited to camera/fade presentation.
+    // Mission-owned locks, AnimScenes, QTEs, and scripted mounting are classified and debounced in BridgeRuntime, where they can be distinguished from a normal free-roam interaction.
     sample.cutsceneActive =
         CAM::IS_CINEMATIC_CAM_RENDERING() != FALSE ||
         sample.screenTransition;
@@ -3695,10 +3614,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
         realtimePolicyActive_ && maximumHealth > 0.0F &&
         health > 0.0F &&
         sample.healthFraction <= kDownedLethalGuardHealthFraction;
-    // localDownedPolicyActive_ is an output latch maintained by the bridge,
-    // not an engine observation. Feeding it back into sample.downed made the
-    // lifecycle self-latching forever: even a newly respawned, healthy ped
-    // could never satisfy the bridge's 1500 ms recovery confirmation.
+    // localDownedPolicyActive_ is an output latch maintained by the bridge, not an engine observation.
+    // Feeding it back into sample.downed made the lifecycle self-latching forever: even a newly respawned, healthy ped could never satisfy the bridge's 1500 ms recovery confirmation.
     sample.downed =
         lethalGuardThresholdReached ||
         health <= 0.0F ||
@@ -3720,10 +3637,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
                 remoteMountReplicas_.FindNetwork(
                     static_cast<LocalEntityHandle>(ownedMount));
             if (peerMountId.has_value()) {
-                // Sitting on the peer's replicated horse does not transfer
-                // ownership. Preserve its shared network identity so the
-                // receiver attaches the rider to its existing local horse
-                // instead of spawning a second horse at the same position.
+                // Sitting on the peer's replicated horse does not transfer ownership.
+                // Preserve its shared network identity so the receiver attaches the rider to its existing local horse instead of spawning a second horse at the same position.
                 borrowedPeerMount = true;
                 sharedMountEntityId = *peerMountId;
                 sharedMountGeneration =
@@ -3882,8 +3797,7 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
         if (mount.modelHash != 0U &&
             IsFinite(mount.position) &&
             IsFinite(mount.velocity)) {
-            // Keep the spectator staging offset out of the shared mount state
-            // for the same reason as the player transform above.
+            // Keep the spectator staging offset out of the shared mount state for the same reason as the player transform above.
             if (missionSpectatorActive_ &&
                 IsFinite(missionSpectatorSavedPosition_) &&
                 std::isfinite(missionSpectatorSavedHeading_)) {
@@ -3894,10 +3808,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
             sample.mount = mount;
         }
     }
-    // A wagon is represented through the same relationship lane as a mount:
-    // one endpoint owns the local physics (the driver) while the other is
-    // assigned a seat in its own non-networked replica.  Never publish a
-    // process-local vehicle handle.
+    // A wagon is represented through the same relationship lane as a mount: one endpoint owns the local physics (the driver) while the other is assigned a seat in its own non-networked replica.
+    // Never publish a process-local vehicle handle.
     if (PED::IS_PED_IN_ANY_VEHICLE(ped, FALSE) != FALSE) {
         const auto vehicle = PED::GET_VEHICLE_PED_IS_IN(ped, FALSE);
         if (vehicle != 0 && ENTITY::DOES_ENTITY_EXIST(vehicle) != FALSE) {
@@ -3980,11 +3892,9 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
             Distance(sample.position, peerPosition) <=
                 kPeerMountPullMaximumDistanceMeters;
     }
-    // Target acquisition alone also stays true while the player blocks. The
-    // old sampler therefore told the other PC to punch on every snapshot,
-    // stole the locomotion graph and made R look like another attack. Carry
-    // input intent separately and keep a short attack latch so a 20 Hz stream
-    // cannot miss a single click.
+    // Target acquisition alone also stays true while the player blocks.
+    // The old sampler therefore told the other PC to punch on every snapshot, stole the locomotion graph and made R look like another attack.
+    // Carry input intent separately and keep a short attack latch so a 20 Hz stream cannot miss a single click.
     const auto controlPressed = [](const int control) noexcept {
         return CONTROLS::IS_CONTROL_PRESSED(
                    kInputGroupGameplay,
@@ -4020,10 +3930,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
         (meleeTargetsPeer &&
          controlPressed(kInputAttack)) ||
         controlPressed(kInputMeleeGrappleAttack);
-    // RDR2 multiplexes the right-mouse context prompt with melee/grapple
-    // controls. Treat that input as combat only after the context owner has
-    // released it; otherwise merely looking at a talkable NPC can enable the
-    // peer-combat isolation that calls SET_EVERYONE_IGNORE_PLAYER.
+    // RDR2 multiplexes the right-mouse context prompt with melee/grapple controls.
+    // Treat that input as combat only after the context owner has released it; otherwise merely looking at a talkable NPC can enable the peer-combat isolation that calls SET_EVERYONE_IGNORE_PLAYER.
     const bool meleeAttackInput =
         rawMeleeAttackInput && !sample.interactionHeld &&
         !ownMountInteractionNearby;
@@ -4117,10 +4025,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
     }
     if (peerCombatInRange && meleeGrapplingInputEdge &&
         !sample.interactionHeld && !ownMountInteractionNearby) {
-        // Paired grapple clips are selected only by the attacker's local RDR2
-        // task graph. Publish a victim-owned knockdown immediately on the
-        // deliberate grapple edge so the other PC cannot remain walking while
-        // the attacker already sees a pin/tackle.
+        // Paired grapple clips are selected only by the attacker's local RDR2 task graph.
+        // Publish a victim-owned knockdown immediately on the deliberate grapple edge so the other PC cannot remain walking while the attacker already sees a pin/tackle.
         sample.peerCombatTarget = true;
         localPeerKnockdownLatchUntilMs_ =
             now + kLocalPeerKnockdownLatchMilliseconds;
@@ -4155,9 +4061,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
     const bool nativeGoingIntoCover =
         PED::IS_PED_GOING_INTO_COVER(ped) != FALSE;
     if (nativeInCover || nativeGoingIntoCover) {
-        // GOING_INTO_COVER may exist for less than one 20 Hz snapshot. Keep a
-        // short semantic lease so the receiving PC always sees at least one
-        // complete cover acquisition instead of a lost Q transition.
+        // GOING_INTO_COVER may exist for less than one 20 Hz snapshot.
+        // Keep a short semantic lease so the receiving PC always sees at least one complete cover acquisition instead of a lost Q transition.
         localCoverSemanticUntilMs_ =
             now + kLocalCoverSemanticHoldMilliseconds;
     } else if (sample.mounted) {
@@ -4201,9 +4106,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
     sample.ragdoll = PED::IS_PED_RAGDOLL(ped) != FALSE;
     sample.gettingUp = AI::IS_PED_GETTING_UP(ped) != FALSE;
 
-    // Keep a forward capsule probe warm before the player presses jump. Shape
-    // tests complete asynchronously, so probing only after IS_PED_CLIMBING
-    // would discover the obstacle after the takeoff context had already gone.
+    // Keep a forward capsule probe warm before the player presses jump.
+    // Shape tests complete asynchronously, so probing only after IS_PED_CLIMBING would discover the obstacle after the takeoff context had already gone.
     if (localTraversalProbeHandle_ != 0) {
         BOOL hit{};
         Vector3 hitPoint{};
@@ -4361,11 +4265,9 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
             "[VICTIM_CONSTRAINT] local peer proxy entered ragdoll inside the recent combat window; publishing authoritative knockdown");
     }
     previousRemoteReplicaRagdolled_ = remoteReplicaRagdolled;
-    // Do not treat merely aiming a lasso as a hit. The attacker's local RDR2
-    // instance first has to put the target proxy into ragdoll; only then is
-    // the restraint latched and forwarded. It stays latched if the hogtie
-    // sequence temporarily changes the selected weapon, and clears when the
-    // local target proxy is no longer physically restrained.
+    // Do not treat merely aiming a lasso as a hit.
+    // The attacker's local RDR2 instance first has to put the target proxy into ragdoll; only then is the restraint latched and forwarded.
+    // It stays latched if the hogtie sequence temporarily changes the selected weapon, and clears when the local target proxy is no longer physically restrained.
     if (sample.weaponHash == kWeaponLasso &&
         remoteReplicaRestrained) {
         localPeerLassoLatched_ = true;
@@ -4433,9 +4335,8 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
         }
     }
     if (lassoAimCorridorTargetsPeer) {
-        // RDR2 can report no aimed entity during the wind-up even though the
-        // camera ray already crosses the peer. Name the peer on Begin so the
-        // receiver does not start TASK_LASSO_PED several Sustain packets late.
+        // RDR2 can report no aimed entity during the wind-up even though the camera ray already crosses the peer.
+        // Name the peer on Begin so the receiver does not start TASK_LASSO_PED several Sustain packets late.
         sample.peerCombatTarget = true;
     }
     if (lassoThrowInput) {
@@ -4522,9 +4423,8 @@ ScriptHookSdkFacade::SampleLocalAppearance(
             return std::nullopt;
         }
 
-        // Stable FNV-1a over the model and the ordered shop-item list. The
-        // fingerprint is only a change detector; it is never treated as a
-        // pointer or as an engine identifier.
+        // Stable FNV-1a over the model and the ordered shop-item list.
+        // The fingerprint is only a change detector; it is never treated as a pointer or as an engine identifier.
         std::uint64_t fingerprint = 1'469'598'103'934'665'603ULL;
         const auto mix = [&fingerprint](const std::uint32_t value) {
             for (unsigned int shift = 0U; shift < 32U; shift += 8U) {
@@ -4565,6 +4465,8 @@ ScriptHookSdkFacade::SampleLocalAppearance(
 }
 
 std::optional<AnimSceneReplicaStatePayload>
+// Host-only observation of a Story animation scene.
+// It samples portable facts for the guest rather than sending the RDR2 scene handle or private script.
 ScriptHookSdkFacade::SampleHostAnimScene(
     const NetEntityId hostEntityId,
     const std::uint32_t missionEpoch,
@@ -4581,10 +4483,8 @@ ScriptHookSdkFacade::SampleHostAnimScene(
             if (scene <= 0 || DoesAnimSceneExist(scene) == FALSE) {
                 return false;
             }
-            // Only a scene that currently owns an authored camera is a safe
-            // transport candidate. Ambient/scenario AnimScenes can remain
-            // running for minutes and must not pin the probe to the wrong
-            // dictionary while a mission cutscene starts.
+            // Only a scene that currently owns an authored camera is a safe transport candidate.
+            // Ambient/scenario AnimScenes can remain running for minutes and must not pin the probe to the wrong dictionary while a mission cutscene starts.
             return GetAnimSceneActiveCameraCount(scene) > 0;
         };
         if (!sceneUsable(hostAnimSceneHandle_)) {
@@ -4742,12 +4642,9 @@ ScriptHookSdkFacade::DrainCapturedAnimSceneDefinitions() noexcept {
                     ENTITY::DOES_ENTITY_EXIST(entity) == FALSE) {
                     role.localHandle = 0;
                     role.modelHash = 0U;
-                    // Story scenes commonly release scene-local props
-                    // immediately after START. Their captured role names are
-                    // still useful to the guest resource, but there is no
-                    // stable world handle to replicate. Keep actor-looking
-                    // roles fail-closed while classifying the canonical RDR2
-                    // prop/weapon prefixes as optional object bindings.
+                    // Story scenes commonly release scene-local props immediately after START.
+                    // Their captured role names are still useful to the guest resource, but there is no stable world handle to replicate.
+                    // Keep actor-looking roles fail-closed while classifying the canonical RDR2 prop/weapon prefixes as optional object bindings.
                     if (role.roleName.starts_with("p_") ||
                         role.roleName.starts_with("w_")) {
                         role.kind = AnimSceneRoleKind::Object;
@@ -4827,6 +4724,7 @@ ScriptHookSdkFacade::FindKnownReplicaNetworkId(
 }
 
 std::optional<MissionCameraSample>
+// Samples the host camera during a mission transition for guest presentation.
 ScriptHookSdkFacade::SampleMissionCamera() noexcept {
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
@@ -4897,15 +4795,13 @@ ScriptHookSdkFacade::SampleMissionCamera() noexcept {
 }
 
 std::optional<MissionObjectiveSample>
+// Reads the visible Story objective text so the host can mirror it to the guest without exposing mission-script internals.
 ScriptHookSdkFacade::SampleMissionObjective() noexcept {
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
-        // _UILOG_GET_CACHED_OBJECTIVE (0x15A4461BEB788096) is a read-only
-        // UILOG native present in the newer native declaration supplied for
-        // validation. The bundled SDK predates that declaration, so retain it
-        // behind the same explicit unverified-binding flag as the other
-        // Story-facing calls. We copy a bounded printable value immediately;
-        // no game pointer crosses the facade or network boundary.
+        // _UILOG_GET_CACHED_OBJECTIVE (0x15A4461BEB788096) is a read-only UILOG native present in the newer native declaration supplied for validation.
+        // The bundled SDK predates that declaration, so retain it behind the same explicit unverified-binding flag as the other Story-facing calls.
+        // We copy a bounded printable value immediately; no game pointer crosses the facade or network boundary.
         const auto raw = invoke<char*>(0x15A4461BEB788096ULL);
         const auto text = CopyNativeAsciiString(
             static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(raw)),
@@ -4922,6 +4818,8 @@ ScriptHookSdkFacade::SampleMissionObjective() noexcept {
 }
 
 std::vector<MissionDialogueSample>
+// Finds an approved host dialogue cue for this exact mission.
+// The Bridge sends catalogue IDs only, never an arbitrary native conversation request.
 ScriptHookSdkFacade::SampleMissionDialogue(const std::uint32_t missionId) noexcept {
     std::vector<MissionDialogueSample> samples;
     try {
@@ -4939,10 +4837,8 @@ ScriptHookSdkFacade::SampleMissionDialogue(const std::uint32_t missionId) noexce
             const bool playing = ::invoke<BOOL>(
                 0x1ECC76792F661CF5ULL, root) != FALSE;
             if (!loaded && !playing) continue;
-            // The mission script itself creates the root only after binding
-            // its own cast with ADD_PED_TO_CONVERSATION. A created, loaded
-            // root is therefore evidence of that local binding; this bridge
-            // never tries to discover handles or bind actors independently.
+            // The mission script itself creates the root only after binding its own cast with ADD_PED_TO_CONVERSATION.
+            // A created, loaded root is therefore evidence of that local binding; this bridge never tries to discover handles or bind actors independently.
             samples.push_back(MissionDialogueSample{
                 CampaignMissionDialogueProfileId(missionId),
                 static_cast<std::uint32_t>(GAMEPLAY::GET_HASH_KEY(root)),
@@ -5087,12 +4983,9 @@ ScriptHookSdkFacade::SampleLocalAnimationState(
             locomotionEpoch,
             sampleSequence};
 
-        // The SDK cannot enumerate the active locomotion graph's clips. Read
-        // the deepest stable native state that is actually available and mark
-        // it explicitly as LocomotionNative rather than pretending it came
-        // from the versioned memory reader. A scripted move network is common
-        // in camps and missions; it must not suppress this safe native sample
-        // or the receiver keeps an old Idle state and slides the replica.
+        // The SDK cannot enumerate the active locomotion graph's clips.
+        // Read the deepest stable native state that is actually available and mark it explicitly as LocomotionNative rather than pretending it came from the versioned memory reader.
+        // A scripted move network is common in camps and missions; it must not suppress this safe native sample or the receiver keeps an old Idle state and slides the replica.
         const auto desiredMoveBlend =
             AI::GET_PED_DESIRED_MOVE_BLEND_RATIO(ped);
         const bool desiredMoveBlendValid =
@@ -5243,9 +5136,8 @@ ScriptHookSdkFacade::SampleAmbientEncounterObservation() noexcept {
         }
         if (nearest == nullptr) return std::nullopt;
 
-        // The anchor and seed are bounded local evidence. The host still
-        // checks peer distance, Story/cinematic state and the one-active-event
-        // rule before this can become a shared activity.
+        // The anchor and seed are bounded local evidence.
+        // The host still checks peer distance, Story/cinematic state and the one-active-event rule before this can become a shared activity.
         const auto seed = nearest->scriptId ^
             static_cast<std::uint32_t>(std::lround(nearestPosition.x * 10.0F)) ^
             (static_cast<std::uint32_t>(std::lround(nearestPosition.y * 10.0F)) << 1U);
@@ -5308,10 +5200,9 @@ bool ScriptHookSdkFacade::BeginAmbientEncounterPresentation(
                 ambientEncounterPresentation_->instanceId);
         }
 
-        // A shared encounter has one physical authority.  The host creates
-        // the actors once; the guest receives them through WorldMirror, where
-        // its normal DamageIntent path can still affect the host actors.  A
-        // second guest-local roster would create two fights and two outcomes.
+        // A shared encounter has one physical authority.
+        // The host creates the actors once; the guest receives them through WorldMirror, where its normal DamageIntent path can still affect the host actors.
+        // A second guest-local roster would create two fights and two outcomes.
         if (!instance.localAuthority) {
             return true;
         }
@@ -5371,12 +5262,9 @@ bool ScriptHookSdkFacade::BeginAmbientEncounterPresentation(
                 }
             }
         }
-        // Host-originated scenes use their observed source cast for the
-        // visual replacement. A guest-originated generic proposal can still
-        // be adopted when the host has no matching local beat: use the host
-        // player's loaded Story model and create no source mask. Exact
-        // adaptations and animal scenes stay fail-closed without their local
-        // source species evidence.
+        // Host-originated scenes use their observed source cast for the visual replacement.
+        // A guest-originated generic proposal can still be adopted when the host has no matching local beat: use the host player's loaded Story model and create no source mask.
+        // Exact adaptations and animal scenes stay fail-closed without their local source species evidence.
         if ((exactExtortion && sourcePeds.empty()) ||
             (instance.profile == AmbientEncounterProfile::AnimalAttack &&
              sourceAnimalModels.empty())) {
@@ -5468,10 +5356,8 @@ bool ScriptHookSdkFacade::BeginAmbientEncounterPresentation(
                     WEAPON::SET_CURRENT_PED_WEAPON(
                         ped, cattleman, TRUE, 0, FALSE, FALSE);
                 }
-                // The host is the only physical authority. Its combat task
-                // is mirrored to the guest as ordinary bridge-owned proxies;
-                // guest damage returns through the authenticated DamageIntent
-                // lane, so a second local combat simulation is never created.
+                // The host is the only physical authority.
+                // Its combat task is mirrored to the guest as ordinary bridge-owned proxies; guest damage returns through the authenticated DamageIntent lane, so a second local combat simulation is never created.
                 AI::TASK_COMBAT_PED(ped, local, 0, 0);
             } else {
                 AI::TASK_STAND_STILL(ped, 60'000);
@@ -5479,9 +5365,8 @@ bool ScriptHookSdkFacade::BeginAmbientEncounterPresentation(
         }
 
         // The detected Rockstar actors remain owned by their local script.
-        // During the bridge scene only, mask them reversibly so the player
-        // does not see two copies. Never delete, damage, reward or otherwise
-        // advance those source actors.
+        // During the bridge scene only, mask them reversibly so the player does not see two copies.
+        // Never delete, damage, reward or otherwise advance those source actors.
         for (const auto source : sourcePeds) {
             if (source == 0 || ENTITY::DOES_ENTITY_EXIST(source) == FALSE) {
                 continue;
@@ -5660,6 +5545,7 @@ void ScriptHookSdkFacade::ClearAmbientEncounterPresentation(
 }
 
 std::vector<HostWorldEntitySample>
+// Host scans nearby RDR2 entities and produces the small state snapshots used by WorldMirror to decide which NPC/object proxies the guest should have.
 ScriptHookSdkFacade::SampleWorldEntities(
     const float radiusMeters,
     const std::size_t maximumEntities) noexcept {
@@ -5756,8 +5642,7 @@ ScriptHookSdkFacade::SampleWorldEntities(
             }
             if (static_cast<LocalEntityHandle>(ped) ==
                 localKnownMountHandle_) {
-                // The active player horse has its own PlayerMountState lane;
-                // mirroring it here would create a duplicate mount proxy.
+                // The active player horse has its own PlayerMountState lane; mirroring it here would create a duplicate mount proxy.
                 ++rejectedPlayerMount;
                 continue;
             }
@@ -5774,14 +5659,10 @@ ScriptHookSdkFacade::SampleWorldEntities(
                     ? static_cast<std::size_t>(populationType)
                     : 8U;
             ++populationHistogram[populationBucket];
-            // Script-owned shopkeepers, side interactions and mission actors
-            // may exist while the coarse global mission flag is false. Treat
-            // entity ownership itself as authoritative admission metadata.
-            // Bridge-owned encounter actors are deliberately not advertised
-            // as Story script actors even though we retain them as mission
-            // entities for safe cleanup.  That keeps guest damage on the
-            // ordinary ambient DamageIntent path rather than the much more
-            // restrictive mission-actor path.
+            // Script-owned shopkeepers, side interactions and mission actors may exist while the coarse global mission flag is false.
+            // Treat entity ownership itself as authoritative admission metadata.
+            // Bridge-owned encounter actors are deliberately not advertised as Story script actors even though we retain them as mission entities for safe cleanup.
+            // That keeps guest damage on the ordinary ambient DamageIntent path rather than the much more restrictive mission-actor path.
             const bool bridgeOwnedEncounterEntity =
                 ambientEncounterPresentation_.has_value() &&
                 std::ranges::find(
@@ -5794,12 +5675,9 @@ ScriptHookSdkFacade::SampleWorldEntities(
                 ENTITY::IS_ENTITY_VISIBLE(ped) != FALSE &&
                 ENTITY::GET_ENTITY_ALPHA(ped) > 0;
             if (!cinematicPresentationActive && !visibleEntity) {
-                // RDR2 keeps cached process-owned horses and actors in the
-                // ped pool with mission ownership after they have been hidden
-                // locally. Mirroring those entries made them appear as random
-                // horses on a newly joined guest. A live cinematic may hide
-                // its cast transiently, so only apply this admission filter
-                // outside cinematic presentation.
+                // RDR2 keeps cached process-owned horses and actors in the ped pool with mission ownership after they have been hidden locally.
+                // Mirroring those entries made them appear as random horses on a newly joined guest.
+                // A live cinematic may hide its cast transiently, so only apply this admission filter outside cinematic presentation.
                 ++rejectedInvisible;
                 continue;
             }
@@ -5819,9 +5697,8 @@ ScriptHookSdkFacade::SampleWorldEntities(
             const bool horse =
                 !reliableHuman &&
                 CanPedBeMounted(ped) != FALSE;
-            // Some scripted MetaPeds temporarily report a non-human species
-            // while their mission outfit/graph is being assembled. They are
-            // still mission actors and must not vanish from the host graph.
+            // Some scripted MetaPeds temporarily report a non-human species while their mission outfit/graph is being assembled.
+            // They are still mission actors and must not vanish from the host graph.
             const bool human =
                 reliableHuman ||
                 ((scriptOwnedEntity || bridgeOwnedEncounterEntity) && !horse);
@@ -5972,8 +5849,7 @@ ScriptHookSdkFacade::SampleWorldEntities(
                     WorldEntityStateFlag::Firing);
             if ((flags & humanFlag) == 0U) {
                 // Animal weapon slots may report internal/unarmed hashes.
-                // They are not portable weapon identities and would violate
-                // the wire contract.
+                // They are not portable weapon identities and would violate the wire contract.
                 weaponHash = 0U;
                 flags &= ~weaponActionFlags;
             } else if (weaponHash == 0U) {
@@ -6021,10 +5897,8 @@ ScriptHookSdkFacade::SampleWorldEntities(
             } else if (
                 cinematicPresentationActive &&
                 scriptOwnedEntity) {
-                // A Story AnimScene owns the actor graph. Do not replace it
-                // with TASK_STAND_STILL on the guest; the cinematic lane
-                // carries the authoritative root at camera frequency while
-                // leaving the local visual graph free for future clip data.
+                // A Story AnimScene owns the actor graph.
+                // Do not replace it with TASK_STAND_STILL on the guest; the cinematic lane carries the authoritative root at camera frequency while leaving the local visual graph free for future clip data.
                 taskKind = WorldTaskKind::Cinematic;
             } else if (
                 targetSlot !=
@@ -6049,9 +5923,8 @@ ScriptHookSdkFacade::SampleWorldEntities(
             } else if (usesScenario && !moving) {
                 taskKind = WorldTaskKind::Scenario;
             } else if (moving) {
-                // Movement outranks the blip heuristic. Story actors commonly
-                // retain a blip while walking; classifying those actors as a
-                // scenario made the guest stand still and periodically warp.
+                // Movement outranks the blip heuristic.
+                // Story actors commonly retain a blip while walking; classifying those actors as a scenario made the guest stand still and periodically warp.
                 taskKind = WorldTaskKind::Locomotion;
             } else if (hasEntityBlip || usesScenario) {
                 taskKind = WorldTaskKind::Scenario;
@@ -6084,8 +5957,7 @@ ScriptHookSdkFacade::SampleWorldEntities(
                 selectionPriority =
                     HostWorldEntityPriority::Combat;
             } else if (usesScenario) {
-                // Scenarios cover generic service/interaction actors without
-                // hard-coding mission or shopkeeper model hashes.
+                // Scenarios cover generic service/interaction actors without hard-coding mission or shopkeeper model hashes.
                 selectionPriority =
                     HostWorldEntityPriority::Interactive;
             } else if (parentLocalHandle != 0) {
@@ -6129,13 +6001,9 @@ ScriptHookSdkFacade::SampleWorldEntities(
                 targetSlot != WorldCombatTargetSlot::None ? 1U : 0U;
         }
 
-        // AnimScenes frequently bind chairs, weapons, bottles and cigarettes
-        // as required named roles. The generic world mirror used to carry
-        // only peds, so those roles had no NetEntityId and the guest tried to
-        // load an incomplete definition forever. Mirror only object handles
-        // observed in the currently started captured Story scene; this keeps
-        // the normal world bubble bounded and avoids replicating ambient
-        // debris.
+        // AnimScenes frequently bind chairs, weapons, bottles and cigarettes as required named roles.
+        // The generic world mirror used to carry only peds, so those roles had no NetEntityId and the guest tried to load an incomplete definition forever.
+        // Mirror only object handles observed in the currently started captured Story scene; this keeps the normal world bubble bounded and avoids replicating ambient debris.
         std::size_t animSceneObjectCandidates{};
         for (const auto localHandle :
              g_storyVmAnimSceneCapture.ActiveRoleEntityHandles()) {
@@ -6350,10 +6218,14 @@ ScriptHookSdkFacade::SampleWorldEntities(
 }
 
 std::optional<DamageIntentPayload>
+// Guest detects an attempted shot at a mapped world proxy.
+// It reports intent to the host; it does not damage the guest's local fake NPC by itself.
 ScriptHookSdkFacade::SampleWorldDamageIntent(
     const NetEntityId attackerId) noexcept {
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        // The guest does not hurt this NPC copy directly.
+        // It sees a valid shot and asks the host to hurt the real NPC instead.
         if (!attackerId.IsValid()) {
             return std::nullopt;
         }
@@ -6365,6 +6237,7 @@ ScriptHookSdkFacade::SampleWorldDamageIntent(
         }
 
         const auto now = TickMilliseconds();
+        // Do not send one damage request every game frame while the trigger is held.
         if (previousWorldDamageIntentMs_ != 0U &&
             now >= previousWorldDamageIntentMs_ &&
             now - previousWorldDamageIntentMs_ <
@@ -6373,6 +6246,8 @@ ScriptHookSdkFacade::SampleWorldDamageIntent(
         }
 
         Entity target{};
+        // This only sees free-aim shots at an NPC copy we know about.
+        // Melee, explosions, blind fire, and random shots are not handled here.
         if (PLAYER::GET_ENTITY_PLAYER_IS_FREE_AIMING_AT(
                 PLAYER::PLAYER_ID(),
                 &target) == FALSE ||
@@ -6447,10 +6322,8 @@ MenuInputState ScriptHookSdkFacade::ReadMenuInput() noexcept {
         .down = Pressed(VK_DOWN),
         .left = Pressed(VK_LEFT),
         .right = Pressed(VK_RIGHT),
-        // Some virtual-key input sources (including accessibility remoting)
-        // do not surface their Return event as VK_RETURN to GetAsyncKeyState.
-        // Space is the conventional alternate menu-confirm key and gives the
-        // emergency/test panel an equivalent, reliable activation path.
+        // Some virtual-key input sources (including accessibility remoting) do not surface their Return event as VK_RETURN to GetAsyncKeyState.
+        // Space is the conventional alternate menu-confirm key and gives the emergency/test panel an equivalent, reliable activation path.
         .confirm = Pressed(VK_RETURN) || Pressed(VK_SPACE),
         .cancel = Pressed(VK_ESCAPE)};
 }
@@ -7072,8 +6945,7 @@ void ScriptHookSdkFacade::DrawPauseVoteStatus(
         (void)state;
 #endif
     } catch (...) {
-        // The synchronized pause remains usable through raw Escape even if
-        // the optional status overlay cannot be rendered.
+        // The synchronized pause remains usable through raw Escape even if the optional status overlay cannot be rendered.
     }
 }
 
@@ -7113,10 +6985,11 @@ void ScriptHookSdkFacade::ShowMissionBubbleWarning(
     }
 }
 
+// Performs a command requested by the local in-game menu after the Bridge has turned the button press into a safe local command.
 bool ScriptHookSdkFacade::ExecuteCommand(
     const BridgeCommand command) noexcept {
-    // No memory writes or pattern scans are allowed. Game actions remain
-    // disabled until their public native calls are validated for 1491.50.
+    // No memory writes or pattern scans are allowed.
+    // Game actions remain disabled until their public native calls are validated for 1491.50.
     switch (command) {
         case BridgeCommand::GrantTestPistol: {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
@@ -7181,9 +7054,8 @@ bool ScriptHookSdkFacade::ExecuteCommand(
                 }
                 const auto lasso =
                     static_cast<Hash>(kWeaponLasso);
-                // IS_WEAPON_VALID is not a reliable gate for utility weapons
-                // in the prologue. Force the delayed grant and equip it now;
-                // this is the same path used by the working remote lasso actor.
+                // IS_WEAPON_VALID is not a reliable gate for utility weapons in the prologue.
+                // Force the delayed grant and equip it now; this is the same path used by the working remote lasso actor.
                 WEAPON::GIVE_DELAYED_WEAPON_TO_PED(
                     ped,
                     lasso,
@@ -7337,11 +7209,12 @@ bool ScriptHookSdkFacade::ExecuteCommand(
     return false;
 }
 
+// Applies a Sidecar-approved command arriving through the local pipe.
+// This is where network instructions finally become RDR2 actions on this machine.
 bool ScriptHookSdkFacade::ApplyNetworkCommand(
     const CommandPayload& command) noexcept {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
-    // UNVERIFIED_NATIVE_BINDING: all calls below use official SDK wrappers,
-    // but their runtime behavior still needs validation on pinned build 1491.50.
+    // UNVERIFIED_NATIVE_BINDING: all calls below use official SDK wrappers, but their runtime behavior still needs validation on pinned build 1491.50.
     switch (command.opcode) {
         case CommandOpcode::SpawnReplica: {
             if (!command.target.IsValid() ||
@@ -7388,9 +7261,8 @@ bool ScriptHookSdkFacade::ApplyNetworkCommand(
                 }
             }
             if (replica == 0) {
-                // Fail safely on an unexpected model-loading edge case. The
-                // clone path retains the previous behaviour and is reported
-                // in diagnostics so a 2-PC test cannot silently use it.
+                // Fail safely on an unexpected model-loading edge case.
+                // The clone path retains the previous behaviour and is reported in diagnostics so a 2-PC test cannot silently use it.
                 replica = PED::CLONE_PED(
                     sourcePed,
                     command.heading,
@@ -7404,17 +7276,16 @@ bool ScriptHookSdkFacade::ApplyNetworkCommand(
             if (independentPuppet) {
                 SetRandomOutfitVariation(replica);
             }
-            // Keep the native ped audio/animation event graph enabled. The
-            // direct-root replica still uses ordinary movement tasks, so RDR2
-            // can emit its own surface-aware movement events where available.
+            // Keep the native ped audio/animation event graph enabled.
+            // The direct-root replica still uses ordinary movement tasks, so RDR2 can emit its own surface-aware movement events where available.
             PED::SET_PED_CAN_PLAY_AMBIENT_ANIMS(replica, TRUE);
             PED::SET_PED_CAN_PLAY_AMBIENT_BASE_ANIMS(replica, TRUE);
             ENTITY::SET_ENTITY_LOAD_COLLISION_FLAG(replica, TRUE);
             ENTITY::SET_ENTITY_HAS_GRAVITY(replica, FALSE);
             ENTITY::SET_ENTITY_COLLISION(replica, TRUE, TRUE);
             ENTITY::FREEZE_ENTITY_POSITION(replica, TRUE);
-            // The peer replica is a visual/targetable stand-in. Local bullets
-            // may hit it, but health authority always remains remote.
+            // The peer replica is a visual/targetable stand-in.
+            // Local bullets may hit it, but health authority always remains remote.
             ENTITY::SET_ENTITY_CAN_BE_DAMAGED(replica, FALSE);
             ENTITY::SET_ENTITY_VISIBLE(replica, TRUE);
             ENTITY::RESET_ENTITY_ALPHA(replica);
@@ -7428,9 +7299,8 @@ bool ScriptHookSdkFacade::ApplyNetworkCommand(
                 TRUE);
             PED::SET_PED_CAN_RAGDOLL(replica, TRUE);
             PED::REGISTER_TARGET(sourcePed, replica, TRUE);
-            // A fallback clone inherits the local player's friendly
-            // relationship group. Independent puppets also use the private
-            // group so both spawn paths have identical targeting policy.
+            // A fallback clone inherits the local player's friendly relationship group.
+            // Independent puppets also use the private group so both spawn paths have identical targeting policy.
             const auto localRelationship =
                 PED::GET_PED_RELATIONSHIP_GROUP_HASH(
                     sourcePed);
@@ -7636,8 +7506,7 @@ bool ScriptHookSdkFacade::ApplyNetworkCommand(
                 0.0F);
             ENTITY::SET_ENTITY_HEADING(teleportRoot, command.heading);
             if (mountedRoot) {
-                // Prevent residual rider velocity from fighting the mounted
-                // root transform during the following physics step.
+                // Prevent residual rider velocity from fighting the mounted root transform during the following physics step.
                 ENTITY::SET_ENTITY_VELOCITY(
                     localPed,
                     0.0F,
@@ -7698,6 +7567,7 @@ bool ScriptHookSdkFacade::ApplyNetworkCommand(
     return false;
 }
 
+// Replays a reliable jump/climb transaction on the remote player proxy.
 bool ScriptHookSdkFacade::ApplyRemoteTraversal(
     const PlayerTraversalPayload& traversal) noexcept {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
@@ -7746,9 +7616,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTraversal(
         return true;
     }
     if (traversal.actionId == lastRemoteTraversalActionId_) {
-        // The initial revision may already have committed before the sender's
-        // landing revision arrived. Never turn that update into a second
-        // climb at the landing point.
+        // The initial revision may already have committed before the sender's landing revision arrived.
+        // Never turn that update into a second climb at the landing point.
         ++remoteActionTraversalReliableUpdates_;
         return true;
     }
@@ -7798,6 +7667,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTraversal(
 #endif
 }
 
+// Replays a host-approved remote combat/action state, such as lasso, melee, or aiming.
+// It is visual/control replication, not a trust bypass for the guest.
 bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
     const PlayerActionPayload& action) noexcept {
     try {
@@ -7975,11 +7846,9 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
         }
         RefreshRemotePlayerActionDerivedState();
 
-        // EquipmentState normally arrives alongside Aim, but a reliable
-        // action can beat that periodic snapshot. Utility weapons are also
-        // reported as invalid by IS_WEAPON_VALID in parts of the prologue.
-        // Prime the remote actor directly from the authenticated action so
-        // the native lasso graph has a real weapon before aiming/throwing.
+        // EquipmentState normally arrives alongside Aim, but a reliable action can beat that periodic snapshot.
+        // Utility weapons are also reported as invalid by IS_WEAPON_VALID in parts of the prologue.
+        // Prime the remote actor directly from the authenticated action so the native lasso graph has a real weapon before aiming/throwing.
         if ((action.kind == PlayerActionKind::Aim ||
              action.kind == PlayerActionKind::Lasso ||
              action.kind == PlayerActionKind::Hogtie) &&
@@ -8016,10 +7885,9 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
         }
 
         if (terminal) {
-            // The sender normally publishes its melee terminal just before
-            // the receiver reaches impact. Do not clear the native strike at
-            // that point: its bounded visual deadline (or the next action)
-            // owns cleanup. V29.5 cancelled every punch at contact.
+            // The sender normally publishes its melee terminal just before the receiver reaches impact.
+            // Do not clear the native strike at that point: its bounded visual deadline (or the next action) owns cleanup.
+            // V29.5 cancelled every punch at contact.
             if (action.kind == PlayerActionKind::Aim &&
                 !remoteActionLassoActive_ &&
                 actor.has_value() &&
@@ -8045,8 +7913,7 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
             if (action.kind == PlayerActionKind::Crafting &&
                 actor.has_value() &&
                 ENTITY::DOES_ENTITY_EXIST(*actor) != FALSE) {
-                // This is a bridge-owned puppet task, never the local
-                // player's crafting UI or inventory transaction.
+                // This is a bridge-owned puppet task, never the local player's crafting UI or inventory transaction.
                 AI::CLEAR_PED_TASKS(*actor, FALSE, FALSE);
                 PED::SET_PED_KEEP_TASK(*actor, FALSE);
                 ++remotePlayerActionNativeCancels_;
@@ -8215,9 +8082,7 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
                         remotePeerDismountStartedMs_ = now;
                         remotePeerDismountLastAttemptMs_ = now;
                         remotePeerDismountAttempts_ = 1U;
-                        // This transaction is an explicitly tagged mount
-                        // pull, not a generic fall or an overlapping vanilla
-                        // context input.
+                        // This transaction is an explicitly tagged mount pull, not a generic fall or an overlapping vanilla context input.
                         previousPeerLassoRagdollMs_ = now;
                         ++remotePlayerActionDismountRequests_;
                         Log(
@@ -8304,13 +8169,8 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
                                 ", reason=engine-constraint-not-observed");
                         } else if (
                             remotePeerLassoTaskAttempts_ == 2U) {
-                            // The native query is not a reliable completion
-                            // signal for a player-owned victim in every Story
-                            // state. Keep the task as visual owner until the
-                            // authenticated terminal instead of handing the
-                            // ped back to root/aim tasks after two seconds;
-                            // that handoff made the lasso vanish from the
-                            // remote actor's hands in V29.5.
+                            // The native query is not a reliable completion signal for a player-owned victim in every Story state.
+                            // Keep the task as visual owner until the authenticated terminal instead of handing the ped back to root/aim tasks after two seconds; that handoff made the lasso vanish from the remote actor's hands in V29.5.
                             remotePeerLassoTaskAttempts_ = 3U;
                             remotePeerLassoEngineOwned_ = false;
                             ++remotePlayerActionLassoFailed_;
@@ -8338,9 +8198,8 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
                     return true;
                 }
 
-                // A Begin packet can precede target acquisition. Start the
-                // engine-owned rope on the first revision that names the
-                // local victim, not merely on the first action revision.
+                // A Begin packet can precede target acquisition.
+                // Start the engine-owned rope on the first revision that names the local victim, not merely on the first action revision.
                 DeleteRemotePeerLassoRope();
                 constexpr std::array<int, 8> kManagedFlags{
                     0, 2, 3, 4, 7, 8, 9, 11};
@@ -8356,9 +8215,7 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
                     localLassoFlagsCaptured_ = true;
                 }
                 for (const auto flag : kManagedFlags) {
-                    // Flag 9 permits strong pull-over forces and is deliberately
-                    // left at the user's original value; enabling it together
-                    // with network root correction can launch both players.
+                    // Flag 9 permits strong pull-over forces and is deliberately left at the user's original value; enabling it together with network root correction can launch both players.
                     if (flag == 9) {
                         continue;
                     }
@@ -8428,6 +8285,7 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
     }
 }
 
+// Applies the host's final result for revive/mount/dismount/restraint actions.
 bool ScriptHookSdkFacade::ApplyInteractionResult(
     const InteractionResultPayload& result,
     const NetEntityId localEntityId) noexcept {
@@ -8488,10 +8346,8 @@ bool ScriptHookSdkFacade::ApplyInteractionResult(
             if (!result.secondaryEntityId.IsValid()) {
                 return false;
             }
-            // A shared vehicle is resolved only through bridge-owned local
-            // registries.  The wire identity is never treated as an RDR2
-            // handle, which prevents a peer from seating a ped in an
-            // arbitrary local carriage.
+            // A shared vehicle is resolved only through bridge-owned local registries.
+            // The wire identity is never treated as an RDR2 handle, which prevents a peer from seating a ped in an arbitrary local carriage.
             auto vehicleHandle = remoteVehicleReplicas_.FindLocal(
                 result.secondaryEntityId);
             if (!vehicleHandle.has_value() && localKnownVehicleHandle_ != 0) {
@@ -8499,8 +8355,7 @@ bool ScriptHookSdkFacade::ApplyInteractionResult(
             }
             if (!vehicleHandle.has_value() ||
                 ENTITY::DOES_ENTITY_EXIST(*vehicleHandle) == FALSE) {
-                // Horse relationships remain applied by the next
-                // PlayerMountState, as before.
+                // Horse relationships remain applied by the next PlayerMountState, as before.
                 return true;
             }
             const auto rider = result.actorEntityId == localEntityId
@@ -8531,6 +8386,8 @@ bool ScriptHookSdkFacade::ApplyInteractionResult(
     }
 }
 
+// Rebuilds the current lasso/hogtie result from a replicated state snapshot.
+// This lets a reconnect recover without replaying the original interaction.
 bool ScriptHookSdkFacade::ApplyRestraintState(
     const RestraintStatePayload& state,
     const NetEntityId localEntityId) noexcept {
@@ -8552,8 +8409,7 @@ bool ScriptHookSdkFacade::ApplyRestraintState(
         }
         if (state.state == PlayerRestraintState::Free) {
             // A two-player session can own only one peer rope transaction.
-            // Release it on both endpoints: the victim owns its ragdoll while
-            // the attacker may still own the visible rope/task locally.
+            // Release it on both endpoints: the victim owns its ragdoll while the attacker may still own the visible rope/task locally.
             DeleteRemotePeerLassoRope(
                 "authoritative-restraint-free");
             if (state.subjectEntityId != localEntityId) {
@@ -8578,10 +8434,9 @@ bool ScriptHookSdkFacade::ApplyRestraintState(
             }
         }
         if (state.subjectEntityId != localEntityId) {
-            // Do not manufacture a second physical rope or a synthetic
-            // ragdoll. On the attacker's PC the local engine already owns the
-            // rope attached to this proxy. The replicated state only tells
-            // the transform motor to yield until Free arrives.
+            // Do not manufacture a second physical rope or a synthetic ragdoll.
+            // On the attacker's PC the local engine already owns the rope attached to this proxy.
+            // The replicated state only tells the transform motor to yield until Free arrives.
             authoritativeRemoteRestraintRevision_ = state.revision;
             authoritativeRemoteRestraint_ = state.state;
             authoritativeRemoteRestraintSubject_ =
@@ -8811,9 +8666,8 @@ void ScriptHookSdkFacade::ConfigureMotionReplication(
                 PED::IS_PED_JUMPING(*handle) == FALSE &&
                 PED::IS_PED_CLIMBING(*handle) == FALSE &&
                 AI::IS_PED_GETTING_UP(*handle) == FALSE) {
-                // Release the controller owned by the previous mode once. The
-                // AnimGraph/Direct path never starts a navmesh locomotion task;
-                // Task/Navmesh will rebuild its task on its next tick.
+                // Release the controller owned by the previous mode once.
+                // The AnimGraph/Direct path never starts a navmesh locomotion task; Task/Navmesh will rebuild its task on its next tick.
                 AI::CLEAR_PED_TASKS(*handle, TRUE, TRUE);
             }
         }
@@ -8835,6 +8689,7 @@ void ScriptHookSdkFacade::ConfigureMotionReplication(
     }
 }
 
+// Plays the sampled animation state on the remote player replica between position updates, making movement feel continuous instead of teleport-only.
 bool ScriptHookSdkFacade::ApplyRemoteAnimationState(
     const PlayerAnimationStatePayload& state) noexcept {
     try {
@@ -8861,14 +8716,12 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimationState(
         const auto handle = replicas_.FindLocal(state.entityId);
         if (!handle.has_value() ||
             ENTITY::DOES_ENTITY_EXIST(*handle) == FALSE) {
-            // The state is still useful: BridgeRuntime can deliver it again
-            // immediately after the player proxy is recreated.
+            // The state is still useful: BridgeRuntime can deliver it again immediately after the player proxy is recreated.
             return true;
         }
         if (IsOwnedHybridAnimSceneEntity(*handle)) {
             // The native AnimScene owns the complete actor graph, phase and IK.
-            // Applying the generic player AnimGraph on top would cut authored
-            // clips and was one source of T-pose/teleport oscillation.
+            // Applying the generic player AnimGraph on top would cut authored clips and was one source of T-pose/teleport oscillation.
             return true;
         }
 
@@ -8897,9 +8750,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimationState(
                 ", capabilities=" +
                 std::to_string(state.capabilities));
         }
-        // Applying the state is owned by ApplyRemoteAnimGraphTransform, where
-        // mounted/ragdoll/lasso/fall protection is known. Doing it here would
-        // force a motion state before that guard on every received packet.
+        // Applying the state is owned by ApplyRemoteAnimGraphTransform, where mounted/ragdoll/lasso/fall protection is known.
+        // Doing it here would force a motion state before that guard on every received packet.
         return true;
 #else
         (void)state;
@@ -8944,10 +8796,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
          IsPedBeingHogtied(static_cast<Ped>(handle)) != FALSE ||
          IsPedHogtied(static_cast<Ped>(handle)) != FALSE);
     if (physicalLassoOwnsRemoteProxy) {
-        // On the thrower's machine the engine constraint must own both ends
-        // of the rope. Pulling the caught proxy back to its network root made
-        // the constraint topple the local thrower instead of keeping the
-        // victim attached.
+        // On the thrower's machine the engine constraint must own both ends of the rope.
+        // Pulling the caught proxy back to its network root made the constraint topple the local thrower instead of keeping the victim attached.
         ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(handle, FALSE);
         ++animGraphPhysicalRootYieldTicks_;
         return true;
@@ -8959,8 +8809,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         (remotePeerLassoTaskPending_ ||
          remotePeerLassoEngineOwned_)) {
         // TASK_LASSO_PED owns the actor's locomotion and upper-body graph.
-        // Any straight-to/aim/root task issued here would replace the rope
-        // task and produce the old thrown-weapon/stacked-lasso artifact.
+        // Any straight-to/aim/root task issued here would replace the rope task and produce the old thrown-weapon/stacked-lasso artifact.
         ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(handle, FALSE);
         ++remotePlayerActionMotorYields_;
         return true;
@@ -9087,10 +8936,9 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
             localPhysicalBefore || traversalStarted || ragdollStarted,
             mounted);
     if (airborneLaunched) {
-        // A plain ledge fall has no PlayerTraversal transaction. Seed RDR2's
-        // native physics once from the authoritative point/velocity so its
-        // own falling graph can take over. If local physics does not engage,
-        // direct-root correction resumes on the next frame.
+        // A plain ledge fall has no PlayerTraversal transaction.
+        // Seed RDR2's native physics once from the authoritative point/velocity so its own falling graph can take over.
+        // If local physics does not engage, direct-root correction resumes on the next frame.
         ENTITY::SET_ENTITY_COORDS_NO_OFFSET(
             handle,
             state.position.x,
@@ -9187,10 +9035,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         PED::SET_PED_KEEP_TASK(handle, FALSE);
         PED::SET_PED_CAN_PLAY_AMBIENT_ANIMS(handle, TRUE);
         PED::SET_PED_CAN_PLAY_AMBIENT_BASE_ANIMS(handle, TRUE);
-        // Allow RDR2's own locomotion/weapon graph to solve feet, hands,
-        // torso and look pose while its native task owns ordinary movement.
-        // These switches do not fabricate exact sender IK targets; they keep
-        // the native ground and weapon solvers available on the replica.
+        // Allow RDR2's own locomotion/weapon graph to solve feet, hands, torso and look pose while its native task owns ordinary movement.
+        // These switches do not fabricate exact sender IK targets; they keep the native ground and weapon solvers available on the replica.
         PED::SET_PED_CAN_ARM_IK(handle, TRUE);
         PED::SET_PED_CAN_HEAD_IK(handle, TRUE);
         PED::SET_PED_CAN_LEG_IK(handle, TRUE);
@@ -9202,9 +9048,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         Log(
             "[INFO][ANIMGRAPH_REPLICA] remote ped prepared; animation-driven locomotion with bounded root recovery");
     } else if (!visualControllerAllowed) {
-        // Never replace a ragdoll, traversal, lasso, fall or mount task. Mark
-        // the visual driver stale so a fresh gait task is issued only after
-        // the protected physical animation yields ownership.
+        // Never replace a ragdoll, traversal, lasso, fall or mount task.
+        // Mark the visual driver stale so a fresh gait task is issued only after the protected physical animation yields ownership.
         animGraphVisualTaskActive_ = false;
         animGraphVisualTaskStartedMs_ = 0U;
     }
@@ -9413,11 +9258,9 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
             kRemoteCoverFallbackMilliseconds;
     if (coverFallbackDue &&
         !animGraphCoverFallbackCrouchActive_) {
-        // Some Story interiors expose no usable local cover point even when
-        // the sender is visibly attached to one. Preserve the semantic pose
-        // with the native crouch graph instead of showing an upright idle
-        // replica. The authoritative root/heading still comes from the
-        // sender, so this fallback cannot navigate or invent movement.
+        // Some Story interiors expose no usable local cover point even when the sender is visibly attached to one.
+        // Preserve the semantic pose with the native crouch graph instead of showing an upright idle replica.
+        // The authoritative root/heading still comes from the sender, so this fallback cannot navigate or invent movement.
         SetPedCrouchMovement(handle, TRUE, FALSE);
         animGraphCoverFallbackCrouchActive_ = true;
         previousRemoteCoverFallbackAssertMs_ = now;
@@ -9436,9 +9279,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                 now < previousRemoteCoverFallbackAssertMs_ ||
                 now - previousRemoteCoverFallbackAssertMs_ >=
                     kRemoteCoverFallbackRecoveryMilliseconds)) {
-        // Aim/fire/Story tasks may clear the crouch branch underneath the
-        // semantic fallback. Reassert it only after a measured loss; doing it
-        // every frame would continually restart the locomotion graph.
+        // Aim/fire/Story tasks may clear the crouch branch underneath the semantic fallback.
+        // Reassert it only after a measured loss; doing it every frame would continually restart the locomotion graph.
         SetPedCrouchMovement(handle, TRUE, FALSE);
         previousRemoteCoverFallbackAssertMs_ = now;
         ++animGraphCoverFallbackRecoveries_;
@@ -9452,20 +9294,17 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
     const bool stealthStateChanged =
         requestedStealth != animGraphStealthActive_;
     if (stealthStateChanged) {
-        // _SET_PED_CROUCH_MOVEMENT is an AnimGraph transition, not a harmless
-        // per-frame override. Re-applying FALSE every render tick resets the
-        // locomotion/aim graph and leaves an otherwise fresh remote snapshot
-        // standing still. Apply it exactly once when the replicated semantic
-        // state changes; the normal visual motor owns subsequent frames.
+        // _SET_PED_CROUCH_MOVEMENT is an AnimGraph transition, not a harmless per-frame override.
+        // Re-applying FALSE every render tick resets the locomotion/aim graph and leaves an otherwise fresh remote snapshot standing still.
+        // Apply it exactly once when the replicated semantic state changes; the normal visual motor owns subsequent frames.
         if (requestedStealth) {
             SetPedCrouchMovement(handle, TRUE, FALSE);
         } else if (!requestedCover) {
             SetPedCrouchMovement(handle, FALSE, FALSE);
         } else {
-            // Cover takes ownership of the same crouch graph. Clearing the
-            // previous stealth state here used to cancel a cover fallback in
-            // the very frame it was entered. Remember that ownership so the
-            // crouch branch is released only on a real cover exit.
+            // Cover takes ownership of the same crouch graph.
+            // Clearing the previous stealth state here used to cancel a cover fallback in the very frame it was entered.
+            // Remember that ownership so the crouch branch is released only on a real cover exit.
             animGraphCoverFallbackCrouchActive_ = true;
             previousRemoteCoverFallbackAssertMs_ = now;
         }
@@ -9753,9 +9592,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                     desiredVisualDestination;
                 animGraphAimTaskDestination_ =
                     animGraphVisualTaskDestination_;
-                // One native task owns both the lower-body path and the
-                // upper-body weapon pose. Running a separate straight-to task
-                // here would continually overwrite the aiming graph.
+                // One native task owns both the lower-body path and the upper-body weapon pose.
+                // Running a separate straight-to task here would continually overwrite the aiming graph.
                 AI::TASK_GO_TO_COORD_WHILE_AIMING_AT_COORD(
                     handle,
                     animGraphVisualTaskDestination_.x,
@@ -9777,9 +9615,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                 ++animGraphAimMovingTaskStarts_;
             } else if (visualLocomotion == RemoteLocomotion::Idle) {
                 if (nativeIdleTurnRequested) {
-                    // A heading warp reproduces position but skips the
-                    // sender's feet/hip turn. Let the native graph perform a
-                    // bounded turn while the network root remains fixed.
+                    // A heading warp reproduces position but skips the sender's feet/hip turn.
+                    // Let the native graph perform a bounded turn while the network root remains fixed.
                     AI::TASK_ACHIEVE_HEADING(
                         handle,
                         state.heading,
@@ -9839,8 +9676,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                 std::max(state.desiredMoveBlend, 1.0F),
                 1.0F,
                 3.0F));
-        // A bounded supported move-rate closes ordinary network drift without
-        // separating the model root from the native foot-placement graph.
+        // A bounded supported move-rate closes ordinary network drift without separating the model root from the native foot-placement graph.
         PED::SET_PED_MOVE_RATE_OVERRIDE(handle, directMoveRate);
         ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(handle, FALSE);
         ++animGraphReplicaStateApplies_;
@@ -9876,12 +9712,9 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                      now - animGraphPreviousLocomotionRecoveryMs_ >=
                          kAnimGraphLocomotionRecoveryCooldownMilliseconds);
                 if (recoveryDue) {
-                    // A valid long-lived straight-to task can become inert
-                    // after camp speed zones or a Story script briefly owns
-                    // the proxy. Merely refreshing its destination preserves
-                    // that dead task. Reacquire the visual graph once after a
-                    // measured 350ms stall; direct-root position authority is
-                    // unaffected and the two-second cooldown prevents flicker.
+                    // A valid long-lived straight-to task can become inert after camp speed zones or a Story script briefly owns the proxy.
+                    // Merely refreshing its destination preserves that dead task.
+                    // Reacquire the visual graph once after a measured 350ms stall; direct-root position authority is unaffected and the two-second cooldown prevents flicker.
                     AI::CLEAR_PED_TASKS(handle, TRUE, TRUE);
                     PED::SET_PED_KEEP_TASK(handle, FALSE);
                     animGraphVisualTaskActive_ = false;
@@ -9930,8 +9763,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                 }
                 if (!requestedAiming && !requestedCover &&
                     state.desiredMoveBlend < 0.20F) {
-                    // Keep the older pose-only fallback if the weapon has not
-                    // streamed/equipped yet when this shot edge arrives.
+                    // Keep the older pose-only fallback if the weapon has not streamed/equipped yet when this shot edge arrives.
                     AI::TASK_AIM_GUN_AT_COORD(
                         handle,
                         state.aimTarget.x,
@@ -10231,14 +10063,14 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
 #endif
 }
 
+// Applies the next remote player position.
+// The motion code chooses smoothing, correction, or recovery instead of always snapping to the received point.
 bool ScriptHookSdkFacade::ApplyRemoteTransform(
     const PlayerStatePayload& state) noexcept {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS && defined(_MSC_VER)
-    // One stale/recycled RDR2 ped handle produced V31.2's only recorded
-    // 0xC0000005 and caused the top-level bridge guard to abandon the complete
-    // coop runtime. Keep this high-frequency native presentation lane behind
-    // its own SEH boundary. Returning false lets BridgeRuntime discard and
-    // recreate the replica after its bounded three-failure policy.
+    // One stale/recycled RDR2 ped handle produced V31.2's only recorded 0xC0000005 and caused the top-level bridge guard to abandon the complete coop runtime.
+    // Keep this high-frequency native presentation lane behind its own SEH boundary.
+    // Returning false lets BridgeRuntime discard and recreate the replica after its bounded three-failure policy.
     bool nativeFault{};
     bool applied{};
     __try {
@@ -10486,9 +10318,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
         return false;
     }
     if (IsOwnedHybridAnimSceneEntity(*handle)) {
-        // An exact AnimScene role must have a single animation/root-motion
-        // owner. The replicated transform remains cached by BridgeRuntime and
-        // resumes after the scene is aborted.
+        // An exact AnimScene role must have a single animation/root-motion owner.
+        // The replicated transform remains cached by BridgeRuntime and resumes after the scene is aborted.
         return true;
     }
     if (requestedPeerLasso || requestedPeerKnockdown) {
@@ -10509,10 +10340,9 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                 ++remotePlayerActionLassoConfirmed_;
                 Log("[LASSO_ROPE] engine ownership observed from transform tick");
             }
-            // A missed or delayed rope is allowed to miss. Replacing it with
-            // SET_PED_TO_RAGDOLL made both peers fall without a line and could
-            // interrupt TASK_LASSO_PED before its controlled retry. Only an
-            // explicit authoritative Knockdown may use the ragdoll path.
+            // A missed or delayed rope is allowed to miss.
+            // Replacing it with SET_PED_TO_RAGDOLL made both peers fall without a line and could interrupt TASK_LASSO_PED before its controlled retry.
+            // Only an explicit authoritative Knockdown may use the ragdoll path.
             const bool shouldApplyRagdoll = requestedPeerKnockdown;
             const bool fallbackRefreshAllowed =
                 reliablePlayerActionProtocolObserved_
@@ -10549,10 +10379,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
             }
         }
     }
-    // Story scripts can restore cloned Arthur's friendly target flags after a
-    // checkpoint or interaction. Keep the visual proxy targetable for
-    // zero-damage weapon/lasso acquisition without ever granting local health
-    // authority.
+    // Story scripts can restore cloned Arthur's friendly target flags after a checkpoint or interaction.
+    // Keep the visual proxy targetable for zero-damage weapon/lasso acquisition without ever granting local health authority.
     ENTITY::SET_ENTITY_CAN_BE_TARGETED_WITHOUT_LOS(
         *handle,
         TRUE);
@@ -10561,8 +10389,7 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
         *handle,
         PLAYER::PLAYER_ID(),
         TRUE);
-    // Reassert visibility because Story scripts and population transitions can
-    // hide a mission-owned MetaPed after it has already spawned.
+    // Reassert visibility because Story scripts and population transitions can hide a mission-owned MetaPed after it has already spawned.
     ENTITY::SET_ENTITY_VISIBLE(*handle, TRUE);
     ENTITY::RESET_ENTITY_ALPHA(*handle);
     STREAMING::REQUEST_COLLISION_AT_COORD(
@@ -10578,10 +10405,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
     }
     ENTITY::SET_ENTITY_COLLISION(*handle, TRUE, TRUE);
     if (!remotePlayerCollisionReady_) {
-        // A peer can join while its marker lies on a tile that has not yet
-        // streamed on this PC. Hold the model-aware spawn root until terrain
-        // collision exists; otherwise gravity can drop the replica through
-        // the map before its first locomotion task starts.
+        // A peer can join while its marker lies on a tile that has not yet streamed on this PC.
+        // Hold the model-aware spawn root until terrain collision exists; otherwise gravity can drop the replica through the map before its first locomotion task starts.
         ENTITY::FREEZE_ENTITY_POSITION(*handle, TRUE);
         ENTITY::SET_ENTITY_HAS_GRAVITY(*handle, FALSE);
         return true;
@@ -10653,10 +10478,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                 float screenY{};
                 const auto visualPosition =
                     ToBridgeVector(remotePosition);
-                // Keep the label attached to the entity the player can
-                // actually see and target. Filtering removes tiny vertical
-                // jitter without allowing the network root to separate the
-                // nickname from a locally drifting puppet.
+                // Keep the label attached to the entity the player can actually see and target.
+                // Filtering removes tiny vertical jitter without allowing the network root to separate the nickname from a locally drifting puppet.
                 const Vec3 nicknameTarget{
                     visualPosition.x,
                     visualPosition.y,
@@ -10697,9 +10520,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                         0.30F - (distance * 0.0015F),
                         0.20F,
                         0.30F);
-                    // DRAW_TEXT uses RDR2's built-in UI typeface. ScriptHook
-                    // exposes no per-call font selector, so the nameplate
-                    // stays fully native without shipping a third-party TTF.
+                    // DRAW_TEXT uses RDR2's built-in UI typeface.
+                    // ScriptHook exposes no per-call font selector, so the nameplate stays fully native without shipping a third-party TTF.
                     const auto nameWidth = std::clamp(
                         0.020F +
                             static_cast<float>(
@@ -10778,8 +10600,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
     previousRemoteDownedRagdollMs_ = 0U;
     if (authoritativeRemoteRestraintActive) {
         // The local player's real lasso owns this proxy's physical graph.
-        // Root correction or a synthetic fall here would detach/obscure the
-        // rope. Hold the replicated motor until authoritative Free/lease end.
+        // Root correction or a synthetic fall here would detach/obscure the rope.
+        // Hold the replicated motor until authoritative Free/lease end.
         ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(*handle, FALSE);
         ++remotePlayerActionMotorYields_;
         return true;
@@ -10830,10 +10652,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
         previousRemoteAimTaskMs_ = 0U;
         previousRemoteMeleeTaskMs_ = 0U;
         hasRemoteLocomotionTask_ = false;
-        // A traversal epoch invalidates interpolation across the action, but
-        // the already-buffered route up to its anchor is still exactly what a
-        // lagging proxy needs in order to reach the fence/window. Clearing it
-        // here made the proxy stop when the authoritative player jumped.
+        // A traversal epoch invalidates interpolation across the action, but the already-buffered route up to its anchor is still exactly what a lagging proxy needs in order to reach the fence/window.
+        // Clearing it here made the proxy stop when the authoritative player jumped.
         if (!epochCarriesTraversalIntent) {
             remoteWaypoints_.clear();
         }
@@ -11109,10 +10929,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
     }
     if (remoteAimRootSuppressed_ !=
         previousAimRootSuppressed) {
-        // The primary task changes owner only at hysteresis boundaries:
-        // straight locomotion while catching up, combined strafe/aim once
-        // the replica is close. Invalidating here gives an immediate clean
-        // transition without clearing the ped task graph.
+        // The primary task changes owner only at hysteresis boundaries: straight locomotion while catching up, combined strafe/aim once the replica is close.
+        // Invalidating here gives an immediate clean transition without clearing the ped task graph.
         previousRemoteTaskMs_ = 0U;
         hasRemoteLocomotionTask_ = false;
         ++remoteActionAimRootSuppressionTransitions_;
@@ -11384,10 +11202,9 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
         HasRemoteNavigationRecoveryTimedOut(
             navigationActiveForMs,
             physicsInterrupted);
-    // A timed-out nav task points only ~2 m ahead. Rejoining that old point
-    // cannot close a growing sprint backlog. Once the full recovery budget is
-    // exhausted, advance to the newest authoritative route point and discard
-    // the obsolete prefix in one operation.
+    // A timed-out nav task points only ~2 m ahead.
+    // Rejoining that old point cannot close a growing sprint backlog.
+    // Once the full recovery budget is exhausted, advance to the newest authoritative route point and discard the obsolete prefix in one operation.
     auto safeRecoveryDestination = remoteNavigationDestination_;
     auto safeRecoveryWaypointCount =
         remoteNavigationDestinationWaypointCount_;
@@ -11403,10 +11220,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                     kRemoteNavigationSafeRecoveryMinimumDistanceMeters &&
                 correctionDistance <=
                     kRemoteNavigationSafeRecoveryMaximumDistanceMeters) {
-                // Keep walking forward through the queue and retain the newest
-                // point that still satisfies the hard correction bound. If
-                // the peer is more than 40 m ahead this still makes bounded
-                // progress instead of disabling recovery altogether.
+                // Keep walking forward through the queue and retain the newest point that still satisfies the hard correction bound.
+                // If the peer is more than 40 m ahead this still makes bounded progress instead of disabling recovery altogether.
                 safeRecoveryDestination = waypoint.position;
                 safeRecoveryWaypointCount = inspectedWaypointCount;
             }
@@ -11424,8 +11239,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
             safeRecoveryDestination = traversal.position;
             safeRecoveryTargetsTraversal = true;
 
-            // Discard only the route prefix leading to this action. Later
-            // points remain available after the deferred climb/jump commits.
+            // Discard only the route prefix leading to this action.
+            // Later points remain available after the deferred climb/jump commits.
             std::size_t inspectedWaypointCount{};
             std::size_t closestWaypointCount{};
             auto closestDistance =
@@ -11860,18 +11675,15 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                 controlMode == PuppetControlMode::TraversalCommitted ||
                 controlMode == PuppetControlMode::Mounted ||
                 controlMode == PuppetControlMode::HardResync) {
-                // Ragdoll/fall/lasso owns the pose. The authoritative
-                // transform can still converge through velocity below, but
-                // no walking task may fight the physical animation.
+                // Ragdoll/fall/lasso owns the pose.
+                // The authoritative transform can still converge through velocity below, but no walking task may fight the physical animation.
                 return;
             }
             PED::SET_PED_MOVE_RATE_OVERRIDE(
                 *handle,
                 remoteMotionAppliedMoveRate_);
-            // Both natives are transient in RDR2 and therefore have to be
-            // refreshed on every applied render sample, not merely when a
-            // locomotion task starts. The maximum blend keeps the full sprint
-            // animation available while move-rate accelerates catch-up.
+            // Both natives are transient in RDR2 and therefore have to be refreshed on every applied render sample, not merely when a locomotion task starts.
+            // The maximum blend keeps the full sprint animation available while move-rate accelerates catch-up.
             PED::SET_PED_MAX_MOVE_BLEND_RATIO(
                 *handle,
                 3.0F);
@@ -12077,12 +11889,9 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                         kRemoteIdleTaskMilliseconds);
                 }
             } else if (useCombinedAimLocomotion) {
-                // A standalone aim task replaces locomotion and makes the
-                // proxy stop/glitch while the remote player walks. Use the
-                // game's combined strafe/aim task only after root motion has
-                // caught the authoritative marker. At larger error the
-                // straight task below owns direction, while visual
-                // zero-damage shots remain handled separately.
+                // A standalone aim task replaces locomotion and makes the proxy stop/glitch while the remote player walks.
+                // Use the game's combined strafe/aim task only after root motion has caught the authoritative marker.
+                // At larger error the straight task below owns direction, while visual zero-damage shots remain handled separately.
                 AI::TASK_GO_TO_COORD_WHILE_AIMING_AT_COORD(
                     *handle,
                     step.taskDestination.x,
@@ -12134,16 +11943,13 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
         case RemoteMotionMode::SmoothVelocity: {
             if (navigationSafeRecoveryApplied ||
                 proactiveHardResyncApplied) {
-                // The next render sample rebuilds locomotion from the new
-                // grounded position. Applying an old pre-teleport velocity in
-                // this frame would visibly launch the replica away again.
+                // The next render sample rebuilds locomotion from the new grounded position.
+                // Applying an old pre-teleport velocity in this frame would visibly launch the replica away again.
                 break;
             }
-            // Grounded task locomotion is the sole owner of XY. Applying
-            // SET_ENTITY_VELOCITY alongside it produced foot sliding,
-            // overshoot and failed vaults. Direct velocity is now restricted
-            // to an explicitly replicated airborne/ragdoll state; local
-            // collision reactions alone do not get pulled through geometry.
+            // Grounded task locomotion is the sole owner of XY.
+            // Applying SET_ENTITY_VELOCITY alongside it produced foot sliding, overshoot and failed vaults.
+            // Direct velocity is now restricted to an explicitly replicated airborne/ragdoll state; local collision reactions alone do not get pulled through geometry.
             const bool semanticPhysicsMode =
                 state.locomotionMode ==
                     PlayerLocomotionMode::Airborne ||
@@ -12165,19 +11971,13 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                 ++remoteNavigationAssistSuppressedTicks_;
             }
             if (applyPhysicsAssist) {
-                // Continuous root velocity is proportional to the vector
-                // from the visible ped to the authoritative marker and is
-                // reapplied because the native task can reset it each frame.
+                // Continuous root velocity is proportional to the vector from the visible ped to the authoritative marker and is reapplied because the native task can reset it each frame.
                 // Unlike SET_ENTITY_COORDS it cannot teleport the proxy.
-                // Reloading and physical interruption may travel with the
-                // root. This is important for a lassoed or falling remote
-                // body: its X/Y/Z still comes from the authoritative peer
-                // instead of independently landing on another ledge.
-                // Grounded walking, stairs and climbovers must leave vertical
-                // motion to RDR2's locomotion/navmesh controller. Applying the
-                // marker's positive Z correction here was the source of the
-                // levitating puppet seen in Ghost Route V11.1. XYZ correction
-                // remains enabled for an actual ragdoll/fall/lasso state.
+                // Reloading and physical interruption may travel with the root.
+                // This is important for a lassoed or falling remote body: its X/Y/Z still comes from the authoritative peer instead of independently landing on another ledge.
+                // Grounded walking, stairs and climbovers must leave vertical motion to RDR2's locomotion/navmesh controller.
+                // Applying the marker's positive Z correction here was the source of the levitating puppet seen in Ghost Route V11.1.
+                // XYZ correction remains enabled for an actual ragdoll/fall/lasso state.
                 const auto assistVerticalVelocity = step.velocity.z;
                 ENTITY::SET_ENTITY_VELOCITY(
                     *handle,
@@ -12213,9 +12013,8 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
                 !remoteNavigationActive_ &&
                 !replicatedTraversalAction;
             if (shouldRecoverTask) {
-                // Replace the semantic destination without clearing the task
-                // graph or moving the ped. CLEAR_PED_TASKS_IMMEDIATELY was
-                // the source of the visible rebase/T-pose flash in V7.
+                // Replace the semantic destination without clearing the task graph or moving the ped.
+                // CLEAR_PED_TASKS_IMMEDIATELY was the source of the visible rebase/T-pose flash in V7.
                 previousRemoteTaskMs_ = 0U;
                 previousRemoteTaskDestination_ = {};
                 previousRemoteTaskHeading_ = step.heading;
@@ -12808,6 +12607,7 @@ bool ScriptHookSdkFacade::ApplyRemoteTransformUnsafe(
     return false;
 }
 
+// Attaches the remote player's stable multiplayer identity/name to its local RDR2 replica after the Sidecar has mapped host/guest roles.
 bool ScriptHookSdkFacade::ApplyRemoteIdentity(
     const PlayerIdentityPayload& identity) noexcept {
     try {
@@ -12858,6 +12658,8 @@ bool ScriptHookSdkFacade::ApplyRemoteIdentity(
     return false;
 }
 
+// Makes the remote player replica use the received model/components.
+// Revision and fingerprint checks outside this method avoid rebuilding unchanged looks.
 bool ScriptHookSdkFacade::ApplyRemoteAppearance(
     const PlayerAppearanceStatePayload& appearance) noexcept {
     try {
@@ -12932,6 +12734,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAppearance(
     return false;
 }
 
+// Applies host time/weather on the guest so the shared world has one visible clock and weather transition.
 bool ScriptHookSdkFacade::ApplyWorldState(
     const WorldStatePayload& state) noexcept {
     try {
@@ -13073,9 +12876,8 @@ bool ScriptHookSdkFacade::ApplyRemoteEquipment(
         remoteWeaponAmmo_ = static_cast<std::uint32_t>(ammo);
         if (remoteVisualFireSuppressedWeaponHash_ ==
             static_cast<std::uint32_t>(requestedWeapon)) {
-            // EquipmentState is authoritative and can arrive while the short
-            // dry-fire lease is active. Preserve its newer total for cleanup,
-            // while keeping the local weapon empty until the task has ended.
+            // EquipmentState is authoritative and can arrive while the short dry-fire lease is active.
+            // Preserve its newer total for cleanup, while keeping the local weapon empty until the task has ended.
             remoteVisualFireRestoreAmmo_ =
                 static_cast<std::uint32_t>(ammo);
         }
@@ -13177,10 +12979,8 @@ bool ScriptHookSdkFacade::ApplyRemoteEquipment(
             AI::TASK_RELOAD_WEAPON(*handle, FALSE);
         }
         if (reloadStateChanged) {
-            // TASK_RELOAD_WEAPON takes ownership from locomotion. Do not
-            // mistake the old task bookkeeping for a live movement task:
-            // while reloading the movement writer stays suppressed, and the
-            // first transform after reload ends starts the current gait.
+            // TASK_RELOAD_WEAPON takes ownership from locomotion.
+            // Do not mistake the old task bookkeeping for a live movement task: while reloading the movement writer stays suppressed, and the first transform after reload ends starts the current gait.
             previousRemoteTaskMs_ = 0U;
             previousRemoteTaskDestination_ = {};
             previousRemoteTaskHeading_ = 0.0F;
@@ -13270,6 +13070,7 @@ bool ScriptHookSdkFacade::ApplyCampaignCapability(
     return false;
 }
 
+// Creates/updates the remote player's horse or vehicle proxy and keeps the rider/seat relationship consistent with the received mount snapshot.
 bool ScriptHookSdkFacade::MaintainRemoteMount(
     const PlayerMountStatePayload& state,
     const std::optional<PlayerMountStatePayload>& localState) noexcept {
@@ -13410,9 +13211,8 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
              IsOwnedHybridAnimSceneEntity(*exactSceneRider)) ||
             (exactSceneMount.has_value() &&
              IsOwnedHybridAnimSceneEntity(*exactSceneMount))) {
-            // Mount/dismount tasks and transform correction fight authored
-            // mounted AnimScene clips. Once either role is bound, the native
-            // scene owns both the relation and root motion.
+            // Mount/dismount tasks and transform correction fight authored mounted AnimScene clips.
+            // Once either role is bound, the native scene owns both the relation and root motion.
             return true;
         }
         if (state.modelHash == 0U ||
@@ -13444,10 +13244,7 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
                     static_cast<LocalEntityHandle>(rider)) !=
                     std::optional{state.playerEntityId}) {
                 // A remote mount relation must never mutate PLAYER_PED_ID.
-                // Keep this fail-closed even if a stale/corrupt registry entry
-                // survives a reconnect; mixing rider handles is otherwise
-                // visible as the local player mounting/dismounting when the
-                // peer touches a different horse.
+                // Keep this fail-closed even if a stale/corrupt registry entry survives a reconnect; mixing rider handles is otherwise visible as the local player mounting/dismounting when the peer touches a different horse.
                 Log(
                     "[ERROR][REMOTE_MOUNT_RELATION] rejected a rider mapping that did not resolve exclusively to the remote replica");
                 return;
@@ -13469,9 +13266,8 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
                     ++remoteMountAttachAttempts_;
                 }
             } else if (!shouldMount && actuallyMounted) {
-                // Do not trust the bookkeeping bit here: the native task can
-                // be interrupted by the player motor or another ScriptHook
-                // task. Reissue until the engine confirms the rider is off.
+                // Do not trust the bookkeeping bit here: the native task can be interrupted by the player motor or another ScriptHook task.
+                // Reissue until the engine confirms the rider is off.
                 const bool retryDue =
                     previousRemoteMountDismountAttemptMs_ == 0U ||
                     now < previousRemoteMountDismountAttemptMs_ ||
@@ -13635,10 +13431,8 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
         }
 
         const auto mount = static_cast<Ped>(*handle);
-        // Guest population suppression used to hide this mission-owned horse
-        // after it was spawned. Reassert the cosmetic proxy invariants so a
-        // script/population transition cannot leave an interactive invisible
-        // mount behind.
+        // Guest population suppression used to hide this mission-owned horse after it was spawned.
+        // Reassert the cosmetic proxy invariants so a script/population transition cannot leave an interactive invisible mount behind.
         ENTITY::SET_ENTITY_VISIBLE(mount, TRUE);
         ENTITY::RESET_ENTITY_ALPHA(mount);
         ENTITY::SET_ENTITY_COLLISION(mount, TRUE, TRUE);
@@ -13847,8 +13641,7 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
         (void)localState;
 #endif
     } catch (...) {
-        // A mount is cosmetic replication; never let a bad model or native
-        // destabilize the bridge.
+        // A mount is cosmetic replication; never let a bad model or native destabilize the bridge.
     }
     return false;
 }
@@ -13921,10 +13714,13 @@ void ScriptHookSdkFacade::ClearRemoteMount() noexcept {
     remotePlayerMountBorrowed_ = false;
 }
 
+// Creates the guest's local copy of one host-owned NPC/object.
+// This local RDR2 handle is intentionally different from the shared NetEntityId.
 bool ScriptHookSdkFacade::SpawnWorldEntityProxy(
     const WorldEntityStatePayload& state) noexcept {
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        // Check the host's NPC data before using it to load/create anything in RDR2.
         if (!state.entityId.IsValid() ||
             state.entityId == remotePlayerId_ ||
             state.modelHash == 0U ||
@@ -13942,6 +13738,7 @@ bool ScriptHookSdkFacade::SpawnWorldEntityProxy(
             return false;
         }
 
+        // If this NPC changed model/type, remove the old copy before making a new one.
         const auto existing = worldProxyEntries_.find(
             state.entityId);
         if (existing != worldProxyEntries_.end() &&
@@ -13962,6 +13759,8 @@ bool ScriptHookSdkFacade::SpawnWorldEntityProxy(
             iterator->second.state = state;
             iterator->second.receivedAtMs = now;
         }
+        // Save what the NPC should look like.
+        // The main loop creates it later when RDR2 has finished loading its model.
         STREAMING::REQUEST_MODEL(
             static_cast<Hash>(state.modelHash),
             FALSE);
@@ -13975,6 +13774,7 @@ bool ScriptHookSdkFacade::SpawnWorldEntityProxy(
     return false;
 }
 
+// Updates a guest world proxy with the latest host NPC/object state.
 bool ScriptHookSdkFacade::UpdateWorldEntityProxy(
     const WorldEntityStatePayload& state) noexcept {
     try {
@@ -13982,9 +13782,8 @@ bool ScriptHookSdkFacade::UpdateWorldEntityProxy(
         const auto iterator =
             worldProxyEntries_.find(state.entityId);
         if (iterator == worldProxyEntries_.end()) {
-            // EntityUpdate is an upsert. This makes the unreliable snapshot
-            // lane self-healing if a reliable spawn was lost during a pipe
-            // reconnect.
+            // EntityUpdate is an upsert.
+            // This makes the unreliable snapshot lane self-healing if a reliable spawn was lost during a pipe reconnect.
             return SpawnWorldEntityProxy(state);
         }
         if (iterator->second.state.modelHash != state.modelHash ||
@@ -14003,6 +13802,8 @@ bool ScriptHookSdkFacade::UpdateWorldEntityProxy(
             state.healthFraction > 1.0F) {
             return false;
         }
+        // Save the newest host NPC state.
+        // The main loop applies it safely later.
         iterator->second.state = state;
         iterator->second.receivedAtMs = TickMilliseconds();
         return true;
@@ -14014,12 +13815,15 @@ bool ScriptHookSdkFacade::UpdateWorldEntityProxy(
     return false;
 }
 
+// Removes the local proxy after the host says the shared entity no longer belongs in the mirrored graph.
 void ScriptHookSdkFacade::DespawnWorldEntityProxy(
     const NetEntityId entityId) noexcept {
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         WorldEntityKind kind{WorldEntityKind::Ped};
         bool borrowedLocalEntity{};
+        // Forget the NPC and its RDR2 handle.
+        // If we borrowed an existing local NPC, show it normally again; otherwise delete the copy we created.
         const auto entry = worldProxyEntries_.find(entityId);
         if (entry != worldProxyEntries_.end()) {
             kind = entry->second.state.kind;
@@ -14118,10 +13922,8 @@ void ScriptHookSdkFacade::MaintainHiddenPedAttachments() noexcept {
             0,
             static_cast<int>(objects.size()));
         std::unordered_set<LocalEntityHandle> shouldHide;
-        // Held weapon entities are not guaranteed to appear in the generic
-        // object pool during an AnimScene transition. Query them directly so
-        // a hidden guest-local actor cannot leave a floating rifle/revolver in
-        // the replicated host camera.
+        // Held weapon entities are not guaranteed to appear in the generic object pool during an AnimScene transition.
+        // Query them directly so a hidden guest-local actor cannot leave a floating rifle/revolver in the replicated host camera.
         for (const auto& [handle, entry] : hiddenAmbientPeds_) {
             const auto ped = static_cast<Ped>(handle);
             if (ped == 0 ||
@@ -14213,8 +14015,7 @@ void ScriptHookSdkFacade::MaintainHiddenPedAttachments() noexcept {
         }
 #endif
     } catch (...) {
-        // The reversible ped mask remains useful even when an attachment
-        // disappears while the world pool is being enumerated.
+        // The reversible ped mask remains useful even when an attachment disappears while the world pool is being enumerated.
     }
 }
 
@@ -14280,6 +14081,7 @@ bool ScriptHookSdkFacade::IsOwnedHybridAnimSceneEntity(
                handle) != ownedHybridAnimSceneBoundEntities_.end();
 }
 
+// Per-tick care for guest NPC/object proxies: cleanup, hide local duplicates, and keep attachment/mount relationships from drifting apart.
 void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
     const bool active,
     const bool authoritativePopulationReady,
@@ -14287,6 +14089,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
     const bool preserveSameProcessSourceActors) noexcept {
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        // Turning this off deletes NPC copies and brings back normal local NPCs.
         if (!active ||
             !std::isfinite(radiusMeters) ||
             radiusMeters <= 0.0F) {
@@ -14314,6 +14117,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
         previousWorldMirrorMaintainMs_ = now;
         worldMirrorGuestActive_ = true;
 
+        // Update mounts/parents first so riders and attached objects have something to attach to.
         std::vector<NetEntityId> maintenanceOrder;
         maintenanceOrder.reserve(worldProxyEntries_.size());
         for (const auto& [entityId, entry] : worldProxyEntries_) {
@@ -14349,6 +14153,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             auto& entry = worldProxyEntries_.at(entityId);
             auto handle =
                 worldEntityReplicas_.FindLocal(entityId);
+            // RDR2 can remove a copy by itself.
+            // Mark it so we can make it again.
             if (handle.has_value() &&
                 ENTITY::DOES_ENTITY_EXIST(*handle) == FALSE) {
                 (void)worldEntityReplicas_.Remove(entityId);
@@ -14374,11 +14180,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 entry.state.kind == WorldEntityKind::Ped &&
                 entry.state.taskKind == WorldTaskKind::Scenario &&
                 (entry.state.flags & kScriptOwnedFlag) != 0U) {
-                // Deterministic Story/camp actors usually already exist on the
-                // guest at the same scenario point. Reusing that actor retains
-                // RDR2's exact scenario graph, phase, IK and attached props.
-                // Only a tight model/position match is accepted; randomized
-                // ambient population remains an independent host proxy.
+                // Deterministic Story/camp actors usually already exist on the guest at the same scenario point.
+                // Reusing that actor retains RDR2's exact scenario graph, phase, IK and attached props.
+                // Only a tight model/position match is accepted; randomized ambient population remains an independent host proxy.
                 constexpr float kScenarioActorMatchRadiusMeters = 1.25F;
                 Ped bestMatch{};
                 auto bestDistance =
@@ -14461,9 +14265,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                             entry.state.parentEntityId);
                     if (!parent.has_value() ||
                         ENTITY::DOES_ENTITY_EXIST(*parent) == FALSE) {
-                        // Model loading and pool order are independent. Keep
-                        // a rider pending until the parent mount is a real
-                        // local entity, not merely a node in desired state.
+                        // Model loading and pool order are independent.
+                        // Keep a rider pending until the parent mount is a real local entity, not merely a node in desired state.
                         entry.spawnDisposition =
                             WorldProxySpawnDisposition::PendingDependency;
                         continue;
@@ -14559,8 +14362,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 }
 
                 const auto ped = static_cast<Ped>(entity);
-                // CREATE_PED may produce a valid, collidable MetaPed with no
-                // visible components until its outfit is initialized.
+                // CREATE_PED may produce a valid, collidable MetaPed with no visible components until its outfit is initialized.
                 if (!objectKind) {
                     SetRandomOutfitVariation(ped);
                 }
@@ -14627,9 +14429,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 ENTITY::SET_ENTITY_COLLISION(entity, FALSE, TRUE);
             }
             if (IsOwnedHybridAnimSceneEntity(*handle)) {
-                // Preserve visibility/collision, but never layer proxy
-                // locomotion, heading snaps, health rewrites or semantic tasks
-                // over an actor controlled by the exact native AnimScene.
+                // Preserve visibility/collision, but never layer proxy locomotion, heading snaps, health rewrites or semantic tasks over an actor controlled by the exact native AnimScene.
                 continue;
             }
             if (entry.state.kind == WorldEntityKind::Object) {
@@ -14652,9 +14452,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             const auto ped = static_cast<Ped>(entity);
             if (entry.borrowedLocalEntity &&
                 entry.state.taskKind == WorldTaskKind::Scenario) {
-                // The local Story VM/scenario manager is the exact animation
-                // owner. Generic transforms or tasks would destroy its clip,
-                // phase, prop and IK state.
+                // The local Story VM/scenario manager is the exact animation owner.
+                // Generic transforms or tasks would destroy its clip, phase, prop and IK state.
                 ENTITY::SET_ENTITY_VISIBLE(ped, TRUE);
                 ENTITY::RESET_ENTITY_ALPHA(ped);
                 ENTITY::SET_ENTITY_COLLISION(ped, TRUE, TRUE);
@@ -14726,8 +14525,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             ENTITY::SET_ENTITY_COLLISION(ped, TRUE, TRUE);
             if (!entry.collisionReady) {
                 // Do not let gravity advance through an unloaded terrain tile.
-                // The authoritative spawn remains frozen only until collision
-                // is present, then ordinary ped/horse physics owns grounding.
+                // The authoritative spawn remains frozen only until collision is present, then ordinary ped/horse physics owns grounding.
                 ENTITY::FREEZE_ENTITY_POSITION(ped, TRUE);
                 ENTITY::SET_ENTITY_HAS_GRAVITY(ped, FALSE);
                 continue;
@@ -14846,13 +14644,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 (entry.state.flags &
                  static_cast<std::uint8_t>(
                      WorldEntityStateFlag::Dead)) != 0U;
-            // Live world replicas are deliberately invulnerable: a local
-            // projectile becomes an authenticated DamageIntent and the host
-            // alone applies the actual damage. Once the host has declared a
-            // ped dead, restore ordinary corpse physics before setting zero
-            // health. That leaves the local vanilla loot prompt/roll in
-            // charge for the bounded corpse-retention window; no loot state
-            // is sampled, transmitted, or applied by the bridge.
+            // Live world replicas are deliberately invulnerable: a local projectile becomes an authenticated DamageIntent and the host alone applies the actual damage.
+            // Once the host has declared a ped dead, restore ordinary corpse physics before setting zero health.
+            // That leaves the local vanilla loot prompt/roll in charge for the bounded corpse-retention window; no loot state is sampled, transmitted, or applied by the bridge.
             ENTITY::SET_ENTITY_CAN_BE_DAMAGED(ped, dead ? TRUE : FALSE);
             const auto maximumHealth =
                 std::max(
@@ -15047,8 +14841,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                  now < entry.previousAimTaskMs ||
                  now - entry.previousAimTaskMs >=
                      kWorldAimTaskRefreshMilliseconds)) {
-                // Deliberately use an aim-only task. Firing flags never create
-                // local bullets, so a mirrored NPC cannot damage the guest.
+                // Deliberately use an aim-only task.
+                // Firing flags never create local bullets, so a mirrored NPC cannot damage the guest.
                 AI::TASK_AIM_GUN_AT_ENTITY(
                     ped,
                     aimTarget,
@@ -15086,8 +14880,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             static_cast<std::size_t>(count) +
             hiddenAmbientPeds_.size());
         // Hidden peds may disappear from ScriptHook's worldGetAllPeds result.
-        // Seed the desired mask from our own stable handles first, otherwise
-        // every other scan restores them and creates the observed 0/5 flicker.
+        // Seed the desired mask from our own stable handles first, otherwise every other scan restores them and creates the observed 0/5 flicker.
         constexpr float kHiddenPopulationRadiusGraceMeters = 12.0F;
         if (authoritativePopulationReady) {
             for (const auto& [handle, entry] : hiddenAmbientPeds_) {
@@ -15145,10 +14938,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 shouldHide.insert(handle);
             }
         }
-        // Readiness comes from the authenticated host WorldState heartbeat,
-        // not from the number of graph nodes. An empty graph is a meaningful
-        // authoritative state (for example a mission interior or an empty
-        // road) and must still suppress guest-local mission/ambient actors.
+        // Readiness comes from the authenticated host WorldState heartbeat, not from the number of graph nodes.
+        // An empty graph is a meaningful authoritative state (for example a mission interior or an empty road) and must still suppress guest-local mission/ambient actors.
         std::size_t eligibleLocalPopulation{};
         std::size_t inRangeLocalPopulation{};
         std::size_t transparentLocalPopulation{};
@@ -15194,9 +14985,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                  !scriptOwnedEntity) ||
                  (!human && !horse) ||
                  playerOwnedHorse) {
-                // The guest-owned horse remains local authority. Other
-                // ambient humans and mountable horses are replaced by the
-                // host mirror.
+                // The guest-owned horse remains local authority.
+                // Other ambient humans and mountable horses are replaced by the host mirror.
                 continue;
             }
             ++eligibleLocalPopulation;
@@ -15214,10 +15004,8 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 if (!visiblyPopulated) {
                     ++transparentLocalPopulation;
                 }
-                // An entity hidden by the authoritative mask is naturally
-                // transparent on the next tick. It must remain in shouldHide;
-                // otherwise the restore loop below makes it visible again and
-                // produces an endless hide/show cycle for guest-local NPCs.
+                // An entity hidden by the authoritative mask is naturally transparent on the next tick.
+                // It must remain in shouldHide; otherwise the restore loop below makes it visible again and produces an endless hide/show cycle for guest-local NPCs.
                 shouldHide.insert(
                     static_cast<LocalEntityHandle>(
                         ped));
@@ -15255,11 +15043,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                            CanPedBeMounted(ped) != FALSE ||
                            ENTITY::IS_ENTITY_A_MISSION_ENTITY(ped) != FALSE;
                 })()) {
-                // Story/mission scripts can restore visibility and collision
-                // after our first write. In a real guest process the local
-                // population is fully masked. The one-PC view must retain the
-                // source actors' collision/physics or gravity makes the very
-                // host samples feeding the guest proxies fall through terrain.
+                // Story/mission scripts can restore visibility and collision after our first write.
+                // In a real guest process the local population is fully masked.
+                // The one-PC view must retain the source actors' collision/physics or gravity makes the very host samples feeding the guest proxies fall through terrain.
                 ENTITY::SET_ENTITY_VISIBLE(
                     ped,
                     preserveSameProcessSourceActors ? TRUE : FALSE);
@@ -15412,6 +15198,8 @@ bool ScriptHookSdkFacade::ApplyWorldEntityDamage(
             damage <= 0.0F) {
             return false;
         }
+        // Only the host runs this.
+        // Guests later receive the NPC's new health/death.
         const auto clampedDamage =
             static_cast<int>(
                 std::lround(
@@ -15478,12 +15266,9 @@ bool ScriptHookSdkFacade::ApplyMissionWorldEntityDamage(
                         1.0F,
                         kWorldDamageIntentFixedDamage)));
 
-        // Attribute the authoritative hit to the guest replica that lives in
-        // the host process.  Mission scripts can then observe a real attacker
-        // instead of anonymous APPLY_DAMAGE_TO_PED damage.  The client shot is
-        // already rendered by the action lane, so this damage projectile is
-        // intentionally inaudible and invisible to avoid a second tracer and
-        // report while retaining collision and weapon attribution.
+        // Attribute the authoritative hit to the guest replica that lives in the host process.
+        // Mission scripts can then observe a real attacker instead of anonymous APPLY_DAMAGE_TO_PED damage.
+        // The client shot is already rendered by the action lane, so this damage projectile is intentionally inaudible and invisible to avoid a second tracer and report while retaining collision and weapon attribution.
         GAMEPLAY::SHOOT_SINGLE_BULLET_BETWEEN_COORDS(
             source.x,
             source.y,
@@ -15510,6 +15295,7 @@ bool ScriptHookSdkFacade::ApplyMissionWorldEntityDamage(
     return false;
 }
 
+// Per-tick multiplayer upkeep inside RDR2: remote movement, proxy lifetime, audio, player actions, and presentation cleanup.
 void ScriptHookSdkFacade::MaintainRealtimeSession(
     const bool active,
     const bool synchronizedPaused) noexcept {
@@ -15521,14 +15307,9 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
         } else {
             observedVanillaPickups_.clear();
         }
-        // Keep the bridge thread alive inside the real RDR2 frontend. Escape
-        // becomes an explicit synchronized pause/resume request; once the
-        // host publishes that state we inject the normal frontend-pause
-        // control on both PCs so each opens the game's own
-        // menu. Never fall back to SET_GAME_PAUSED(TRUE): opening the native
-        // frontend can suspend the ScriptHook fiber long enough for that
-        // timeout to expire after the player has already closed the menu,
-        // which used to leave the local game permanently frozen.
+        // Keep the bridge thread alive inside the real RDR2 frontend.
+        // Escape becomes an explicit synchronized pause/resume request; once the host publishes that state we inject the normal frontend-pause control on both PCs so each opens the game's own menu.
+        // Never fall back to SET_GAME_PAUSED(TRUE): opening the native frontend can suspend the ScriptHook fiber long enough for that timeout to expire after the player has already closed the menu, which used to leave the local game permanently frozen.
         GAMEPLAY::SET_THIS_SCRIPT_CAN_BE_PAUSED(FALSE);
         const auto now = TickMilliseconds();
         const auto localPlayer = PLAYER::PLAYER_ID();
@@ -15595,10 +15376,8 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
                 Log(
                     "[INFO][PEER_COMBAT] NPC reaction and crime isolation enabled for peer-only combat");
             }
-            // This guard is deliberately short-lived and refreshed only by a
-            // peer melee/lasso target. It prevents ambient witnesses and honor
-            // scripts from treating the private replica as a civilian victim,
-            // without suppressing the host's ordinary combat indefinitely.
+            // This guard is deliberately short-lived and refreshed only by a peer melee/lasso target.
+            // It prevents ambient witnesses and honor scripts from treating the private replica as a civilian victim, without suppressing the host's ordinary combat indefinitely.
             PLAYER::SET_EVERYONE_IGNORE_PLAYER(localPlayer, TRUE);
             PLAYER::CLEAR_PLAYER_HAS_DAMAGED_AT_LEAST_ONE_PED(
                 localPlayer);
@@ -15633,10 +15412,8 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
                             "native RDR2 pause frontend opened after synchronized request");
                     }
                     frontendPauseTogglePending_ = false;
-                    // The real menu is open, but a single physical Escape
-                    // must remain only a resume vote. Block the frontend
-                    // control until host consensus requests the synthetic
-                    // close below.
+                    // The real menu is open, but a single physical Escape must remain only a resume vote.
+                    // Block the frontend control until host consensus requests the synthetic close below.
                     CONTROLS::DISABLE_CONTROL_ACTION(
                         kInputGroupGameplay,
                         kInputFrontendPause,
@@ -15667,11 +15444,9 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
                     GAMEPLAY::SET_TIME_SCALE(1.0F);
                     UI::DISABLE_FRONTEND_THIS_FRAME();
                 } else if (!frontendPauseCycleCompleted_) {
-                    // We previously observed the frontend open. If execution
-                    // resumes while it is no longer active, the player closed
-                    // it locally before the authoritative resume arrived.
-                    // Mark this vote cycle complete so it is never reopened
-                    // or converted into a hard game freeze.
+                    // We previously observed the frontend open.
+                    // If execution resumes while it is no longer active, the player closed it locally before the authoritative resume arrived.
+                    // Mark this vote cycle complete so it is never reopened or converted into a hard game freeze.
                     frontendPauseCycleCompleted_ = true;
                     Log(
                         "native RDR2 pause frontend closed locally; waiting for coop resume without freezing gameplay");
@@ -15743,9 +15518,8 @@ void ScriptHookSdkFacade::MaintainRealtimeSession(
                 }
             }
         } else {
-            // Stopping a session is also the emergency escape hatch. Always
-            // release every time override even if bookkeeping was interrupted
-            // while the native frontend had suspended this script.
+            // Stopping a session is also the emergency escape hatch.
+            // Always release every time override even if bookkeeping was interrupted while the native frontend had suspended this script.
             GAMEPLAY::SET_GAME_PAUSED(FALSE);
             GAMEPLAY::SET_TIME_SCALE(1.0F);
             synchronizedPauseActive_ = false;
@@ -15847,8 +15621,7 @@ void ScriptHookSdkFacade::ObserveScriptEvents() noexcept {
         }
         previousScriptEventObservationMs_ = now;
         // The SDK exposes script-event enumeration but not payload schemas.
-        // Record only bounded group/index/type metadata until a specific
-        // campaign event has been independently decoded and verified.
+        // Record only bounded group/index/type metadata until a specific campaign event has been independently decoded and verified.
         constexpr int kEventGroups = 3;
         constexpr int kMaximumEventsPerGroup = 32;
         for (int group = 0; group < kEventGroups; ++group) {
@@ -15863,10 +15636,9 @@ void ScriptHookSdkFacade::ObserveScriptEvents() noexcept {
                     "; diagnostic only, no capability emitted");
             }
         }
-        // The official SDK exposes ownership checks but no supported
-        // enumeration of a ped's entire weapon inventory. Poll only
-        // individually proven capability records. A false-to-true edge proves
-        // acquisition without requiring the player to equip the weapon.
+        // The official SDK exposes ownership checks but no supported enumeration of a ped's entire weapon inventory.
+        // Poll only individually proven capability records.
+        // A false-to-true edge proves acquisition without requiring the player to equip the weapon.
         constexpr std::array<std::uint32_t, 1> kObservedWeaponCapabilities{
             kRepeatingShotgunWeaponHash};
         const auto ped = PLAYER::PLAYER_PED_ID();
@@ -15912,6 +15684,7 @@ ScriptHookSdkFacade::DrainCampaignCapabilityObservations() noexcept {
 }
 
 GuestMissionIsolationStatus
+// Host reads Story Mode state and converts it into the safe mission snapshot consumed by BridgeRuntime; the guest does not use this to control scripts.
 ScriptHookSdkFacade::MaintainMissionAuthority(
     const bool active,
     const bool hostMissionActive,
@@ -15922,9 +15695,8 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         if (active) {
             const auto now = TickMilliseconds();
-            // The start barrier is deliberately the sole path that lifts the
-            // guest prompt guard. It is keyed by an exact catalog mission and
-            // held only by BridgeRuntime while that mission remains active.
+            // The start barrier is deliberately the sole path that lifts the guest prompt guard.
+            // It is keyed by an exact catalog mission and held only by BridgeRuntime while that mission remains active.
             // Do not inspect or modify any Story script memory here.
             if (allowExpectedLocalMissionInstance) {
                 if (missionFlagOverrideActive_) {
@@ -16002,12 +15774,9 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                     GetAnimSceneActiveCameraCount(candidate) <= 0) {
                     return false;
                 }
-                // Never DELETE, pause, unpause, or accelerate a game-owned
-                // scene: its Story script can be waiting for exact authored
-                // timing. The previous unconditional unpause here could race
-                // a script-owned pause and advance a private guest scene
-                // independently of the host. Quarantine owns presentation
-                // while the vanilla scene keeps its own native timing.
+                // Never DELETE, pause, unpause, or accelerate a game-owned scene: its Story script can be waiting for exact authored timing.
+                // The previous unconditional unpause here could race a script-owned pause and advance a private guest scene independently of the host.
+                // Quarantine owns presentation while the vanilla scene keeps its own native timing.
                 guestMissionQuarantinedAnimSceneHandles_.insert(candidate);
                 guestMissionAuthoredSceneSeenUntilMs_ =
                     now + kGuestMissionClearConfirmationMilliseconds;
@@ -16023,10 +15792,8 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                 if (candidate == ownedHybridAnimSceneHandle_) {
                     continue;
                 }
-                // LOAD precedes START in the captured Story VM sequence. Arm
-                // spectator quarantine before the guest's private camera can
-                // own even one rendered frame; START is still allowed and is
-                // fast-forwarded below so the vanilla script can finish.
+                // LOAD precedes START in the captured Story VM sequence.
+                // Arm spectator quarantine before the guest's private camera can own even one rendered frame; START is still allowed and is fast-forwarded below so the vanilla script can finish.
                 guestMissionAuthoredSceneSeenUntilMs_ =
                     now + kGuestMissionClearConfirmationMilliseconds;
                 authoredSceneObserved = true;
@@ -16076,10 +15843,9 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                 localAuthoredSceneConflict ||
                 (!hostPresentationActive &&
                  CAM::IS_CINEMATIC_CAM_RENDERING() != FALSE);
-            // Losing player control is not sufficient evidence of a Story
-            // mission. It also happens while Story Mode loads and on result
-            // screens. V29.5 classified those transitions as fresh local
-            // missions and repeatedly entered spectator/skip quarantine.
+            // Losing player control is not sufficient evidence of a Story mission.
+            // It also happens while Story Mode loads and on result screens.
+            // V29.5 classified those transitions as fresh local missions and repeatedly entered spectator/skip quarantine.
             const bool localControlConflict =
                 !hostPresentationActive &&
                 !missionSpectatorActive_ &&
@@ -16174,13 +15940,9 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                             RADAR::GET_BLIP_FROM_ENTITY(candidate);
                         if (entityBlip == 0 ||
                             RADAR::DOES_BLIP_EXIST(entityBlip) == FALSE) {
-                            // IS_ENTITY_A_MISSION_ENTITY is far too broad in
-                            // Story Mode: camp companions, conversation NPCs
-                            // and temporary script-owned ambient peds all use
-                            // it. Disabling context around every such ped made
-                            // M2 talk and horse prompts unusable. A local
-                            // mission-start guard now requires the actor's
-                            // actual map/prompt blip as positive evidence.
+                            // IS_ENTITY_A_MISSION_ENTITY is far too broad in Story Mode: camp companions, conversation NPCs and temporary script-owned ambient peds all use it.
+                            // Disabling context around every such ped made M2 talk and horse prompts unusable.
+                            // A local mission-start guard now requires the actor's actual map/prompt blip as positive evidence.
                             return false;
                         }
                         const auto position = ToBridgeVector(
@@ -16200,15 +15962,10 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                         return insideGuard;
                     };
 
-                // Do not rely only on hiddenAmbientPeds_. A yellow-marker
-                // actor can enter the local script pool one frame before the
-                // reversible population mask has classified it. That gap let
-                // a guest start their own Story transition in V26.1 even
-                // though the vanilla mission flag was reserved. Scan the
-                // complete local ped pool and close the context controls only
-                // around a blipped non-mount mission actor; replicated host
-                // actors, ordinary conversation NPCs, horses and both player
-                // proxies remain interactive.
+                // Do not rely only on hiddenAmbientPeds_.
+                // A yellow-marker actor can enter the local script pool one frame before the reversible population mask has classified it.
+                // That gap let a guest start their own Story transition in V26.1 even though the vanilla mission flag was reserved.
+                // Scan the complete local ped pool and close the context controls only around a blipped non-mount mission actor; replicated host actors, ordinary conversation NPCs, horses and both player proxies remain interactive.
                 std::array<int, kWorldPedPoolCapacity> storyPeds{};
                 const auto storyPedCount = std::clamp(
                     worldGetAllPeds(
@@ -16284,17 +16041,13 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                 }
             }
 
-            // Never fight an already-running Story VM by stopping its camera,
-            // conversation or player control every frame. Those calls can race
-            // AnimScene teardown and were the source of the V23 post-cutscene
-            // ASI exception. The runtime consumes quarantineActive and keeps a
-            // contaminated guest in the reversible spectator state instead.
+            // Never fight an already-running Story VM by stopping its camera, conversation or player control every frame.
+            // Those calls can race AnimScene teardown and were the source of the V23 post-cutscene ASI exception.
+            // The runtime consumes quarantineActive and keeps a contaminated guest in the reversible spectator state instead.
 
-            // MISSION_FLAG is process-global and also suppresses unrelated
-            // vanilla conversations and mount prompts. Assert it only while a
-            // positively identified mission-start actor, quarantine, or host
-            // presentation needs the gate. The targeted context guard remains
-            // the enforceable pre-marker block.
+            // MISSION_FLAG is process-global and also suppresses unrelated vanilla conversations and mount prompts.
+            // Assert it only while a positively identified mission-start actor, quarantine, or host presentation needs the gate.
+            // The targeted context guard remains the enforceable pre-marker block.
             const bool missionGateRequired =
                 ShouldAssertGuestMissionGate(
                     active,
@@ -16303,10 +16056,8 @@ ScriptHookSdkFacade::MaintainMissionAuthority(
                     guestMissionQuarantineActive_,
                     suppressLocalStoryPrompt);
             if (missionGateRequired && !missionFlagOverrideActive_) {
-                // Own only the transition that this mod asserted. Writing
-                // FALSE on every free-roam tick erased transient vanilla
-                // conversation/prompt ownership and made the guest unable to
-                // talk to NPCs even though no mission guard was active.
+                // Own only the transition that this mod asserted.
+                // Writing FALSE on every free-roam tick erased transient vanilla conversation/prompt ownership and made the guest unable to talk to NPCs even though no mission guard was active.
                 missionFlagOverrideRestoreValue_ =
                     GAMEPLAY::GET_MISSION_FLAG() != FALSE;
                 GAMEPLAY::SET_MISSION_FLAG(TRUE);
@@ -16574,6 +16325,7 @@ void ScriptHookSdkFacade::MaintainCutsceneSkipInput(
     }
 }
 
+// Keeps the guest in the safe spectator/presentation mode during host-owned mission sections where normal shared-world control would be unsafe.
 void ScriptHookSdkFacade::MaintainMissionSpectator(
     const bool active) noexcept {
     try {
@@ -16709,13 +16461,9 @@ void ScriptHookSdkFacade::MaintainMissionSpectator(
                 missionStreamingFocusActive_ = true;
             }
 
-            // A matching local AnimScene owns the exact cast and therefore
-            // keeps transform-driven host proxies hidden. When no such scene
-            // exists, V30.3 uses a deliberately limited kinematic cast: the
-            // host proxies are visible, non-colliding and driven by smoothed
-            // roots plus native idle/locomotion tasks. This cannot invent the
-            // authored dialogue gestures, but avoids both an empty frame and
-            // the direct 30 Hz snap/T-pose loop observed in V29.5/V30.2.
+            // A matching local AnimScene owns the exact cast and therefore keeps transform-driven host proxies hidden.
+            // When no such scene exists, V30.3 uses a deliberately limited kinematic cast: the host proxies are visible, non-colliding and driven by smoothed roots plus native idle/locomotion tasks.
+            // This cannot invent the authored dialogue gestures, but avoids both an empty frame and the direct 30 Hz snap/T-pose loop observed in V29.5/V30.2.
             const bool proxyCastFallback =
                 !missionNativeAnimSceneActive_;
             if (proxyCastFallback !=
@@ -16743,12 +16491,9 @@ void ScriptHookSdkFacade::MaintainMissionSpectator(
                         *proxy,
                         FALSE);
                 } else if (IsOwnedHybridAnimSceneEntity(*proxy)) {
-                    // Exact scenes bind the already replicated world actors;
-                    // they do not spawn a second cast. V31.2 hid every world
-                    // proxy as soon as the native scene became active, which
-                    // made a correctly bound scene camera render without its
-                    // Dutch/Hosea cast. Keep only bound actors visible and let
-                    // the AnimScene own their animation and root motion.
+                    // Exact scenes bind the already replicated world actors; they do not spawn a second cast.
+                    // V31.2 hid every world proxy as soon as the native scene became active, which made a correctly bound scene camera render without its Dutch/Hosea cast.
+                    // Keep only bound actors visible and let the AnimScene own their animation and root motion.
                     ENTITY::FREEZE_ENTITY_POSITION(*proxy, FALSE);
                     ENTITY::SET_ENTITY_VISIBLE(*proxy, TRUE);
                     ENTITY::RESET_ENTITY_ALPHA(*proxy);
@@ -16770,9 +16515,8 @@ void ScriptHookSdkFacade::MaintainMissionSpectator(
                                                      TRUE,
                                                      FALSE));
             if (missionNativeAnimSceneActive_) {
-                // A dictionary/duration-matched local AnimScene owns its cast,
-                // voice tracks and subtitles. Restore the reversible ambient
-                // mask so that engine-owned scene actors remain visible.
+                // A dictionary/duration-matched local AnimScene owns its cast, voice tracks and subtitles.
+                // Restore the reversible ambient mask so that engine-owned scene actors remain visible.
                 RestoreHiddenAmbientPeds();
             } else {
                 std::array<int, kWorldPedPoolCapacity> scenePeds{};
@@ -16906,10 +16650,8 @@ void ScriptHookSdkFacade::MaintainMissionSpectator(
                 !missionNativeAnimSceneActive_ &&
                 !missionReplicatedCameraActive_ &&
                 !missionResumePreparing_) {
-                // A late guest-local Story scene may attempt to reclaim the
-                // rendering stack every frame. Reassert the reversible host
-                // spectator camera so that scene stays quarantined instead of
-                // appearing as a sequential second cutscene.
+                // A late guest-local Story scene may attempt to reclaim the rendering stack every frame.
+                // Reassert the reversible host spectator camera so that scene stays quarantined instead of appearing as a sequential second cutscene.
                 CAM::SET_CAM_ACTIVE(missionSpectatorCamera_, TRUE);
                 CAM::RENDER_SCRIPT_CAMS(
                     TRUE,
@@ -17187,6 +16929,7 @@ void ScriptHookSdkFacade::MaintainMissionResumeBarrier(
     }
 }
 
+// Applies the host camera snapshot as a guest-only presentation fallback while mission/cinematic engine objects cannot be shared directly between PCs.
 void ScriptHookSdkFacade::MaintainReplicatedMissionCamera(
     const bool spectatorActive,
     const std::optional<MissionCameraStatePayload>& state) noexcept {
@@ -17234,8 +16977,7 @@ void ScriptHookSdkFacade::MaintainReplicatedMissionCamera(
                     kMissionCameraGapHoldMilliseconds;
             if (shortNetworkGap) {
                 // Hold the latest cinematic frame through a short UDP gap.
-                // Reattaching to the player after one missed snapshot caused
-                // the visible host-follow camera in otherwise healthy scenes.
+                // Reattaching to the player after one missed snapshot caused the visible host-follow camera in otherwise healthy scenes.
                 return;
             }
             missionReplicatedCameraActive_ = false;
@@ -17336,10 +17078,9 @@ void ScriptHookSdkFacade::MaintainReplicatedMissionCamera(
 
         const auto now = TickMilliseconds();
         missionReplicatedCameraUpdatedMs_ = now;
-        // Cinematic cuts are authored discontinuities. Interpolating them as
-        // ordinary gameplay motion changes framing and makes the guest trail
-        // the host. Apply every authoritative sample exactly; the host stream
-        // already runs at 30 Hz.
+        // Cinematic cuts are authored discontinuities.
+        // Interpolating them as ordinary gameplay motion changes framing and makes the guest trail the host.
+        // Apply every authoritative sample exactly; the host stream already runs at 30 Hz.
         missionReplicatedCameraPosition_ =
             missionReplicatedCameraTargetPosition_;
         missionReplicatedCameraRotation_ =
@@ -17426,6 +17167,7 @@ void ScriptHookSdkFacade::MaintainReplicatedMissionCamera(
 }
 
 ReplicatedAnimScenePrepareResult
+// Checks that the guest can build a matching local animation scene from the host recipe before either side commits the cinematic presentation.
 ScriptHookSdkFacade::PrepareReplicatedAnimSceneDefinition(
     const AnimSceneDefinitionPayload& definition,
     const NetEntityId localEntityId) noexcept {
@@ -17596,12 +17338,9 @@ ScriptHookSdkFacade::PrepareReplicatedAnimSceneDefinition(
             return result;
         };
 
-        // RDR2 must receive the complete required cast before LOAD. The V31.9
-        // ODR1_INT trace proved that loading with only the two player roles
-        // (2/22) never recovered after the remaining world spawns arrived:
-        // IS_ANIM_SCENE_LOADED stayed false until timeout. Re-run this binding
-        // pass on every prepare poll and keep the scene un-loaded until every
-        // required actor exists locally and matches the captured model.
+        // RDR2 must receive the complete required cast before LOAD.
+        // The V31.9 ODR1_INT trace proved that loading with only the two player roles (2/22) never recovered after the remaining world spawns arrived: IS_ANIM_SCENE_LOADED stayed false until timeout.
+        // Re-run this binding pass on every prepare poll and keep the scene un-loaded until every required actor exists locally and matches the captured model.
         auto bindings = bindAvailableRoles();
         ownedHybridAnimSceneResolvedRoles_ = bindings.resolvedRequired;
         if (bindings.entityMismatch) {
@@ -17638,11 +17377,10 @@ ScriptHookSdkFacade::PrepareReplicatedAnimSceneDefinition(
                 std::move(bindings.firstPendingRoleName)};
         }
 
-        // Use the captured dependency order exactly:
-        // CREATE -> SET_ENTITY(all required roles) -> LOAD -> START.
+        // Use the captured dependency order exactly: CREATE -> SET_ENTITY(all required roles) -> LOAD -> START.
         if (!ownedHybridAnimSceneLoadRequested_) {
-            // CREATE already received the captured final playback list. A
-            // second SET_PLAYBACK_LIST here could reset internal streaming.
+            // CREATE already received the captured final playback list.
+            // A second SET_PLAYBACK_LIST here could reset internal streaming.
             LoadAnimScene(ownedHybridAnimSceneHandle_);
             ownedHybridAnimSceneLoadRequested_ = true;
             Log(
@@ -17659,8 +17397,7 @@ ScriptHookSdkFacade::PrepareReplicatedAnimSceneDefinition(
             IsAnimSceneLoaded(ownedHybridAnimSceneHandle_) != FALSE;
 
         // Do not START or declare readiness until RDR2 confirms the resource.
-        // Retry the binding pass while streaming so optional late actors can
-        // still join without ever letting a missing required actor through.
+        // Retry the binding pass while streaming so optional late actors can still join without ever letting a missing required actor through.
         if (!loaded) {
             return {
                 ReplicatedAnimScenePrepareStatus::Pending,
@@ -17733,16 +17470,16 @@ ScriptHookSdkFacade::PrepareReplicatedAnimSceneDefinition(
 
 bool ScriptHookSdkFacade::MaintainHostAnimSceneStartBarrier(
     const bool active) noexcept {
-    // The sampled handle belongs to RDR2's Story VM. Pausing it while the
-    // guest streams a speculative replica also pauses the host-side actor
-    // assignment and audio timeline. V31.5 proved that this can make even the
-    // authoritative host scene render without its cast. Keep only a logical
-    // 2PC marker; the game-owned scene is observation-only and never mutated.
+    // The sampled handle belongs to RDR2's Story VM.
+    // Pausing it while the guest streams a speculative replica also pauses the host-side actor assignment and audio timeline.
+    // V31.5 proved that this can make even the authoritative host scene render without its cast.
+    // Keep only a logical 2PC marker; the game-owned scene is observation-only and never mutated.
     hostAnimSceneStartBarrierHandle_ = 0;
     hostAnimSceneStartBarrierActive_ = active;
     return true;
 }
 
+// Starts the prepared guest scene only after the host sends the matching commit.
 bool ScriptHookSdkFacade::CommitReplicatedAnimSceneDefinition(
     const AnimSceneControlPayload& commit) noexcept {
     try {
@@ -17757,10 +17494,8 @@ bool ScriptHookSdkFacade::CommitReplicatedAnimSceneDefinition(
             IsAnimSceneLoaded(ownedHybridAnimSceneHandle_) == FALSE) {
             return false;
         }
-        // CREATE/LOAD happens after the host Story VM has already started its
-        // scene. Begin a late guest scene at bounded fast-forward when the
-        // committed phase is non-zero; the live phase controller below then
-        // converges it to the host instead of replaying the scene from frame 0.
+        // CREATE/LOAD happens after the host Story VM has already started its scene.
+        // Begin a late guest scene at bounded fast-forward when the committed phase is non-zero; the live phase controller below then converges it to the host instead of replaying the scene from frame 0.
         const auto initialRate =
             commit.startPhase > 0.001F
                 ? 4.0F
@@ -17927,10 +17662,8 @@ bool ScriptHookSdkFacade::MaintainReplicatedAnimScene(
                         kAnimSceneMaximumProbeHandle)) {
                     ++guestAnimSceneProbeAttempts_;
                 }
-                // A dictionary can have a stale preloaded duplicate. Bind only
-                // to the instance that is actually running/loaded and owns an
-                // authored camera; after binding, retain that handle across a
-                // short engine stop so it can be restarted once below.
+                // A dictionary can have a stale preloaded duplicate.
+                // Bind only to the instance that is actually running/loaded and owns an authored camera; after binding, retain that handle across a short engine stop so it can be restarted once below.
                 if (signatureMatches(candidate) &&
                     (IsAnimSceneLoaded(candidate) != FALSE ||
                      IsAnimSceneRunning(candidate) != FALSE) &&
@@ -18021,10 +17754,9 @@ bool ScriptHookSdkFacade::MaintainReplicatedAnimScene(
                 SetAnimScenePaused(guestAnimSceneHandle_, false);
                 guestAnimScenePausedByBridge_ = false;
             }
-            // AnimScene rate is duration-relative. The old fixed phase gain
-            // needed tens of seconds to recover a one- or two-second prepare
-            // delay in a long Story scene. Convert phase error back to seconds
-            // and converge over a bounded 750 ms window instead.
+            // AnimScene rate is duration-relative.
+            // The old fixed phase gain needed tens of seconds to recover a one- or two-second prepare delay in a long Story scene.
+            // Convert phase error back to seconds and converge over a bounded 750 ms window instead.
             const auto catchUpRate =
                 std::max(0.0F, phaseError) *
                 state->durationSeconds /
@@ -18215,12 +17947,9 @@ void ScriptHookSdkFacade::MaintainMissionCompanionPresentation(
                 std::to_string(missionObjectiveBlip_ != 0));
         }
 
-        // ScriptHook exposes no verified getter for the current localized
-        // objective line owned by another process's Story VM. Show a stable
-        // mission-context panel instead of the misleading old "follow host"
-        // wording. The yellow world/minimap marker remains the spatial aid;
-        // this panel tells the guest that the active task is the shared Story
-        // objective, not a generic follow-me command.
+        // ScriptHook exposes no verified getter for the current localized objective line owned by another process's Story VM.
+        // Show a stable mission-context panel instead of the misleading old "follow host" wording.
+        // The yellow world/minimap marker remains the spatial aid; this panel tells the guest that the active task is the shared Story objective, not a generic follow-me command.
         DrawNativeRectangle(
             0.785F,
             0.885F,
@@ -18453,6 +18182,7 @@ ScriptHookSdkFacade::SampleRuntimeDivergenceDiagnostics() noexcept {
     return diagnostics;
 }
 
+// Keeps the guest's player replica positioned/visible as a mission companion while the host remains in charge of Story Mode objectives and checkpoints.
 void ScriptHookSdkFacade::MaintainRemoteMissionParticipant(
     const bool hidden) noexcept {
     try {

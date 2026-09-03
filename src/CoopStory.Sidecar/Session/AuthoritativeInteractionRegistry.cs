@@ -18,13 +18,13 @@ internal readonly record struct InteractionAuthoritySnapshot(
     long Cancelled);
 
 /// <summary>
-/// The only state machine allowed to approve cross-player interactions. It is
-/// intentionally engine-agnostic: the host validates stable identities,
-/// freshness, distance and lifecycle, then both bridges apply the same
-/// semantic result to their own process-local handles.
+/// The only state machine allowed to approve cross-player interactions.
+/// It is intentionally engine-agnostic: the host validates stable identities, freshness, distance and lifecycle, then both bridges apply the same semantic result to their own process-local handles.
 /// </summary>
 internal sealed class AuthoritativeInteractionRegistry
 {
+    // Interaction decisions require recent player transforms.
+    // The host refuses an old position instead of allowing a revive/mount action from far away.
     private const long MaximumPlayerStateAgeMs = 2_000;
     private const float PlayerInteractionDistanceMeters = 2.0f;
     private const float MountInteractionDistanceMeters = 3.5f;
@@ -41,10 +41,8 @@ internal sealed class AuthoritativeInteractionRegistry
         InteractionResultPayload Result);
 
     /// <summary>
-    /// Opaque rollback point used while a peer-originated authority decision
-    /// is being delivered to the exact local game-pipe generation. The peer
-    /// control gate serializes every host mutation, so restoring this complete
-    /// snapshot cannot overwrite another committed interaction transaction.
+    /// Opaque rollback point used while a peer-originated authority decision is being delivered to the exact local game-pipe generation.
+    /// The peer control gate serializes every host mutation, so restoring this complete snapshot cannot overwrite another committed interaction transaction.
     /// </summary>
     internal sealed class TransactionSnapshot
     {
@@ -106,6 +104,7 @@ internal sealed class AuthoritativeInteractionRegistry
         ArgumentNullException.ThrowIfNull(lookupPlayer);
         lock (_sync)
         {
+            // Return an identical result for a retry, but reject stale IDs or revisions before they can repeat an old physical interaction.
             if (_cursors.TryGetValue(intent.ActorEntityId, out var cursor))
             {
                 if (cursor.InteractionId == intent.InteractionId &&
@@ -131,6 +130,7 @@ internal sealed class AuthoritativeInteractionRegistry
                 }
             }
 
+            // The host validates identity, freshness, matching slots and range before the intent is allowed to change authoritative state.
             if (!TryValidateParticipantsLocked(
                     intent,
                     lookupPlayer,
@@ -141,6 +141,7 @@ internal sealed class AuthoritativeInteractionRegistry
                 return RejectLocked(intent, rejection, nowMs);
             }
 
+            // A cancel ends the actor's currently held operation and is itself remembered, so duplicate cancel packets remain idempotent.
             if (intent.Phase == InteractionIntentPhase.Cancel)
             {
                 _active.Remove(intent.ActorEntityId);
@@ -188,6 +189,8 @@ internal sealed class AuthoritativeInteractionRegistry
                 return new InteractionAuthorityResolution(completed, free);
             }
 
+            // Revive is a hold-to-complete host clock, not a client claim.
+            // Each sustain packet must arrive within its short freshness interval.
             if (intent.Kind == InteractionKind.Revive)
             {
                 if (actor is null || target is null ||
@@ -281,9 +284,8 @@ internal sealed class AuthoritativeInteractionRegistry
                 return new InteractionAuthorityResolution(inProgress);
             }
 
-            // Mount/dismount and emergency recovery are immediate semantic
-            // transactions. The bridges still report a native apply failure in
-            // their diagnostics, but they never invent a different target.
+            // Mount/dismount and emergency recovery are immediate semantic transactions.
+            // The bridges still report a native apply failure in their diagnostics, but they never invent a different target.
             var immediate = Result(
                 intent,
                 InteractionResultStatus.Completed,
@@ -326,11 +328,8 @@ internal sealed class AuthoritativeInteractionRegistry
                     PlayerActionKind.Hogtie))
             {
                 // RDR2 clears the target handle before the final action sample.
-                // Consequently End normally arrives with target=0 and without
-                // TargetEntityValid/PhysicalTargetEffect. Resolve that terminal
-                // by its stable actor + action id instead of rejecting it as an
-                // invalid physical sample, otherwise Lassoed remains latched
-                // forever on both bridges.
+                // Consequently End normally arrives with target=0 and without TargetEntityValid/PhysicalTargetEffect.
+                // Resolve that terminal by its stable actor + action id instead of rejecting it as an invalid physical sample, otherwise Lassoed remains latched forever on both bridges.
                 if (TryFindTerminalRestraintLocked(
                         action,
                         out var releaseable))
@@ -368,10 +367,8 @@ internal sealed class AuthoritativeInteractionRegistry
                 current.OwnerEntityId == action.ActorEntityId &&
                 current.SourceInteractionId == action.ActionId)
             {
-                // A same-revision snapshot is a lease heartbeat. It keeps a
-                // legitimate held lasso alive in the bridges without creating
-                // a false state transition or incrementing the authority
-                // revision on every Sustain packet.
+                // A same-revision snapshot is a lease heartbeat.
+                // It keeps a legitimate held lasso alive in the bridges without creating a false state transition or incrementing the authority revision on every Sustain packet.
                 if (desiredState == PlayerRestraintState.Lassoed &&
                     action.Phase is PlayerActionPhase.Active or
                         PlayerActionPhase.Attached or
@@ -397,20 +394,15 @@ internal sealed class AuthoritativeInteractionRegistry
     }
 
     /// <summary>
-    /// Allows an already-authoritative lasso/hogtie to be released even when
-    /// its remote PlayerState mapping lease has expired. This never authorizes
-    /// a new physical action: the actor and action id must match a restraint
-    /// that is still active in the host registry.
+    /// Allows an already-authoritative lasso/hogtie to be released even when its remote PlayerState mapping lease has expired.
+    /// This never authorizes a new physical action: the actor and action id must match a restraint that is still active in the host registry.
     /// </summary>
     internal bool HasMatchingTerminalRestraint(PlayerActionPayload action)
     {
         lock (_sync)
         {
-            // This proof is the only path allowed to bypass a temporarily
-            // missing PlayerState mapping for a peer-originated terminal. The
-            // owner slot was captured when the original physical action still
-            // had a fresh authenticated mapping; forgeable ActorSlot bits on
-            // the terminal payload are never sufficient by themselves.
+            // This proof is the only path allowed to bypass a temporarily missing PlayerState mapping for a peer-originated terminal.
+            // The owner slot was captured when the original physical action still had a fresh authenticated mapping; forgeable ActorSlot bits on the terminal payload are never sufficient by themselves.
             return TryFindTerminalRestraintLocked(
                 action,
                 out _,
@@ -509,9 +501,8 @@ internal sealed class AuthoritativeInteractionRegistry
             _restraints[state.SubjectEntityId] = state;
             if (state.State != PlayerRestraintState.Free)
             {
-                // A wire RestraintState does not carry owner provenance. Do
-                // not let provenance retained from an older local authority
-                // decision authorize a future mapping-bypass terminal.
+                // A wire RestraintState does not carry owner provenance.
+                // Do not let provenance retained from an older local authority decision authorize a future mapping-bypass terminal.
                 _restraintOwnerSlots.Remove(state.SubjectEntityId);
             }
             return true;
@@ -598,6 +589,7 @@ internal sealed class AuthoritativeInteractionRegistry
             return false;
         }
 
+        // Distance is evaluated against the host's latest snapshots, with a slightly larger allowance only for mount attachment operations.
         if (target is not null && !selfRecovery)
         {
             var distance = Vector3.Distance(
@@ -685,6 +677,7 @@ internal sealed class AuthoritativeInteractionRegistry
         bool snapshot,
         byte? ownerSlot = null)
     {
+        // Each restraint update increments its subject revision so an older free/bound packet cannot overwrite a newer authoritative decision.
         var revision = _restraints.TryGetValue(subject, out var previous)
             ? unchecked(previous.Revision + 1)
             : 1;

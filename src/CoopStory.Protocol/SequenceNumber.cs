@@ -1,5 +1,7 @@
 namespace CoopStory.Protocol;
 
+// Unsigned sequence arithmetic that still works when a 32-bit counter wraps.
+// A candidate less than half the number space ahead is considered newer.
 public static class SequenceNumber
 {
     public static bool IsNewer(uint candidate, uint reference) =>
@@ -17,6 +19,8 @@ public sealed class SequenceTracker
         ? _latest
         : throw new InvalidOperationException("No sequence has been accepted.");
 
+    // Strict in-order tracker: useful when receiving an older state would undo the current state.
+    // It never accepts a late packet, even if unseen.
     public bool TryAccept(uint sequence)
     {
         if (!_hasValue)
@@ -42,6 +46,8 @@ public sealed class SequenceTracker
     }
 }
 
+// Sliding 64-message replay window for UDP.
+// It permits a previously unseen late packet within the window, but rejects duplicates and very old traffic.
 public sealed class SequenceReplayWindow
 {
     private const int WindowSize = 64;
@@ -65,6 +71,8 @@ public sealed class SequenceReplayWindow
             return true;
         }
 
+        // A newer highest number shifts the seen-bit window forward.
+        // Bit zero always represents the newest accepted sequence.
         if (SequenceNumber.IsNewer(sequence, _latest))
         {
             var advance = unchecked(sequence - _latest);
@@ -75,6 +83,7 @@ public sealed class SequenceReplayWindow
             return true;
         }
 
+        // A not-newer packet can still be useful only if it is inside the small window and its bit proves it was not delivered already.
         var distance = unchecked(_latest - sequence);
         if (distance >= WindowSize)
         {

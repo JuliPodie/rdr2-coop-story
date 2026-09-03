@@ -7,6 +7,7 @@ public sealed record SessionConfigPairResult(
     string HostConfigPath,
     string GuestConfigPath);
 
+// Creates a matched host/guest pair with one shared credential, publishing the pair atomically so a launcher never sees a half-written session directory.
 public static class SessionConfigPairGenerator
 {
     public const string HostFileName = "host.config.json";
@@ -36,6 +37,7 @@ public static class SessionConfigPairGenerator
                 "Session output path has no parent directory.");
         Directory.CreateDirectory(parent);
 
+        // Both configuration files need the same secret for their later TCP and UDP authentication proofs; only the guest file is shared with a peer.
         var credentials = SessionCredentials.Generate();
         var common = new SidecarConfig
         {
@@ -59,6 +61,7 @@ public static class SessionConfigPairGenerator
                 "%LOCALAPPDATA%\\RDR2CoopStory\\logs\\guest-sidecar.jsonl"
         }).Validate();
 
+        // Build under a uniquely owned sibling temp directory, then one move makes the pair appear together on the same filesystem volume.
         var staging = Path.Combine(
             parent,
             $".coopstory-session-{Guid.NewGuid():N}.tmp");
@@ -81,6 +84,7 @@ public static class SessionConfigPairGenerator
         }
         catch
         {
+            // Cleanup is restricted to the exact generated staging shape, never a broad caller-controlled path, if serialisation/move fails.
             DeleteOwnedStagingDirectory(staging, parent);
             throw;
         }

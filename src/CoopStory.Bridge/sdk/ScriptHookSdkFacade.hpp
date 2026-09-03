@@ -18,6 +18,8 @@
 
 namespace coopstory::bridge::sdk {
 
+// The real RDR2-facing implementation of IScriptHookFacade.
+// BridgeRuntime uses this interface so multiplayer rules stay separate from ScriptHook native calls.
 class ScriptHookSdkFacade final : public IScriptHookFacade {
 public:
     ScriptHookSdkFacade();
@@ -219,9 +221,8 @@ private:
         // The first hostileCount entries are host-authoritative combatants.
         // The remaining entries are non-combatant scene roles.
         std::vector<LocalEntityHandle> peds{};
-        // Actors remain frozen until their local terrain/collision tile is
-        // ready. This prevents a newly materialized encounter from falling
-        // through the world before its first combat task can run.
+        // Actors remain frozen until their local terrain/collision tile is ready.
+        // This prevents a newly materialized encounter from falling through the world before its first combat task can run.
         std::vector<bool> collisionReady{};
         std::uint64_t collisionDeadlineMs{};
         std::size_t hostileCount{};
@@ -231,8 +232,8 @@ private:
             std::uint32_t modelHash{};
             bool wasVisible{};
         };
-        // Only tracks source actors hidden while a bridge-owned exact event
-        // is active.  They are restored, never deleted or rewarded by us.
+        // Only tracks source actors hidden while a bridge-owned exact event is active.
+        // They are restored, never deleted or rewarded by us.
         std::vector<SuppressedSourcePed> suppressedSourcePeds{};
     };
     bool abandonNativeCleanupAfterFatal_{};
@@ -778,8 +779,8 @@ private:
     bool remoteMissionParticipantHidden_{};
     LocalEntityHandle remoteMissionParticipantPed_{};
     LocalEntityHandle remoteMissionParticipantMount_{};
-    // Bridge-owned hidden actor shells used only by the host-only dialogue
-    // presenter. They are never networked or reused as world replicas.
+    // Bridge-owned hidden actor shells used only by the host-only dialogue presenter.
+    // They are never networked or reused as world replicas.
     std::array<LocalEntityHandle, 2U> hostMissionDialogueProxyPeds_{};
     std::string hostMissionDialogueRoot_{};
     bool remoteMissionParticipantWasVisible_{true};

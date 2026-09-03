@@ -3,6 +3,8 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Persistence;
 
+// Reads/writes the guest's local profile with a backup fallback.
+// This protects local save-like data from a failed write; it is not a LAN synchronization path.
 public sealed class GuestProfileStore : IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);

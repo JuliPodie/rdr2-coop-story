@@ -3,8 +3,8 @@ using System.Buffers.Binary;
 namespace CoopStory.Protocol;
 
 /// <summary>
-/// Binary codecs for the optional AnimGraph replication lane. The payloads
-/// are independently schema-versioned in addition to the frame protocol.
+/// Binary codecs for the optional AnimGraph replication lane.
+/// The payloads are independently schema-versioned in addition to the frame protocol.
 /// </summary>
 public static class AnimationReplicationPayloadCodec
 {
@@ -41,6 +41,8 @@ public static class AnimationReplicationPayloadCodec
         PlayerAnimationStateFlags.RootMotionActive |
         PlayerAnimationStateFlags.Looping;
 
+    // Optional high-detail layer over PlayerState.
+    // It identifies the source animation graph/clip only when the capability and validity flags agree.
     public static byte[] EncodePlayerAnimationState(
         PlayerAnimationStatePayload payload)
     {
@@ -80,6 +82,7 @@ public static class AnimationReplicationPayloadCodec
                 "Player animation state reserved field must be zero.");
         }
 
+        // Read fixed offsets first, then validate the cross-field contract so a peer cannot claim a phase/rate for a clip it did not identify.
         var result = new PlayerAnimationStatePayload(
             new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)),
             payload[8],
@@ -104,6 +107,7 @@ public static class AnimationReplicationPayloadCodec
         return result;
     }
 
+    // Both peers exchange this small schema/mode record before accepting live animation samples, preventing incompatible puppet engines from mixing.
     public static byte[] EncodeMotionReplicationConfig(
         MotionReplicationConfigPayload payload)
     {
@@ -135,6 +139,7 @@ public static class AnimationReplicationPayloadCodec
     private static void ValidatePlayerAnimationState(
         PlayerAnimationStatePayload payload)
     {
+        // Canonical validation keeps a malformed optional overlay from corrupting the reliable player-transform lane that must continue to function.
         if (!payload.EntityId.IsValid ||
             payload.Slot > (byte)SessionRole.Guest ||
             payload.SchemaVersion != PlayerAnimationStateSchemaVersion ||

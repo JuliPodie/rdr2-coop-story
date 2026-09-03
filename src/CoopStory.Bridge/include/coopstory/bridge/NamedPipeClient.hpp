@@ -9,6 +9,8 @@
 
 namespace coopstory::bridge {
 
+// Client side of the private local pipe between RDR2 Bridge and C# Sidecar.
+// It is not the host-to-guest network connection; both PCs have their own pipe.
 inline constexpr std::wstring_view kDefaultPipeStem = L"CoopStory.Bridge.v1";
 inline constexpr std::uint32_t kDefaultPipeConnectTimeoutMs = 1U;
 

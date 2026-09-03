@@ -14,9 +14,8 @@ internal readonly record struct MissionStateCacheUpdate(
     MissionStatePayload State);
 
 /// <summary>
-/// Keeps the newest validated host mission state available while the game pipe
-/// is disconnected. Mission epoch/revision order wins over transport order;
-/// equal revisions are accepted only as byte-equivalent heartbeats.
+/// Keeps the newest validated host mission state available while the game pipe is disconnected.
+/// Mission epoch/revision order wins over transport order; equal revisions are accepted only as byte-equivalent heartbeats.
 /// </summary>
 internal sealed class AuthoritativeMissionStateCache
 {
@@ -57,6 +56,7 @@ internal sealed class AuthoritativeMissionStateCache
                     candidate);
             }
 
+            // A matching mission epoch/revision may be a heartbeat only if the content is byte-equivalent; otherwise a sender skipped revision.
             var sameVersion =
                 candidate.MissionEpoch == current.MissionEpoch &&
                 candidate.Revision == current.Revision;
@@ -107,6 +107,7 @@ internal sealed class AuthoritativeMissionStateCache
         }
     }
 
+    // Cached payloads outlive their network read callback, so retain a copy.
     private static ProtocolEnvelope Freeze(ProtocolEnvelope envelope) =>
         new(
             envelope.Type,

@@ -19,6 +19,8 @@
 
 namespace coopstory::bridge {
 
+// Main in-RDR2 multiplayer coordinator.
+// It samples the local game, sends/gets pipe frames, tracks host/guest state, and asks the facade to update RDR2.
 struct BridgeRuntimeConfig final {
     MissionBubbleOverLimitAction bubbleAction{
         MissionBubbleOverLimitAction::TeleportGuest};
@@ -377,36 +379,32 @@ private:
     std::uint32_t localMissionObjectiveRevision_{};
     std::uint64_t nextMissionObjectiveSampleMs_{};
     std::optional<MissionProgressionPayload> localMissionProgressionOffer_{};
-    // A mission completion can carry persistent save changes. Retain it for
-    // bounded retransmission until the guest explicitly acknowledges that
-    // its local transaction completed.
+    // A mission completion can carry persistent save changes.
+    // Retain it for bounded retransmission until the guest explicitly acknowledges that its local transaction completed.
     std::optional<MissionProgressionPayload> localMissionProgressionCompletion_{};
     std::optional<MissionProgressionPayload> remoteMissionProgressionOffer_{};
-    // The host opens this only after the guest has confirmed the exact
-    // MissionData entry. It is a bounded permission to use the guest's own
-    // vanilla prompt, never a general Story-mode exemption.
+    // The host opens this only after the guest has confirmed the exact MissionData entry.
+    // It is a bounded permission to use the guest's own vanilla prompt, never a general Story-mode exemption.
     std::optional<MissionProgressionPayload> localMissionStartBarrier_{};
     std::optional<MissionProgressionPayload> remoteMissionStartBarrier_{};
     std::uint64_t localMissionStartBarrierDeadlineMs_{};
     std::uint64_t remoteMissionStartBarrierDeadlineMs_{};
-    // A guest barrier starts guarded. The short verified-idle interval
-    // distinguishes a fresh host-authorized prompt interaction from a local
-    // mission that was already entering when the network barrier arrived.
+    // A guest barrier starts guarded.
+    // The short verified-idle interval distinguishes a fresh host-authorized prompt interaction from a local mission that was already entering when the network barrier arrived.
     std::uint64_t remoteMissionStartBarrierPromptArmedAtMs_{};
     bool localMissionStartBarrierGuestStarted_{};
     bool remoteMissionStartBarrierGuestStarted_{};
     bool remoteMissionStartBarrierReleased_{};
     bool remoteMissionStartBarrierRejected_{};
-    // Set only after the host releases an exact matching local mission
-    // instance. Eligibility alone never authorizes a save mutation.
+    // Set only after the host releases an exact matching local mission instance.
+    // Eligibility alone never authorizes a save mutation.
     bool remoteMissionProgressionParticipated_{};
     std::uint64_t nextGuestMissionInstanceStartedRetryMs_{};
-    // This is calculated locally when the guest receives the offer.  A host
-    // completion frame may never substitute for that local-save evidence.
+    // This is calculated locally when the guest receives the offer.
+    // A host completion frame may never substitute for that local-save evidence.
     bool remoteMissionProgressionEligible_{};
-    // Completion frames are reliable enough to be retransmitted across a
-    // reconnect.  Keep their effects exactly-once even after a future native
-    // mapping is enabled.
+    // Completion frames are reliable enough to be retransmitted across a reconnect.
+    // Keep their effects exactly-once even after a future native mapping is enabled.
     std::optional<std::uint64_t> remoteMissionProgressionAppliedEventId_{};
     std::uint32_t localProgressionMissionId_{};
     bool guestMissionProgressionEligible_{};
@@ -561,9 +559,7 @@ private:
     std::uint64_t nextAppearanceRefreshMs_{};
     std::uint64_t nextMotionDiagnosticsMs_{};
     std::uint64_t nextMissionIsolationDiagnosticsMs_{};
-    // A short entry debounce rejects incidental control suppression (such as
-    // the interaction frontend), while the release hold prevents one-frame
-    // control/UI transitions from toggling guest spectator repeatedly.
+    // A short entry debounce rejects incidental control suppression (such as the interaction frontend), while the release hold prevents one-frame control/UI transitions from toggling guest spectator repeatedly.
     std::optional<std::uint64_t> spectatorClassifierCandidateSinceMs_{};
     std::uint64_t spectatorClassifierReleaseUntilMs_{};
     std::uint64_t nextRuntimeDiagnosticsMs_{};
@@ -585,14 +581,12 @@ private:
     std::uint64_t pendingTeleportRequestedAtMs_{};
     bool hostWorldMirrorActive_{};
     bool guestWorldMirrorActive_{};
-    // SOLO TEST only: accepts the looped-back, offset host graph through the
-    // normal guest proxy renderer so one PC can switch between host and guest
-    // population layers. It is gated by the SyntheticTest player flag.
+    // SOLO TEST only: accepts the looped-back, offset host graph through the normal guest proxy renderer so one PC can switch between host and guest population layers.
+    // It is gated by the SyntheticTest player flag.
     bool soloGuestWorldViewEnabled_{};
     bool guestWorldAuthorityConfirmed_{};
-    // This lease starts before a JOIN request leaves the bridge and survives
-    // transport reconnects, spectator windows and Solo override. Releasing it
-    // any earlier would briefly reopen the guest's process-local Story VM.
+    // This lease starts before a JOIN request leaves the bridge and survives transport reconnects, spectator windows and Solo override.
+    // Releasing it any earlier would briefly reopen the guest's process-local Story VM.
     bool guestMissionIsolationLeaseActive_{};
     bool remoteMountAbsenceConfirmed_{};
     std::string hostInviteCode_{};

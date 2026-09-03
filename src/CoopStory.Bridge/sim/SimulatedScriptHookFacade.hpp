@@ -9,6 +9,8 @@
 
 namespace coopstory::bridge::simulation {
 
+// Test replacement for the real RDR2 facade.
+// It gives BridgeRuntime predictable player/world answers so protocol and desync rules can be tested outside RDR2.
 class SimulatedScriptHookFacade final : public IScriptHookFacade {
 public:
     SimulatedScriptHookFacade();

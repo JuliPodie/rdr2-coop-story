@@ -8,6 +8,8 @@ using CoopStory.Sidecar.Session;
 
 namespace CoopStory.Sidecar.Simulation;
 
+// Local two-player test world used without RDR2.
+// It produces the same kinds of player/NPC/control messages as a real session so networking bugs can be found before testing inside the game.
 public sealed record LocalGameTestResult(
     int HostSnapshotsObserved,
     int GuestSnapshotsSent,
@@ -514,10 +516,8 @@ public static class LocalGameTestSession
                             host);
                     }
 
-                    // This authenticated UDP packet teaches the host which
-                    // ephemeral endpoint belongs to the synthetic guest.
-                    // It is intentionally ignored by SidecarRuntime, so no
-                    // invalid world-space position can reach the bridge.
+                    // This authenticated UDP packet teaches the host which ephemeral endpoint belongs to the synthetic guest.
+                    // It is intentionally ignored by SidecarRuntime, so no invalid world-space position can reach the bridge.
                     _ = await guest.SendSnapshotAsync(
                         MessageType.Heartbeat,
                         ReadOnlyMemory<byte>.Empty,
@@ -1193,9 +1193,8 @@ public static class LocalGameTestSession
     {
         var flags = host.Flags;
         flags &= ~PlayerStateFlags.OnlineModeDetected;
-        // A mount needs its own replicated entity and relationship. Until the
-        // live mirror also mirrors that lane, presenting the actor as mounted
-        // would leave it suspended beside the local horse.
+        // A mount needs its own replicated entity and relationship.
+        // Until the live mirror also mirrors that lane, presenting the actor as mounted would leave it suspended beside the local horse.
         flags &= ~PlayerStateFlags.Mounted;
         flags |= PlayerStateFlags.SyntheticTest;
         var aimTarget =

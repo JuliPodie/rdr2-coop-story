@@ -9,6 +9,8 @@
 
 namespace coopstory::bridge {
 
+// Gives host-created NPC/object proxies shared NetEntityIds and remembers each PC's own local handle for that ID.
+// The two IDs must never be confused.
 class NetEntityIdGenerator final {
 public:
     explicit NetEntityIdGenerator(std::uint32_t epoch, std::uint32_t firstCounter = 1U);

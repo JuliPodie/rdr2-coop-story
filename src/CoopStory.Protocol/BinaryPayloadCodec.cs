@@ -5,6 +5,8 @@ using System.Text;
 
 namespace CoopStory.Protocol;
 
+// Fixed-layout payload serializers for multiplayer state.
+// Every encoder writes a canonical byte layout; every decoder checks exact length, reserved fields, enums, IDs, and numeric ranges before a frame reaches game/session logic.
 public static class BinaryPayloadCodec
 {
     public const int PlayerStateSize = 104;
@@ -310,6 +312,7 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Realtime player snapshot: identity, transform, health and locomotion are kept together so a remote puppet can present one coherent point in time.
     public static byte[] EncodePlayerState(PlayerStatePayload payload)
     {
         ValidatePlayerState(payload);
@@ -341,6 +344,8 @@ public static class BinaryPayloadCodec
     public static PlayerStatePayload DecodePlayerState(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, PlayerStateSize, nameof(PlayerStatePayload));
+        // Decode first, then run semantic validation.
+        // A correctly-sized buffer is not sufficient if it carries NaN coordinates or an invalid role.
         var result = new PlayerStatePayload(
             new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)),
             payload[8],
@@ -778,6 +783,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Host-authoritative NPC/object snapshot.
+    // ParentEntityId connects riders and attachments; TaskKind/flags describe how the guest should present it.
     public static byte[] EncodeWorldEntityState(
         WorldEntityStatePayload payload)
     {
@@ -855,6 +862,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // A guest asks the host to validate/apply this hit.
+    // It is not proof that a local proxy was damaged, which is why host-side range/state checks remain.
     public static byte[] EncodeDamageIntent(DamageIntentPayload payload)
     {
         ValidateDamageIntent(payload);
@@ -932,6 +941,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Mission state is an ordered host record.
+    // Epoch/revision/checkpoint values let a guest reject an old scene after a recovery or checkpoint restart.
     public static byte[] EncodeMissionState(MissionStatePayload payload)
     {
         ValidateMissionState(payload);
@@ -1022,6 +1033,7 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Cinematic state and camera are separate: the first is reliable authority while camera samples can be replaced as the presentation advances.
     public static byte[] EncodeMissionCinematicState(
         MissionCinematicStatePayload payload)
     {
@@ -1173,6 +1185,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // An AnimScene definition is a bounded, role-addressed description of a scripted scene.
+    // It is larger than realtime data and must be reliable.
     public static byte[] EncodeAnimSceneDefinition(
         AnimSceneDefinitionPayload payload)
     {
@@ -1249,6 +1263,8 @@ public static class BinaryPayloadCodec
         BinaryPrimitives.WriteUInt32LittleEndian(span[52..], payload.SceneFlags);
         span[56] = payload.CreateOptionFlags;
 
+        // Variable-length strings and role bindings are appended after the fixed header.
+        // Lengths/counts are written first so the decoder can walk them safely without searching untrusted bytes.
         var offset = AnimSceneDefinitionHeaderSize;
         resource.CopyTo(span[offset..]);
         offset += resource.Length;
@@ -1322,6 +1338,7 @@ public static class BinaryPayloadCodec
             "AnimScene playback list");
         offset += playbackLength;
 
+        // Consume each variable-length role exactly once; leftover/truncated bytes are rejected so incompatible scene schemas cannot silently work.
         var roles = new AnimSceneRoleBindingPayload[roleCount];
         for (var index = 0; index < roles.Length; index++)
         {

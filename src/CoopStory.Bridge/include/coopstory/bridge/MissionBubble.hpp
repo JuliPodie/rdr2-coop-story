@@ -4,6 +4,8 @@
 
 namespace coopstory::bridge {
 
+// Keeps the guest near the host during Story Mode.
+// It first warns, then chooses the configured recovery action instead of letting mission players drift apart.
 inline constexpr float kMissionBubbleWarningMeters = 200.0F;
 inline constexpr float kMissionBubbleLimitMeters = 250.0F;
 

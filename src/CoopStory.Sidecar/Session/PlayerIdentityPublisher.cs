@@ -3,6 +3,7 @@ using CoopStory.Sidecar.Networking;
 
 namespace CoopStory.Sidecar.Session;
 
+// Lets callers distinguish a missing player identity, normal refresh delay, successful control delivery, and a disconnected/failed send.
 internal enum IdentityPublishResult
 {
     NotReady,
@@ -11,6 +12,7 @@ internal enum IdentityPublishResult
     Failed
 }
 
+// Publishes the local player's validated nickname only after PlayerState gives it a stable network entity ID; periodically refreshes it across reconnects.
 internal sealed class PlayerIdentityPublisher
 {
     internal const long RefreshIntervalMilliseconds = 5_000;
@@ -39,6 +41,8 @@ internal sealed class PlayerIdentityPublisher
                 "Cannot publish identity for an invalid local player state.");
         }
 
+        // PlayerState owns the current entity ID/slot.
+        // A respawn/reconnect ID change makes the identity immediately due again for the peer bridge.
         var observed = new PlayerIdentityPayload(
             state.EntityId,
             state.Slot,
@@ -85,6 +89,7 @@ internal sealed class PlayerIdentityPublisher
     {
         ArgumentNullException.ThrowIfNull(isPeerConnected);
         ArgumentNullException.ThrowIfNull(send);
+        // Serialize refresh sends so two runtime loops cannot race and publish a stale next-refresh deadline after a newer identity observation.
         await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -107,6 +112,7 @@ internal sealed class PlayerIdentityPublisher
                 identity = _identity.Value;
             }
 
+            // Identity is reliable control rather than UDP snapshot state: the receiving facade needs a complete nickname/entity association.
             var delivered = await send(
                 BinaryPayloadCodec.EncodePlayerIdentity(identity),
                 tick,

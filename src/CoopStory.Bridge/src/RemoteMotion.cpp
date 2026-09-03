@@ -135,8 +135,8 @@ namespace {
         (h00 * from.z) + (h10 * intervalSeconds * fromVelocity.z) +
             (h01 * to.z) + (h11 * intervalSeconds * toVelocity.z)};
 
-    // Bad velocity samples must not make the cubic curve overshoot through a
-    // wall or floor. Keep it inside a small corridor around both endpoints.
+    // Bad velocity samples must not make the cubic curve overshoot through a wall or floor.
+    // Keep it inside a small corridor around both endpoints.
     const auto clampAxis = [](const float sample,
                               const float first,
                               const float second) noexcept {
@@ -243,12 +243,9 @@ void ApplyLocomotion(
         boundedTargetVelocity.x,
         boundedTargetVelocity.y);
 
-    // Once coordinate nudges are removed, authoritative velocity alone is
-    // not enough: an idle remote player would otherwise leave a delayed
-    // proxy standing at the wrong position forever. Convert local separation
-    // into a temporary visual gait and a small animation-rate boost. The ped
-    // still reaches the target through native locomotion; no coordinates are
-    // written here.
+    // Once coordinate nudges are removed, authoritative velocity alone is not enough: an idle remote player would otherwise leave a delayed proxy standing at the wrong position forever.
+    // Convert local separation into a temporary visual gait and a small animation-rate boost.
+    // The ped still reaches the target through native locomotion; no coordinates are written here.
     step.catchUpActive =
         step.positionErrorMeters >
         kRemoteMotionCatchUpDeadZoneMeters;
@@ -320,9 +317,8 @@ void ApplyLocomotion(
             std::clamp(input.targetDesiredMoveBlend, 0.0F, 3.0F));
     }
 
-    // The facade replaces this checkpoint with a curvature-aware point from
-    // its monotonic route queue. Never extend the velocity tangent here: on a
-    // corner that line points through the outside wall.
+    // The facade replaces this checkpoint with a curvature-aware point from its monotonic route queue.
+    // Never extend the velocity tangent here: on a corner that line points through the outside wall.
     step.taskDestination = step.snapPosition;
 }
 
@@ -348,10 +344,8 @@ void ApplyLocomotion(
         desired = ClampRemoteVelocity(desired);
     }
 
-    // Smooth the command carried by the facade, not the engine-reported
-    // velocity that native locomotion may reset between frames. This retains
-    // V9.1's reliable catch-up while removing the visible jump from ordinary
-    // gait speed straight to the 12 m/s ceiling.
+    // Smooth the command carried by the facade, not the engine-reported velocity that native locomotion may reset between frames.
+    // This retains V9.1's reliable catch-up while removing the visible jump from ordinary gait speed straight to the 12 m/s ceiling.
     const auto boundedElapsedMs = std::clamp<std::uint32_t>(
         input.elapsedMs,
         1U,
@@ -653,6 +647,8 @@ RemoteMovementDirection ClassifyRemoteMovementDirection(
 Vec3 SelectGroundSafePosition(
     const Vec3& reportedPosition,
     const std::optional<float> groundZ) noexcept {
+    // Only fix a small height mistake.
+    // Do not pull a player to a different floor.
     if (!IsFinite(reportedPosition) ||
         !groundZ.has_value() ||
         !IsFinite(*groundZ) ||
@@ -680,6 +676,9 @@ RemoteMotionStep PlanRemoteMotion(
             : 0.0F;
     step.velocity = StopHorizontalMotion(input.currentVelocity);
 
+    // Bad position data?
+    // Do nothing.
+    // Never send bad numbers into RDR2.
     if (!IsFinite(input.currentPosition) ||
         !IsFinite(input.targetPosition) ||
         !IsFinite(input.targetVelocity) ||
@@ -695,6 +694,8 @@ RemoteMotionStep PlanRemoteMotion(
     step.positionErrorMeters = separation;
     ApplyLocomotion(step, input);
 
+    // Only teleport when the host says this was a real teleport/reconnect.
+    // Normal late packets should use smooth movement instead.
     if (input.discontinuity &&
         separation >= kRemoteMotionSnapDistanceMeters) {
         step.mode = RemoteMotionMode::Snap;
@@ -705,6 +706,7 @@ RemoteMotionStep PlanRemoteMotion(
         return step;
     }
 
+    // Normal movement: move toward the saved remote position at a safe speed.
     step.mode = RemoteMotionMode::SmoothVelocity;
     step.velocity = PlanCatchUpVelocity(input);
     const auto boundedElapsedMs = std::clamp<std::uint32_t>(
@@ -759,6 +761,7 @@ bool ShouldSuppressRemoteAimRoot(
     if (!IsFinite(positionErrorMeters)) {
         return currentlySuppressed;
     }
+    // Use two distances so aiming does not rapidly turn on/off near one spot.
     if (currentlySuppressed) {
         return positionErrorMeters >
                kRemoteAimRootSuppressExitMeters;
@@ -820,9 +823,8 @@ bool ShouldUseRemoteNavigationRecovery(
         return false;
     }
     if (physicsInterrupted) {
-        // Pause the active recovery while ragdoll/jump/climb owns the task
-        // graph. Retaining the mode prevents a sheriff takedown from creating
-        // a false exit/re-enter pair and losing route progress.
+        // Pause the active recovery while ragdoll/jump/climb owns the task graph.
+        // Retaining the mode prevents a sheriff takedown from creating a false exit/re-enter pair and losing route progress.
         return currentlyActive;
     }
     if (currentlyActive) {
@@ -874,6 +876,8 @@ bool ShouldApplyRemoteNavigationSafeRecovery(
     const float distanceToRouteDestinationMeters,
     const bool physicsInterrupted,
     const bool mounted) noexcept {
+    // If RDR2 pathfinding fails for too long, move the player back near the path.
+    // This can look like a small teleport.
     return navigationTimedOut &&
            hasRouteDestination &&
            IsFinite(positionErrorMeters) &&
@@ -895,6 +899,8 @@ bool ShouldApplyRemoteHardResync(
     const bool physicsInterrupted,
     const bool mounted,
     const bool authoritativeDiscontinuity) noexcept {
+    // If the copy stays 6 m away for too long, or 12 m away very quickly, move it back.
+    // This is one reason remote players can visibly teleport.
     if (!IsFinite(positionErrorMeters) ||
         positionErrorMeters < kRemoteMotionHardResyncDistanceMeters ||
         cooldownActive || physicsInterrupted || mounted ||
@@ -1162,6 +1168,7 @@ std::optional<RemoteSnapshotSample> RemoteSnapshotBuffer::Sample(
         Elapsed(newest.receivedAtMs, nowMs);
     sample.senderTickMs = newest.senderTickMs;
 
+    // One update is not enough to smooth between two positions, so hold it still.
     if (size_ == 1U) {
         sample.mode = RemoteSnapshotSampleMode::Hold;
         return sample;
@@ -1184,6 +1191,8 @@ std::optional<RemoteSnapshotSample> RemoteSnapshotBuffer::Sample(
         return sample;
     }
 
+    // Show the other player a little in the past, between two saved updates.
+    // This hides uneven packet timing.
     for (std::size_t index = 1U; index < size_; ++index) {
         const auto& to = snapshots_[index];
         if (renderAtMs > to.timelineAtMs) {
@@ -1254,6 +1263,7 @@ std::optional<RemoteSnapshotSample> RemoteSnapshotBuffer::Sample(
         return sample;
     }
 
+    // If no new update arrives, guess movement for a short time, then stop.
     const auto extrapolationAge =
         renderAtMs - newest.timelineAtMs;
     const auto maximumExtrapolation =
@@ -1284,6 +1294,7 @@ std::optional<RemoteSnapshotSample> RemoteSnapshotBuffer::Sample(
 }
 
 void RemoteSnapshotBuffer::Reset() noexcept {
+    // After reconnecting, forget old timing data before using new player updates.
     size_ = 0U;
     senderAnchorTickMs_ = 0U;
     receiverAnchorMs_ = 0U;

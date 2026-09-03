@@ -3,9 +3,8 @@ using CoopStory.Sidecar.Ipc;
 namespace CoopStory.Sidecar.Session;
 
 /// <summary>
-/// Serializes a logical game-pipe authority boundary with bridge-originated
-/// work that may mutate reusable session state. An inbound frame is admitted
-/// only while its captured receive generation is still the ready generation.
+/// Serializes a logical game-pipe authority boundary with bridge-originated work that may mutate reusable session state.
+/// An inbound frame is admitted only while its captured receive generation is still the ready generation.
 /// </summary>
 internal sealed class BridgeSessionGenerationGate : IDisposable
 {
@@ -18,6 +17,7 @@ internal sealed class BridgeSessionGenerationGate : IDisposable
             _owner = owner;
         }
 
+        // Releasing the lease is the only way to let the next role/reset or inbound game frame cross this authority boundary.
         public ValueTask DisposeAsync()
         {
             Interlocked.Exchange(ref _owner, null)?.Release();
@@ -34,6 +34,7 @@ internal sealed class BridgeSessionGenerationGate : IDisposable
         ObjectDisposedException.ThrowIf(
             Volatile.Read(ref _disposed) != 0,
             this);
+        // Role changes and token rotation take this lane ahead of related work so they cannot race a bridge message that reuses session state.
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         return new Lease(this);
     }
@@ -47,9 +48,11 @@ internal sealed class BridgeSessionGenerationGate : IDisposable
         ObjectDisposedException.ThrowIf(
             Volatile.Read(ref _disposed) != 0,
             this);
+        // Wait before checking readiness: otherwise a token could become stale immediately after the check but before its handler starts.
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Discard a late frame from the old native bridge rather than allowing it to mutate caches belonging to a replacement session.
             if (!isReadyConnection(receiveConnection))
             {
                 _gate.Release();

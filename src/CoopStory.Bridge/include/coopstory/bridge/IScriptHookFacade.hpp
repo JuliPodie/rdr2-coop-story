@@ -18,6 +18,8 @@
 
 namespace coopstory::bridge {
 
+// Boundary between multiplayer rules and RDR2 native calls.
+// BridgeRuntime asks this interface to sample/apply state; ScriptHookSdkFacade performs game work.
 struct LocalMountSample final {
     LocalEntityHandle localHandle{};
     NetEntityId sharedEntityId{};
@@ -32,9 +34,8 @@ struct LocalMountSample final {
     bool mounted{};
     bool dead{};
     bool borrowedPeerMount{};
-    // The mount-state lane is also used for a shared wagon/carriage.  It is
-    // deliberately a relationship sample, not a claim that vehicle physics
-    // are deterministic on both machines.
+    // The mount-state lane is also used for a shared wagon/carriage.
+    // It is deliberately a relationship sample, not a claim that vehicle physics are deterministic on both machines.
     bool vehicle{};
     bool vehicleDriver{};
     bool vehiclePassenger{};
@@ -46,9 +47,8 @@ struct LocalPlayerSample final {
     Vec3 position{};
     Vec3 velocity{};
     float heading{};
-    // RDR2 can drive scripted/camp locomotion at a custom blend while the
-    // world-space velocity is temporarily zero. Preserve the game-provided
-    // intent so the remote replica does not slide in an idle pose.
+    // RDR2 can drive scripted/camp locomotion at a custom blend while the world-space velocity is temporarily zero.
+    // Preserve the game-provided intent so the remote replica does not slide in an idle pose.
     float desiredMoveBlend{};
     bool desiredMoveBlendValid{};
     float healthFraction{1.0F};
@@ -101,15 +101,14 @@ struct LocalPlayerSample final {
     Vec3 traversalObstacleNormal{};
     float traversalObstacleTopZ{};
     std::optional<LocalMountSample> mount{};
-    // Process-local identity used only while resolving captured AnimScene
-    // roles. It is never copied into PlayerState or any network payload.
+    // Process-local identity used only while resolving captured AnimScene roles.
+    // It is never copied into PlayerState or any network payload.
     LocalEntityHandle localHandle{};
 };
 
-// This describes a bridge profile observed near the local player. It is not a
-// handle for a Rockstar random-event script. Facades must only surface a
-// profile when their own local evidence is safe to replace with a bridge-owned
-// presentation.
+// This describes a bridge profile observed near the local player.
+// It is not a handle for a Rockstar random-event script.
+// Facades must only surface a profile when their own local evidence is safe to replace with a bridge-owned presentation.
 struct AmbientEncounterObservation final {
     AmbientEncounterProfile profile{AmbientEncounterProfile::RoadsideAmbush};
     Vec3 anchor{};
@@ -143,17 +142,14 @@ struct PauseVoteView final {
     bool guestVoted{};
 };
 
-// A host mission cannot be transferred by toggling RDR2's process-local
-// MISSION_FLAG.  The guest therefore keeps its own Story mission runtime idle
-// and treats any unexpected local transition as a quarantined condition.
+// A host mission cannot be transferred by toggling RDR2's process-local MISSION_FLAG.
+// The guest therefore keeps its own Story mission runtime idle and treats any unexpected local transition as a quarantined condition.
 struct GuestMissionIsolationStatus final {
     bool localMissionDetected{};
     bool quarantineActive{};
     bool localStoryInteractionSuppressed{};
-    // True only while a verified local mission-start prompt, a quarantined
-    // local Story transition, or the host's authoritative mission owns the
-    // guest. It is never asserted for the whole network lease, so unrelated
-    // free-roam talk and horse prompts remain game-owned.
+    // True only while a verified local mission-start prompt, a quarantined local Story transition, or the host's authoritative mission owns the guest.
+    // It is never asserted for the whole network lease, so unrelated free-roam talk and horse prompts remain game-owned.
     bool missionGateAsserted{};
 };
 
@@ -168,10 +164,9 @@ struct GuestMissionIsolationStatus final {
             verifiedStoryPromptSuppressed);
 }
 
-// Context inputs used to mount/talk overlap RDR2's melee/grapple controls. A
-// nearby mounted peer can therefore be reported by GET_MELEE_TARGET_FOR_PED
-// while the local player is actually interacting with their own horse. Only a
-// clean combat edge is allowed to publish the victim-owned dismount action.
+// Context inputs used to mount/talk overlap RDR2's melee/grapple controls.
+// A nearby mounted peer can therefore be reported by GET_MELEE_TARGET_FOR_PED while the local player is actually interacting with their own horse.
+// Only a clean combat edge is allowed to publish the victim-owned dismount action.
 [[nodiscard]] constexpr bool ShouldPublishPeerMountPull(
     const bool remoteReplicaMounted,
     const bool peerInRange,
@@ -191,15 +186,14 @@ struct MissionCameraSample final {
     std::uint32_t flags{};
 };
 
-// A bounded, read-only line from the host's Story objective UI. It is used for
-// guest presentation only and is never interpreted as a script command.
+// A bounded, read-only line from the host's Story objective UI.
+// It is used for guest presentation only and is never interpreted as a script command.
 struct MissionObjectiveSample final {
     std::string text{};
 };
 
-// Read-only observation of one catalog-admitted conversation. The facade
-// never creates, starts, pauses, restarts, skips or stops it; normal local
-// mission script ownership remains intact.
+// Read-only observation of one catalog-admitted conversation.
+// The facade never creates, starts, pauses, restarts, skips or stops it; normal local mission script ownership remains intact.
 struct MissionDialogueSample final {
     std::uint32_t profileId{};
     std::uint32_t rootId{};
@@ -209,11 +203,7 @@ struct MissionDialogueSample final {
     bool requiredRolesBound{};
 };
 
-// A catalog entry is intentionally a stable script hash rather than a save
-// offset.  `canStart` is evidence from the guest's own save; it is never
-// inferred from the host chapter or copied between machines. `wasCompleted`
-// is a read-only MISSIONDATA result and distinguishes normal completion from
-// an aborted or unloaded mission script.
+// A catalog entry is intentionally a stable script hash rather than a save offset. `canStart` is evidence from the guest's own save; it is never inferred from the host chapter or copied between machines. `wasCompleted` is a read-only MISSIONDATA result and distinguishes normal completion from an aborted or unloaded mission script.
 struct CampaignMissionProbe final {
     std::uint32_t missionId{};
     bool active{};
@@ -222,9 +212,9 @@ struct CampaignMissionProbe final {
     std::uint8_t rating{};
 };
 
-// Host-process capture records. These types may contain RDR2 handles, so they
-// remain behind the facade boundary. BridgeRuntime converts every role to a
-// stable NetEntityId before constructing AnimSceneDefinitionPayload.
+// Host-process capture records.
+// These types may contain RDR2 handles, so they remain behind the facade boundary.
+// BridgeRuntime converts every role to a stable NetEntityId before constructing AnimSceneDefinitionPayload.
 struct CapturedAnimSceneRoleBinding final {
     std::string roleName{};
     LocalEntityHandle localHandle{};
@@ -292,9 +282,8 @@ struct MissionCompanionPresentation final {
     std::string objectiveText{};
 };
 
-// Sanitized runtime-only measurements used by the structured diagnostics
-// stream.  Handles/pointers never leave the SDK facade; the bridge receives
-// only stable network ids, aggregate counts and bounded numeric errors.
+// Sanitized runtime-only measurements used by the structured diagnostics stream.
+// Handles/pointers never leave the SDK facade; the bridge receives only stable network ids, aggregate counts and bounded numeric errors.
 struct PlayerDivergenceDiagnostic final {
     bool available{};
     float positionErrorMeters{};
@@ -329,17 +318,16 @@ struct RuntimeDivergenceDiagnostics final {
     EntityDivergenceDiagnostic entities{};
 };
 
-// Native-only evidence. A pickup becomes reportable solely after the game
-// reports HAS_PICKUP_BEEN_COLLECTED for a handle observed in this session.
+// Native-only evidence.
+// A pickup becomes reportable solely after the game reports HAS_PICKUP_BEEN_COLLECTED for a handle observed in this session.
 // This intentionally carries no item, money, or inventory data.
 struct VanillaPickupCollection final {
     std::uint64_t collectionId{};
     std::uint32_t pickupHash{};
 };
 
-// A host-local transition to a known campaign capability. It carries no
-// private inventory, save, currency, or weapon-ammo state; BridgeRuntime
-// assigns the durable journal event identity when it forwards the observation.
+// A host-local transition to a known campaign capability.
+// It carries no private inventory, save, currency, or weapon-ammo state; BridgeRuntime assigns the durable journal event identity when it forwards the observation.
 struct CampaignCapabilityObservation final {
     CampaignCapabilityKind kind{CampaignCapabilityKind::WeaponShopEligibility};
     std::uint32_t recordHash{};
@@ -380,8 +368,8 @@ public:
     [[nodiscard]] virtual std::optional<ExactEncounterObservation>
     SampleExactEncounterObservation() noexcept { return std::nullopt; }
 
-    // The facade may only create and later delete entities it created for this
-    // event. Native ambient scripts and their rewards remain private.
+    // The facade may only create and later delete entities it created for this event.
+    // Native ambient scripts and their rewards remain private.
     [[nodiscard]] virtual bool BeginAmbientEncounterPresentation(
         const AmbientEncounterInstance& instance) noexcept {
         (void)instance;
@@ -395,10 +383,8 @@ public:
     virtual void ClearAmbientEncounterPresentation(
         std::uint64_t instanceId) noexcept { (void)instanceId; }
 
-    // Starts a bridge-owned, audio-only local conversation for a guest who is
-    // deliberately not running the host's mission VM. Implementations must
-    // use only catalogue-owned roots and must clean up only conversations and
-    // hidden proxy actors that they created themselves.
+    // Starts a bridge-owned, audio-only local conversation for a guest who is deliberately not running the host's mission VM.
+    // Implementations must use only catalogue-owned roots and must clean up only conversations and hidden proxy actors that they created themselves.
     [[nodiscard]] virtual bool PresentHostMissionDialogue(
         std::uint32_t missionId,
         std::uint32_t rootId) noexcept {
@@ -420,8 +406,8 @@ public:
         (void)revision;
         return std::nullopt;
     }
-    // Process-local identity of the scene represented by the most recent
-    // successful SampleHostAnimScene result. Never serialized or cached.
+    // Process-local identity of the scene represented by the most recent successful SampleHostAnimScene result.
+    // Never serialized or cached.
     [[nodiscard]] virtual std::optional<LocalEntityHandle>
     SampledHostAnimSceneLocalHandle() noexcept {
         return std::nullopt;
@@ -462,9 +448,8 @@ public:
         (void)expectedMissionId;
         return std::nullopt;
     }
-    // This must return false until the entry's exact native completion mapping
-    // has been validated on the pinned game build. It must never write saves
-    // or script globals directly.
+    // This must return false until the entry's exact native completion mapping has been validated on the pinned game build.
+    // It must never write saves or script globals directly.
     [[nodiscard]] virtual bool ApplyCampaignMissionCompletion(
         std::uint32_t missionId,
         std::uint64_t completionEventId,
@@ -555,9 +540,8 @@ public:
         const WorldStatePayload& state) noexcept = 0;
     [[nodiscard]] virtual bool ApplyRemoteEquipment(
         const EquipmentStatePayload& state) noexcept = 0;
-    // A host weapon observation is a capability signal, not an inventory
-    // transfer.  The guest receives only the local shop/unlock entitlement;
-    // weapon ownership, ammo, upgrades and money remain private.
+    // A host weapon observation is a capability signal, not an inventory transfer.
+    // The guest receives only the local shop/unlock entitlement; weapon ownership, ammo, upgrades and money remain private.
     [[nodiscard]] virtual bool UnlockLocalWeaponEntitlement(
         std::uint32_t weaponHash) noexcept {
         (void)weaponHash;
@@ -585,10 +569,8 @@ public:
     [[nodiscard]] virtual bool ApplyWorldEntityDamage(
         LocalEntityHandle target,
         float damage) noexcept = 0;
-    // Mission actors need an attacker that exists inside the host's Story
-    // Mode process.  The default keeps non-SDK facades source-compatible;
-    // the real SDK facade overrides this with a single attributed bullet
-    // owned by the host-side guest replica.
+    // Mission actors need an attacker that exists inside the host's Story Mode process.
+    // The default keeps non-SDK facades source-compatible; the real SDK facade overrides this with a single attributed bullet owned by the host-side guest replica.
     [[nodiscard]] virtual bool ApplyMissionWorldEntityDamage(
         LocalEntityHandle target,
         std::uint32_t weaponHash,
@@ -604,10 +586,8 @@ public:
         bool active,
         bool hostMissionActive,
         bool hostPresentationActive,
-        // A narrow, protocol-authenticated exception for a guest that has
-        // confirmed the host's exact MissionData ID and is entering its own
-        // matching vanilla mission prompt. It never enables arbitrary Story
-        // scripts and expires in BridgeRuntime.
+        // A narrow, protocol-authenticated exception for a guest that has confirmed the host's exact MissionData ID and is entering its own matching vanilla mission prompt.
+        // It never enables arbitrary Story scripts and expires in BridgeRuntime.
         bool allowExpectedLocalMissionInstance = false) noexcept = 0;
     virtual void MaintainMissionSpectator(bool active) noexcept {
         (void)active;
@@ -671,9 +651,8 @@ public:
     SampleRuntimeDivergenceDiagnostics() noexcept {
         return {};
     }
-    // The host hides the cosmetic guest ped (and its replicated mount) while
-    // vanilla Story cameras own the scene.  This is distinct from hiding the
-    // guest's real local player in its spectator process.
+    // The host hides the cosmetic guest ped (and its replicated mount) while vanilla Story cameras own the scene.
+    // This is distinct from hiding the guest's real local player in its spectator process.
     virtual void MaintainRemoteMissionParticipant(bool hidden) noexcept {
         (void)hidden;
     }

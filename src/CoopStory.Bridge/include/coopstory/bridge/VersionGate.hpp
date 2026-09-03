@@ -5,6 +5,8 @@
 
 namespace coopstory::bridge {
 
+// Checks that the Bridge is attached to the tested RDR2 Story Mode build.
+// It refuses unknown/Online builds instead of issuing multiplayer native calls.
 inline constexpr std::string_view kSupportedExecutableName = "RDR2.exe";
 inline constexpr std::string_view kSupportedFileVersion = "1.0.1491.50";
 inline constexpr std::string_view kSupportedExecutableSha256 =

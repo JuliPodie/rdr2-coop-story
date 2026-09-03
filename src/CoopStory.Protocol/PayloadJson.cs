@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 
 namespace CoopStory.Protocol;
 
+// JSON is reserved for small human-readable control payloads such as heartbeat data.
+// Realtime state uses BinaryPayloadCodec to keep packet size predictable.
 public static class PayloadJson
 {
     public static JsonSerializerOptions Options { get; } = CreateOptions();
@@ -28,6 +30,7 @@ public static class PayloadJson
 
     private static JsonSerializerOptions CreateOptions()
     {
+        // Strict options make a peer's JSON schema explicit: no comments, unknown members, trailing commas, or case-insensitive aliases.
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             AllowTrailingCommas = false,

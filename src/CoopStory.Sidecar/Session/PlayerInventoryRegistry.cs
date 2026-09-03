@@ -3,12 +3,12 @@ using CoopStory.Protocol;
 namespace CoopStory.Sidecar.Session;
 
 /// <summary>
-/// Host-authoritative inventory state for a co-op session.  A loot source is
-/// deliberately not depleted globally: it has one claim cursor per player, so
-/// every participating player can claim the same map loot exactly once.
+/// Host-authoritative inventory state for a co-op session.
+/// A loot source is deliberately not depleted globally: it has one claim cursor per player, so every participating player can claim the same map loot exactly once.
 /// </summary>
 public sealed class PlayerInventoryRegistry
 {
+    // Keep inventory balances and per-loot claimant sets in one transaction so a retry cannot award an already claimed source twice.
     private readonly object _sync = new();
     private readonly Dictionary<NetEntityId, PlayerInventory> _inventories = [];
     private readonly Dictionary<string, HashSet<NetEntityId>> _lootClaims =
@@ -28,8 +28,8 @@ public sealed class PlayerInventoryRegistry
     }
 
     /// <summary>
-    /// Claims a map loot source for one player. Repeating the same request is
-    /// idempotent and never grants currency or items a second time.
+    /// Claims a map loot source for one player.
+    /// Repeating the same request is idempotent and never grants currency or items a second time.
     /// </summary>
     public LootClaimResult ClaimLoot(NetEntityId playerId, MapLoot loot)
     {
@@ -46,6 +46,7 @@ public sealed class PlayerInventoryRegistry
             }
 
             var inventory = GetOrCreateLocked(playerId);
+            // Idempotence: a duplicate collection event returns the same view without mutating currency/item counts a second time.
             if (!claimants.Add(playerId))
             {
                 return new LootClaimResult(
@@ -68,6 +69,7 @@ public sealed class PlayerInventoryRegistry
     }
 
     /// <summary>Creates an isolated rollback point before a durable delivery.</summary>
+    // Host delivery/persistence code can roll a pending mutation back if it fails before becoming durable/visible to the peer's bridge.
     public InventoryTransactionSnapshot CaptureTransactionSnapshot()
     {
         lock (_sync)
@@ -77,9 +79,8 @@ public sealed class PlayerInventoryRegistry
     }
 
     /// <summary>
-    /// Restores a previously captured state after persistence or delivery
-    /// fails. The host serializes these mutations, so this cannot undo an
-    /// unrelated committed inventory transaction.
+    /// Restores a previously captured state after persistence or delivery fails.
+    /// The host serializes these mutations, so this cannot undo an unrelated committed inventory transaction.
     /// </summary>
     public void RestoreTransactionSnapshot(InventoryTransactionSnapshot snapshot)
     {
@@ -109,6 +110,7 @@ public sealed class PlayerInventoryRegistry
         }
     }
 
+    // Persist/replay a detached deterministic snapshot, never the mutable dictionaries that continue serving a live session.
     private InventorySessionState CaptureStateLocked() =>
         new(
             _inventories.Select(pair => new PersistedPlayerInventory(
@@ -180,6 +182,7 @@ public sealed record MapLoot(
     public IReadOnlyList<InventoryItemStack> Items { get; init; } =
         ItemStacks ?? Array.Empty<InventoryItemStack>();
 
+    // Defend the persisted/reconnect format with strict caps before restoring it into live authoritative dictionaries.
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(LootId) || LootId.Length > 128)

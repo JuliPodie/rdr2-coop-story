@@ -1,5 +1,7 @@
 namespace CoopStory.Sidecar.Persistence;
 
+// The guest's locally stored Story-profile shape.
+// Validation keeps damaged or unsupported profile data from entering the local multiplayer helper.
 public sealed record GuestProfile
 {
     public const int CurrentSchemaVersion = 1;

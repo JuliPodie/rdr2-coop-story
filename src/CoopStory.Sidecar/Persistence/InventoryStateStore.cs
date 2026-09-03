@@ -4,7 +4,8 @@ using CoopStory.Sidecar.Session;
 
 namespace CoopStory.Sidecar.Persistence;
 
-/// <summary>Atomic persistence for host-authoritative inventory reconnect state.</summary>
+// Atomic persistence for host-owned pickup/inventory reconnect state.
+// It lets a reconnect replay known collection claims without copying private inventories.
 public sealed class InventoryStateStore
 {
     public async Task SaveAsync(string path, InventorySessionState state,

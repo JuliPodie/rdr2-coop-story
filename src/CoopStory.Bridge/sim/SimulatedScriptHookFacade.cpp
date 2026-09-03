@@ -5,6 +5,7 @@
 
 namespace coopstory::bridge::simulation {
 
+// Starts the fake host player with ordinary valid values used by simulation tests; later methods change these values to mimic RDR2/network events.
 SimulatedScriptHookFacade::SimulatedScriptHookFacade() {
     sample_.slot = PlayerSlot::Host;
     sample_.position = {1.0F, 2.0F, 3.0F};

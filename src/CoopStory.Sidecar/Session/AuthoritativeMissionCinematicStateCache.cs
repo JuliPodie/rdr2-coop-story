@@ -14,9 +14,8 @@ internal readonly record struct MissionCinematicStateCacheUpdate(
     MissionCinematicStatePayload State);
 
 /// <summary>
-/// Retains the latest reliable cinematic FSM state while the game pipe is
-/// unavailable. Ordering is mission epoch, cinematic generation, then
-/// revision; equal versions must be byte-equivalent heartbeats.
+/// Retains the latest reliable cinematic FSM state while the game pipe is unavailable.
+/// Ordering is mission epoch, cinematic generation, then revision; equal versions must be byte-equivalent heartbeats.
 /// </summary>
 internal sealed class AuthoritativeMissionCinematicStateCache
 {
@@ -48,6 +47,7 @@ internal sealed class AuthoritativeMissionCinematicStateCache
             }
 
             var current = _state.Value;
+            // Cinematic generation sits between mission epoch and revision: a newer cutscene must supersede an older one even if its revision is low.
             var ordering = CompareVersion(candidate, current);
             if (ordering < 0)
             {
@@ -101,6 +101,7 @@ internal sealed class AuthoritativeMissionCinematicStateCache
         }
     }
 
+    // Compare semantic cinematic identity, not transport sequence, because TCP reconnect replay may assign newer delivery sequence numbers to old state.
     private static int CompareVersion(
         MissionCinematicStatePayload left,
         MissionCinematicStatePayload right)

@@ -6,9 +6,12 @@ using CoopStory.Sidecar.Diagnostics;
 
 namespace CoopStory.Sidecar.Networking;
 
+// Listens for exactly one authenticated guest.
+// It pairs reliable TCP control with authenticated UDP snapshots and replaces an old guest at a clear generation boundary when a new authenticated connection takes its place.
 public sealed class LanSessionHost : ILanSession
 {
     private readonly object _peerSync = new();
+    // Serializes connection replacement so connection-change events cannot be emitted out of order while old loops are still unwinding.
     private readonly SemaphoreSlim _peerActivationGate = new(1, 1);
     private readonly SidecarConfig _config;
     private readonly SessionCredentials _credentials;
@@ -127,6 +130,7 @@ public sealed class LanSessionHost : ILanSession
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _stop.Token);
+        // Bind both transports before announcing readiness: the TCP handshake establishes identity, then UDP may begin carrying snapshots.
         _listener = new TcpListener(_listenAddress, _config.TcpPort);
         _udp = new UdpClient(new IPEndPoint(_listenAddress, _config.UdpPort));
         _listener.Start(backlog: 2);
@@ -148,6 +152,7 @@ public sealed class LanSessionHost : ILanSession
 
         try
         {
+            // TCP accepts/reliable receive and UDP reception run independently for the lifetime of the host session.
             await Task.WhenAll(
                 AcceptLoopAsync(linked.Token),
                 UdpReceiveLoopAsync(linked.Token)).ConfigureAwait(false);
@@ -168,6 +173,8 @@ public sealed class LanSessionHost : ILanSession
         ulong tick,
         CancellationToken cancellationToken = default)
     {
+        // Capture the peer generation before scheduling work.
+        // A reconnect after this point must make the send fail instead of target the newcomer.
         if (!TryCaptureControlPeer(out var peer))
         {
             return false;
@@ -236,6 +243,7 @@ public sealed class LanSessionHost : ILanSession
             return false;
         }
 
+        // UDP is still authenticated; it is only unreliable in delivery/order, not an unauthenticated shortcut around the session secret.
         var datagram = AuthenticatedDatagramCodec.Encode(
             CreateEnvelope(type, payload, tick),
             _credentials,
@@ -279,6 +287,7 @@ public sealed class LanSessionHost : ILanSession
             ?? throw new InvalidOperationException("TCP listener is not initialized.");
         while (!cancellationToken.IsCancellationRequested)
         {
+            // Do not block accepting a reconnect while the current peer runs; HandlePeerSafelyAsync performs serialized replacement later.
             var client = await listener.AcceptTcpClientAsync(cancellationToken)
                 .ConfigureAwait(false);
             _ = HandlePeerSafelyAsync(client, cancellationToken);
@@ -293,6 +302,7 @@ public sealed class LanSessionHost : ILanSession
         var authenticated = false;
         try
         {
+            // No gameplay state reaches callbacks until this proof exchange has confirmed it is an invited guest.
             var handshake = await HandshakeProtocol.AcceptGuestAsync(
                 peer,
                 _credentials,
@@ -315,11 +325,13 @@ public sealed class LanSessionHost : ILanSession
                     replaced = _activePeer;
                     replacedUdpStop = _guestUdpStop;
                     _activePeer = peer;
+                    // Incrementing this invalidates all send/cache work which still holds the previous guest capability.
                     _controlPeerGeneration = NextPeerGeneration(
                         _controlPeerGeneration);
                     peerToken = new ControlPeerToken(
                         _instanceId,
                         _controlPeerGeneration);
+                    // UDP inherits identity/IP and a sequence floor from the authenticated TCP Hello before its port is pinned.
                     _guestUdpBinding = new UdpPeerBinding(
                         peer.RemoteEndPoint.Address,
                         controlSequenceFloor: handshake.ControlSequence,
@@ -331,10 +343,8 @@ public sealed class LanSessionHost : ILanSession
                 if (replaced is not null && !ReferenceEquals(replaced, peer))
                 {
                     await replaced.DisposeAsync().ConfigureAwait(false);
-                    // Replacement is a real authority boundary even though the
-                    // old receive loop must not emit a second stale disconnect.
-                    // Runtime releases restraint state before negotiating the
-                    // freshly installed peer generation.
+                    // Replacement is a real authority boundary even though the old receive loop must not emit a second stale disconnect.
+                    // Runtime releases restraint state before negotiating the freshly installed peer generation.
                     await RaiseConnectionChangedAsync(
                         connected: false,
                         CancellationToken.None).ConfigureAwait(false);
@@ -434,6 +444,7 @@ public sealed class LanSessionHost : ILanSession
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             peerCancellationToken);
+        // A failed reliable read, heartbeat send, or timeout tears down this peer together; otherwise half-dead connections linger indefinitely.
         var receive = ReceiveControlLoopAsync(
             peer,
             peerToken,
@@ -458,6 +469,7 @@ public sealed class LanSessionHost : ILanSession
                 return;
             }
 
+            // An old receive loop cannot deliver frames after another guest has authenticated and taken over the single guest slot.
             if (!IsControlPeerCurrent(peerToken))
             {
                 return;
@@ -479,6 +491,7 @@ public sealed class LanSessionHost : ILanSession
             TimeSpan.FromMilliseconds(_config.Network.HeartbeatIntervalMs));
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
+            // Heartbeats make an otherwise idle TCP connection observable to the timeout loop and carry a current monotonic tick.
             var heartbeat = new HeartbeatPayload(
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 NetworkClock.Tick);
@@ -499,6 +512,7 @@ public sealed class LanSessionHost : ILanSession
             TimeSpan.FromMilliseconds(_config.Network.HeartbeatIntervalMs));
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
+            // Lack of any valid TCP frame for this window means reconnect/resync is safer than continuing to apply a stale remote world.
             if (Environment.TickCount64 - peer.LastReceivedTimestamp >
                 _config.Network.HeartbeatTimeoutMs)
             {
@@ -519,6 +533,7 @@ public sealed class LanSessionHost : ILanSession
                 initialBinding = _guestUdpBinding;
             }
 
+            // Reject UDP before TCP authentication, even if its HMAC would be valid, because there is no active peer to associate it with.
             if (initialBinding is null)
             {
                 await LogUdpPolicyRejectionAsync(
@@ -541,6 +556,7 @@ public sealed class LanSessionHost : ILanSession
                 var expectedGuestInstanceId = initialBinding.ExpectedInstanceId
                     ?? throw new ProtocolException(
                         "UDP binding is not associated with an authenticated TCP instance.");
+                // Verify the HMAC and expected remote instance before parsing an untrusted datagram into a protocol envelope.
                 envelope = AuthenticatedDatagramCodec.Decode(
                     received.Buffer,
                     _credentials,
@@ -560,6 +576,7 @@ public sealed class LanSessionHost : ILanSession
             var accepted = false;
             lock (_peerSync)
             {
+                // Recheck every binding under the lock: TCP could reconnect after the asynchronous HMAC check but before dispatch.
                 if (ReferenceEquals(_guestUdpBinding, initialBinding) &&
                     _activePeer is not null &&
                     _guestUdpStop is not null &&
@@ -605,8 +622,7 @@ public sealed class LanSessionHost : ILanSession
             catch (OperationCanceledException) when (
                 peerCancellation.IsCancellationRequested)
             {
-                // The authenticated TCP peer was replaced while this
-                // datagram was being dispatched.
+                // The authenticated TCP peer was replaced while this datagram was being dispatched.
             }
         }
     }
@@ -615,6 +631,7 @@ public sealed class LanSessionHost : ILanSession
         string reason,
         CancellationToken cancellationToken)
     {
+        // Log the first failures and then powers of two to expose a sustained bad network/policy condition without flooding the diagnostics file.
         var count = Interlocked.Increment(ref _udpPolicyRejections);
         if (count > 3 && (count & (count - 1)) != 0)
         {

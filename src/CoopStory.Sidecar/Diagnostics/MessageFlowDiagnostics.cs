@@ -2,6 +2,7 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Diagnostics;
 
+// Tracks both sides of the session bridge separately: native-game to LAN and LAN back to native-game, which isolates where a visible gap originated.
 internal enum MessageFlowDirection
 {
     BridgeToNetwork,
@@ -21,12 +22,12 @@ internal readonly record struct MessageFlowStreamSnapshot(
     long MaximumGapMs);
 
 /// <summary>
-/// Bounded, thread-safe transport telemetry. It deliberately stores only
-/// counters and monotonic arrival gaps: never payloads, invite codes, IP
-/// addresses or process-local handles.
+/// Bounded, thread-safe transport telemetry.
+/// It deliberately stores only counters and monotonic arrival gaps: never payloads, invite codes, IP addresses or process-local handles.
 /// </summary>
 internal sealed class MessageFlowDiagnostics
 {
+    // Retain a bounded recent sample for p95 timing; full payload history would be expensive and could accidentally expose private session material.
     private const int MaximumRecentGaps = 128;
     private readonly object _sync = new();
     private readonly Dictionary<StreamKey, MutableStream> _streams = [];
@@ -40,6 +41,7 @@ internal sealed class MessageFlowDiagnostics
         lock (_sync)
         {
             var stream = GetOrCreate(direction, messageType);
+            // Arrival gaps measure actual observation time, including a quiet game bridge or UDP loss, rather than trusting sender timestamps.
             if (stream.LastObservedMs >= 0)
             {
                 var gap = Math.Max(0, nowMs - stream.LastObservedMs);
@@ -143,6 +145,7 @@ internal sealed class MessageFlowDiagnostics
         long nowMs)
     {
         var recent = stream.RecentGaps.Order().ToArray();
+        // Sort only the bounded rolling window when capturing diagnostics, then publish p95 alongside average and maximum for jitter investigations.
         var p95 = recent.Length == 0
             ? 0L
             : recent[Math.Min(

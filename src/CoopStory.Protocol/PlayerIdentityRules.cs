@@ -3,6 +3,8 @@ using System.Text;
 
 namespace CoopStory.Protocol;
 
+// Canonical nickname rules shared by both peers.
+// Validation before encoding and after decoding prevents HUD/control characters or a different Unicode view from creating mismatched player identities.
 public static class PlayerIdentityRules
 {
     public const int MinimumNicknameCharacters = 1;
@@ -25,6 +27,7 @@ public static class PlayerIdentityRules
                 nameof(nickname));
         }
 
+        // Count Unicode runes rather than UTF-16 code units so emoji/supplementary characters have one predictable display-character cost.
         var characterCount = 0;
         foreach (var rune in nickname.EnumerateRunes())
         {
@@ -78,6 +81,7 @@ public static class PlayerIdentityRules
     internal static byte[] EncodeUtf8(string nickname) =>
         StrictUtf8.GetBytes(ValidateNickname(nickname));
 
+    // Treat invalid bytes and invalid-but-decodable nicknames as protocol errors because both arrived from a peer rather than a local text box.
     internal static string DecodeUtf8(ReadOnlySpan<byte> bytes)
     {
         try

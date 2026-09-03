@@ -1,5 +1,7 @@
 namespace CoopStory.Protocol;
 
+// Deterministic player down/revive rules shared by host and guest.
+// It owns only logical lifecycle state; BridgeRuntime and the SDK facade show the animation.
 public sealed class DownedStateMachine
 {
     public const int ReviveDurationMs = 4000;
@@ -32,6 +34,8 @@ public sealed class DownedStateMachine
             throw new ArgumentOutOfRangeException(nameof(healthFraction));
         }
 
+        // Zero health is the only normal transition into Downed.
+        // While already down/reviving, incoming transform health cannot overwrite the revive.
         if (healthFraction <= 0f)
         {
             EnterDowned(tick);
@@ -58,6 +62,7 @@ public sealed class DownedStateMachine
         float distanceMeters,
         ulong tick)
     {
+        // Starting a revive requires a live nearby teammate and records exactly who started it so another player/late packet cannot finish it.
         if (State != PlayerLifecycle.Downed ||
             reviverId.IsNone ||
             reviverId == EntityId ||
@@ -85,6 +90,8 @@ public sealed class DownedStateMachine
             return false;
         }
 
+        // Revalidate the entire revive every update.
+        // Releasing interact, moving away, a different reviver, or an old tick cancels back to Downed.
         if (!holdingInteraction ||
             reviverId != _reviverId ||
             !float.IsFinite(distanceMeters) ||
@@ -96,6 +103,7 @@ public sealed class DownedStateMachine
             return false;
         }
 
+        // The reviver must maintain the interaction for the whole fixed window.
         if (tick - _reviveStartedTick < ReviveDurationMs)
         {
             return false;

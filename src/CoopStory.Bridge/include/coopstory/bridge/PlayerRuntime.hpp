@@ -9,6 +9,8 @@
 
 namespace coopstory::bridge {
 
+// Local rules for downed/revive state.
+// The host decides the shared result, while these values keep the local RDR2 presentation/timer consistent with that result.
 inline constexpr std::uint32_t kReviveDurationMs = 4'000U;
 inline constexpr float kReviveMaximumDistanceMeters = 2.0F;
 inline constexpr float kRevivedHealthFraction = 0.35F;

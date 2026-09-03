@@ -10,6 +10,8 @@
 
 namespace coopstory::bridge {
 
+// State for the in-game host/join overlay.
+// It collects a player's choice, then BridgeRuntime sends that request to Sidecar; this UI does not open LAN sockets.
 enum class SessionOverlayAction {
     Host,
     JoinFromClipboard,

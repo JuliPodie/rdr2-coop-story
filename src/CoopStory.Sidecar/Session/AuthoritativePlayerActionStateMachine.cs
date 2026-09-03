@@ -3,13 +3,12 @@ using CoopStory.Protocol;
 namespace CoopStory.Sidecar.Session;
 
 /// <summary>
-/// Host-owned lifecycle gate for actions which can take ownership of a ped's
-/// physics or task graph.  The sender reports intent, but only an ordered,
-/// legal transition is allowed to become an authoritative action on either
-/// game bridge.
+/// Host-owned lifecycle gate for actions which can take ownership of a ped's physics or task graph.
+/// The sender reports intent, but only an ordered, legal transition is allowed to become an authoritative action on either game bridge.
 /// </summary>
 internal sealed class AuthoritativePlayerActionStateMachine
 {
+    // Each actor/action-kind gets an independent ordered cursor, allowing an aim and a lasso to be tracked without accepting stale phase rewrites.
     private readonly object _sync = new();
     private readonly Dictionary<ActionChannel, ActionCursor> _channels = [];
 
@@ -22,9 +21,8 @@ internal sealed class AuthoritativePlayerActionStateMachine
         ushort Revision,
         PlayerActionPhase Phase);
 
-    // Peer-to-bridge delivery is generation-bound and can roll back. Keep the
-    // action cursor in that same transaction so a failed delivery never burns
-    // a revision which the reconnecting bridge has not actually received.
+    // Peer-to-bridge delivery is generation-bound and can roll back.
+    // Keep the action cursor in that same transaction so a failed delivery never burns a revision which the reconnecting bridge has not actually received.
     internal sealed record TransactionSnapshot(
         Dictionary<ActionChannel, ActionCursor> Channels);
 
@@ -35,6 +33,7 @@ internal sealed class AuthoritativePlayerActionStateMachine
         lock (_sync)
         {
             rejection = string.Empty;
+            // Authorise semantic phase order before a bridge task can gain physics ownership or claim a physical target effect.
             var key = new ActionChannel(action.ActorEntityId, action.Kind);
             var terminal = IsTerminal(action.Phase);
 
@@ -45,6 +44,7 @@ internal sealed class AuthoritativePlayerActionStateMachine
                 return false;
             }
 
+            // The first frame must be a legal begin (or persistent resync snapshot); a peer cannot jump directly into an impact/bound state.
             if (!_channels.TryGetValue(key, out var current))
             {
             if (!IsStart(action))
@@ -62,6 +62,7 @@ internal sealed class AuthoritativePlayerActionStateMachine
             return true;
             }
 
+            // Same action ID advances strictly by revision and legal phase edge.
             if (action.ActionId == current.ActionId)
             {
             if (action.Revision <= current.Revision)
@@ -87,6 +88,7 @@ internal sealed class AuthoritativePlayerActionStateMachine
             return true;
             }
 
+            // A successor action is also required to start cleanly; modular ID comparison keeps this correct after uint action-ID wraparound.
             if (!IsNewer(action.ActionId, current.ActionId) || !IsStart(action))
             {
             rejection = IsNewer(action.ActionId, current.ActionId)
@@ -123,6 +125,7 @@ internal sealed class AuthoritativePlayerActionStateMachine
         }
     }
 
+    // A failed generation-bound bridge delivery rolls the semantic cursor back so the peer may retry instead of being rejected as accidentally stale.
     internal void RestoreTransactionSnapshot(TransactionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -169,8 +172,7 @@ internal sealed class AuthoritativePlayerActionStateMachine
         }
         if (to == PlayerActionPhase.Snapshot)
         {
-            // A snapshot only refreshes an already host-approved persistent
-            // action; it may not manufacture a new one (handled by IsStart).
+            // A snapshot only refreshes an already host-approved persistent action; it may not manufacture a new one (handled by IsStart).
             return from is PlayerActionPhase.Active or
                 PlayerActionPhase.Attached or PlayerActionPhase.Sustain or
                 PlayerActionPhase.Bound;

@@ -239,9 +239,8 @@ template <typename T>
         return true;
     }
 
-    // Unicode format characters are not visible and can reorder or hide HUD
-    // text. Keep the wire rule fail-closed without depending on the process
-    // locale or a platform Unicode database.
+    // Unicode format characters are not visible and can reorder or hide HUD text.
+    // Keep the wire rule fail-closed without depending on the process locale or a platform Unicode database.
     return codePoint == 0x00ADU ||
            (codePoint >= 0x0600U && codePoint <= 0x0605U) ||
            codePoint == 0x061CU ||
@@ -1357,6 +1356,7 @@ namespace {
 }
 }  // namespace
 
+// Mission messages use fixed byte layouts so the C++ Bridge and C# Sidecar agree exactly about progression transactions, objectives, and dialogue cues.
 std::vector<std::uint8_t> EncodeMissionProgression(
     const MissionProgressionPayload& payload) {
     const auto phase = static_cast<std::uint8_t>(payload.phase);
@@ -1541,6 +1541,7 @@ std::optional<MissionDialogueReadyPayload> DecodeMissionDialogueReady(
     return payload;
 }
 
+// Ambient encounter and campaign messages carry small approved identifiers and state only; they never serialize a complete RDR2 save or native handle.
 std::vector<std::uint8_t> EncodeAmbientEncounterProposal(const AmbientEncounterProposalPayload& p) {
     if (!p.guestEntityId.IsValid() || p.proposalId == 0U ||
         !IsSupportedAmbientEncounterProfile(p.profile) ||
@@ -1692,7 +1693,10 @@ std::optional<PickupCollectedPayload> DecodePickupCollected(const std::span<cons
     return payload.actorEntityId.IsValid() && payload.collectionId != 0U && payload.pickupHash != 0U && reserved == 0U ? std::optional<PickupCollectedPayload>{payload} : std::nullopt;
 }
 
+// Adds the common frame header around one already-encoded payload before it is written to the pipe or network.
+// Every receiver checks this header first.
 std::vector<std::uint8_t> FrameCodec::Encode(const Frame& frame) {
+    // Enforce frame limits at the first serialisation boundary, before a bad producer can allocate/send an unbounded payload through the named pipe.
     if (frame.payload.size() > kMaximumFramePayload) {
         throw std::length_error("frame payload exceeds the 1 MiB protocol limit");
     }
@@ -1700,6 +1704,7 @@ std::vector<std::uint8_t> FrameCodec::Encode(const Frame& frame) {
         throw std::invalid_argument("frame has an unknown message type");
     }
 
+    // Header is fixed little-endian and precedes the exact payload byte count.
     std::vector<std::uint8_t> bytes;
     bytes.reserve(kFrameHeaderSize + frame.payload.size());
     AppendLittleEndian(bytes, kFrameMagic);
@@ -1715,6 +1720,7 @@ std::vector<std::uint8_t> FrameCodec::Encode(const Frame& frame) {
 }
 
 DecodeResult FrameCodec::DecodeOne(const std::span<const std::uint8_t> bytes) {
+    // A streaming caller may have only a partial header; asking for more is normal and differs from a malformed magic/version/type/length.
     if (bytes.size() < kFrameHeaderSize) {
         return {DecodeStatus::NeedMoreData, 0U, std::nullopt, {}};
     }
@@ -1728,6 +1734,7 @@ DecodeResult FrameCodec::DecodeOne(const std::span<const std::uint8_t> bytes) {
     const auto payloadLength =
         ReadLittleEndian<std::uint32_t>(bytes, offset);
 
+    // Validate all header fields before trusting payloadLength for slicing.
     if (magic != kFrameMagic) {
         return {
             DecodeStatus::Invalid,
@@ -1777,9 +1784,8 @@ void FrameStreamDecoder::Append(const std::span<const std::uint8_t> bytes) {
     if (HasError() || bytes.empty()) {
         return;
     }
-    // Two complete maximum frames cover coalesced stream writes while still
-    // imposing a hard memory bound. NamedPipeClient drains after each 64 KiB
-    // read, so its practical high-water mark is one frame plus one read.
+    // Two complete maximum frames cover coalesced stream writes while still imposing a hard memory bound.
+    // NamedPipeClient drains after each 64 KiB read, so its practical high-water mark is one frame plus one read.
     constexpr auto kMaximumBufferedBytes =
         2U *
         (kFrameHeaderSize +
@@ -1790,6 +1796,7 @@ void FrameStreamDecoder::Append(const std::span<const std::uint8_t> bytes) {
         buffer_.clear();
         return;
     }
+    // Keep an incomplete trailing frame for a later pipe read.
     buffer_.insert(buffer_.end(), bytes.begin(), bytes.end());
 }
 
@@ -1799,6 +1806,7 @@ std::optional<Frame> FrameStreamDecoder::Pop() {
     }
     auto result =
         FrameCodec::DecodeOne(std::span<const std::uint8_t>{buffer_});
+    // One invalid frame loses stream alignment, so mark the decoder failed and require the client to reconnect rather than guessing a new boundary.
     if (result.status == DecodeStatus::Invalid) {
         error_ = std::move(result.error);
         buffer_.clear();
@@ -1831,6 +1839,7 @@ SequenceDisposition SequenceWindow::Observe(
         return SequenceDisposition::Duplicate;
     }
 
+    // Signed modular subtraction makes wrapping 32-bit sequence numbers work: a small forward wrap is newer, not a huge stale regression.
     const auto delta = static_cast<std::int32_t>(sequence - last_);
     if (delta > 0) {
         last_ = sequence;
@@ -1853,6 +1862,8 @@ std::uint32_t FrameSequencer::Next() noexcept {
     return result;
 }
 
+// Fast remote-player state uses a fixed layout for positions, movement intent, and flags.
+// Decode rejects wrong-sized or invalid packets before RDR2 sees it.
 std::vector<std::uint8_t> EncodePlayerState(
     const PlayerStatePayload& payload) {
     if (!payload.entityId.IsValid()) {
@@ -2224,6 +2235,7 @@ std::optional<PlayerActionPayload> DecodePlayerAction(
         : std::nullopt;
 }
 
+// Reliable interactions/actions carry IDs and revisions so an old revive, mount, or lasso request cannot be mistaken for the current action.
 std::vector<std::uint8_t> EncodeInteractionIntent(
     const InteractionIntentPayload& payload) {
     if (!IsValidInteractionIntent(payload)) {
@@ -2392,6 +2404,8 @@ std::optional<RestraintStatePayload> DecodeRestraintState(
         : std::nullopt;
 }
 
+// Player identity/appearance data is bounded before it crosses machines.
+// This stops a bad nickname/component list from growing a frame without limit.
 std::vector<std::uint8_t> EncodePlayerIdentity(
     const PlayerIdentityPayload& payload) {
     if (!payload.entityId.IsValid() ||
@@ -2521,6 +2535,8 @@ std::optional<PlayerAppearanceStatePayload> DecodePlayerAppearanceState(
                : std::nullopt;
 }
 
+// World-mirror encoding sends the host's shared NPC/object description.
+// It deliberately uses NetEntityId, never the host's local RDR2 entity handle.
 std::vector<std::uint8_t> EncodeWorldEntityState(
     const WorldEntityStatePayload& payload) {
     if (!IsValidWorldEntityState(payload)) {
@@ -2835,6 +2851,7 @@ std::optional<WorldStatePayload> DecodeWorldState(
                : std::nullopt;
 }
 
+// Mission/cinematic data includes epoch/revision values so the guest can reject late state from before a reconnect, checkpoint, or newer cinematic started.
 std::vector<std::uint8_t> EncodeMissionState(
     const MissionStatePayload& payload) {
     if (!IsValidMissionState(payload)) {
@@ -3002,6 +3019,8 @@ std::optional<MissionCinematicActionPayload> DecodeMissionCinematicAction(
                : std::nullopt;
 }
 
+// Animation-scene layouts describe portable state and role bindings.
+// They do not attempt to serialize private engine scene objects between game processes.
 std::vector<std::uint8_t> EncodeAnimSceneReplicaState(
     const AnimSceneReplicaStatePayload& payload) {
     if (!IsValidAnimSceneReplicaState(payload)) {
@@ -3298,6 +3317,8 @@ std::optional<MissionCameraStatePayload> DecodeMissionCameraState(
                : std::nullopt;
 }
 
+// Equipment and pause messages are compact shared presentation/control state.
+// They do not grant the peer direct ownership of local RDR2 inventory state.
 std::vector<std::uint8_t> EncodeEquipmentState(
     const EquipmentStatePayload& payload) {
     if (!IsValidEquipmentState(payload)) {
@@ -3340,6 +3361,7 @@ std::optional<EquipmentStatePayload> DecodeEquipmentState(
                : std::nullopt;
 }
 
+// Commands/lifecycle messages are the Bridge-side translation of Sidecar decisions into local game actions such as resync, revive, or teleport.
 std::vector<std::uint8_t> EncodeCommand(const CommandPayload& payload) {
     if (!IsKnownCommandOpcode(
             static_cast<std::uint16_t>(payload.opcode))) {
@@ -3569,6 +3591,7 @@ std::optional<ReviveCompletePayload> DecodeReviveComplete(
     return payload;
 }
 
+// Session-menu bytes are deliberately small and bounded because the UI only asks the Sidecar to host/join/stop; it never contains raw network settings.
 std::vector<std::uint8_t> EncodeSessionMenuRequest(
     const SessionMenuAction action,
     const std::string_view inviteCode) {

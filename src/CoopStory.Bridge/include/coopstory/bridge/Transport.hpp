@@ -7,6 +7,8 @@
 
 namespace coopstory::bridge {
 
+// Small interface for the Bridge's message connection.
+// NamedPipeClient is the real version; simulations use a memory version with the same Frame methods.
 class IFrameTransport {
 public:
     virtual ~IFrameTransport() = default;

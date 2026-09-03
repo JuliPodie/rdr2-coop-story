@@ -2,6 +2,7 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Session;
 
+// Explains why an optional cinematic definition was or was not safe to include in the host's reconnect snapshot; it doubles as useful resync diagnostics.
 internal enum AuthoritativePeerResyncDefinitionDisposition
 {
     Included,
@@ -33,9 +34,8 @@ internal readonly record struct AuthoritativePeerResyncReplayResult(
     bool DefinitionDelivered);
 
 /// <summary>
-/// Builds and sends a reconnect snapshot in dependency order. The AnimScene
-/// definition is admitted only when the cached mission and cinematic keys are
-/// coherent, and it is always the final reliable frame.
+/// Builds and sends a reconnect snapshot in dependency order.
+/// The AnimScene definition is admitted only when the cached mission and cinematic keys are coherent, and it is always the final reliable frame.
 /// </summary>
 internal static class AuthoritativePeerResyncReplay
 {
@@ -47,8 +47,10 @@ internal static class AuthoritativePeerResyncReplay
     {
         ArgumentNullException.ThrowIfNull(parentFirstSpawns);
 
+        // Keep reliable replay order: mission identity, matching cinematic, parents-before-children world spawns, then the optional definition.
         var frames = new List<ProtocolEnvelope>(
             3 + parentFirstSpawns.Count);
+        // Cached frames are revalidated because they might be from a former session or may have been rejected when originally received.
         var missionValid = TryDecodeMission(
             missionEnvelope,
             out var mission);
@@ -67,6 +69,7 @@ internal static class AuthoritativePeerResyncReplay
             frames.Add(Freeze(cinematicEnvelope!));
         }
 
+        // Child proxies cannot attach until their parent appears, so reject a malformed graph instead of replaying it in an unsafe order.
         var worldGraphValid = TryFreezeParentFirstSpawns(
             parentFirstSpawns,
             out var frozenSpawns);
@@ -108,6 +111,8 @@ internal static class AuthoritativePeerResyncReplay
 
         var delivered = 0;
         var definitionDelivered = false;
+        // Stop at the first failed reliable frame.
+        // A partial replay is not called complete, so the reconnect path can request it again.
         foreach (var frame in plan.Frames)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -146,6 +151,7 @@ internal static class AuthoritativePeerResyncReplay
             out ProtocolEnvelope? frozenDefinition)
     {
         frozenDefinition = null;
+        // An anim-scene definition refers to all of these keys, so admitting it without a coherent mission/cinematic/world base would recreate the scene against the wrong entity after a reconnect.
         if (definitionEnvelope is null)
         {
             return AuthoritativePeerResyncDefinitionDisposition.NotCached;
@@ -287,6 +293,8 @@ internal static class AuthoritativePeerResyncReplay
         IReadOnlyList<ProtocolEnvelope> spawns,
         out IReadOnlyList<ProtocolEnvelope> frozen)
     {
+        // Decode first so validation completes before returning any frozen frames.
+        // This avoids a caller observing part of an invalid graph.
         var decoded = new List<(
             ProtocolEnvelope Envelope,
             WorldEntityStatePayload State)>(spawns.Count);
@@ -321,6 +329,7 @@ internal static class AuthoritativePeerResyncReplay
 
         var seen = new HashSet<NetEntityId>();
         var result = new List<ProtocolEnvelope>(decoded.Count);
+        // Each parent that is also replayed must have appeared earlier in this ordered list; an external/non-replayed parent is allowed.
         foreach (var item in decoded)
         {
             if (item.State.ParentEntityId.IsValid &&
@@ -346,6 +355,7 @@ internal static class AuthoritativePeerResyncReplay
         envelope.Type == type &&
         envelope.Version == ProtocolConstants.Version;
 
+    // Copy payload bytes so cached/replayed envelopes cannot share mutable receive storage with the live networking loop.
     private static ProtocolEnvelope Freeze(ProtocolEnvelope envelope) =>
         new(
             envelope.Type,

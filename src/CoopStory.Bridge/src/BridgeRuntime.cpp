@@ -21,6 +21,7 @@
 namespace coopstory::bridge {
 namespace {
 
+// If we have not heard from the other player for one second, do not trust their old position or let it control NPC/game actions.
 constexpr std::uint64_t kRemotePlayerFreshnessMilliseconds = 1'000U;
 constexpr std::uint64_t kRemotePlayerDespawnTimeoutMilliseconds = 5'000U;
 constexpr std::uint64_t kWorldStateIntervalMilliseconds = 500U;
@@ -30,19 +31,16 @@ constexpr std::uint64_t kMissionObjectiveSampleMilliseconds = 250U;
 constexpr std::uint64_t kAmbientEncounterProposalTimeoutMilliseconds = 10'000U;
 constexpr std::uint64_t kExactEncounterPreflightTimeoutMilliseconds = 2'000U;
 constexpr std::uint64_t kExactEncounterPreflightRepublishMilliseconds = 250U;
-// A defeated bridge-owned bandit remains locally lootable long enough for a
-// normal RDR2 search animation.  The host remains the only outcome authority;
-// after this window its world entities are despawned on both peers.
+// A defeated bridge-owned bandit remains locally lootable long enough for a normal RDR2 search animation.
+// The host remains the only outcome authority; after this window its world entities are despawned on both peers.
 constexpr std::uint64_t kAmbientEncounterTerminalRetentionMilliseconds = 30'000U;
 constexpr float kAmbientEncounterAbandonDistanceMeters = 160.0F;
-// A guest must use their own verified vanilla prompt in this window. The
-// barrier is deliberately short enough that a stale packet cannot leave their
-// Story VM unguarded, but long enough to cover one normal conversation start.
+// A guest must use their own verified vanilla prompt in this window.
+// The barrier is deliberately short enough that a stale packet cannot leave their Story VM unguarded, but long enough to cover one normal conversation start.
 constexpr std::uint64_t kMissionStartBarrierMilliseconds = 45'000U;
 constexpr std::uint64_t kMissionStartBarrierRetryMilliseconds = 1'000U;
-// Keep the guest's nearby Story-prompt guard asserted briefly after the
-// host's exact-ID barrier arrives. This lets us reject a local mission that
-// was already being entered, instead of treating it as newly authorized.
+// Keep the guest's nearby Story-prompt guard asserted briefly after the host's exact-ID barrier arrives.
+// This lets us reject a local mission that was already being entered, instead of treating it as newly authorized.
 constexpr std::uint64_t kMissionStartBarrierPromptArmMilliseconds = 250U;
 
 [[nodiscard]] std::uint64_t MissionObjectiveFingerprint(
@@ -55,9 +53,8 @@ constexpr std::uint64_t kMissionStartBarrierPromptArmMilliseconds = 250U;
     return value == 0U ? 1U : value;
 }
 constexpr std::uint64_t kAppearanceRefreshMilliseconds = 2'000U;
-// Story Mode temporarily streams a personal horse out for several seconds
-// around doors, dense towns and cutscene transitions. A sub-second absence
-// used to destroy/recreate the proxy and caused duplicate horses and bad IK.
+// Story Mode temporarily streams a personal horse out for several seconds around doors, dense towns and cutscene transitions.
+// A sub-second absence used to destroy/recreate the proxy and caused duplicate horses and bad IK.
 constexpr std::uint64_t kRemoteMountAbsentDebounceMilliseconds = 8'000U;
 constexpr std::uint64_t kLocalMountIdentityContinuityMilliseconds = 30'000U;
 constexpr std::uint64_t kMotionDiagnosticsIntervalMilliseconds = 5'000U;
@@ -84,10 +81,9 @@ constexpr std::uint64_t kMissionCameraSampleMilliseconds = 33U;
 constexpr std::uint64_t kAnimSceneSampleMilliseconds = 50U;
 constexpr std::uint64_t kRemoteMountMaintainIntervalMilliseconds = 50U;
 constexpr std::uint64_t kAnimSceneFreshnessMilliseconds = 750U;
-// Disk/resource preparation is bounded but intentionally wider than the old
-// 2500 ms window. Large Story dictionaries can cold-load for several seconds;
-// the host Story VM remains nonblocking and the guest converges to its live
-// phase after commit. The host keeps two additional seconds for LAN/Hamachi.
+// Disk/resource preparation is bounded but intentionally wider than the old 2500 ms window.
+// Large Story dictionaries can cold-load for several seconds; the host Story VM remains nonblocking and the guest converges to its live phase after commit.
+// The host keeps two additional seconds for LAN/Hamachi.
 constexpr std::uint64_t kAnimSceneHybridGuestPrepareTimeoutMilliseconds =
     8'000U;
 constexpr std::uint64_t kAnimSceneHybridHostDecisionTimeoutMilliseconds =
@@ -96,9 +92,8 @@ constexpr std::uint64_t kAnimSceneHybridHostReplyWindowMilliseconds =
     10'000U;
 constexpr std::uint64_t kAnimSceneHybridGuestDecisionWindowMilliseconds =
     4'000U;
-// Keep the final host frame through the 750ms control-recovery debounce. A
-// shorter lease switched the guest to the third-person fallback between the
-// end of the AnimScene and PrepareResume even on a healthy LAN session.
+// Keep the final host frame through the 750ms control-recovery debounce.
+// A shorter lease switched the guest to the third-person fallback between the end of the AnimScene and PrepareResume even on a healthy LAN session.
 constexpr std::uint64_t kMissionCameraFreshnessMilliseconds = 2'500U;
 constexpr std::uint64_t kMissionInitialCameraWaitMilliseconds = 1'500U;
 constexpr std::uint64_t kMissionControlRecoveryMilliseconds = 750U;
@@ -155,8 +150,7 @@ constexpr std::uint32_t kTransientPlayerActionDurationMilliseconds =
         case BridgeCommand::ArmHunt1MissionProgression:
         case BridgeCommand::ArmFud1MissionProgression:
         case BridgeCommand::DisarmMissionProgression:
-            // This command is carried by the local-only session-menu channel
-            // and never reaches MenuOpcode.
+            // This command is carried by the local-only session-menu channel and never reaches MenuOpcode.
             return CommandOpcode::ToggleDiagnostics;
         case BridgeCommand::ToggleSoloOverride:
             return soloOverrideEnabled
@@ -344,12 +338,9 @@ struct LocalLocomotionIntent final {
                   : horizontalSpeed < 5.0F
                         ? 2.0F
                         : 3.0F;
-    // Camp and mission scripts can cap Arthur's root velocity without
-    // changing the locomotion graph.  Inferring the gait only from meters
-    // per second then advertised Idle while the real ped was walking and the
-    // remote replica visibly slid.  RDR2's desired blend is the animation
-    // source of truth; retain the velocity estimate only as a conservative
-    // fallback when that native is unavailable or momentarily reports zero.
+    // Camp and mission scripts can cap Arthur's root velocity without changing the locomotion graph.
+    // Inferring the gait only from meters per second then advertised Idle while the real ped was walking and the remote replica visibly slid.
+    // RDR2's desired blend is the animation source of truth; retain the velocity estimate only as a conservative fallback when that native is unavailable or momentarily reports zero.
     result.moveBlend = sample.desiredMoveBlendValid
                            ? std::max(
                                  std::clamp(
@@ -375,10 +366,8 @@ struct LocalLocomotionIntent final {
         return PlayerLocomotionMode::Traversal;
     }
     if (sample.swimming) {
-        // There is no stable public swimming task/clip identifier in the
-        // pinned SDK. Keep the root in the grounded native-task lane and let
-        // the local water volume select RDR2's swimming graph; a vertical
-        // swim velocity must not be misclassified as a ledge fall.
+        // There is no stable public swimming task/clip identifier in the pinned SDK.
+        // Keep the root in the grounded native-task lane and let the local water volume select RDR2's swimming graph; a vertical swim velocity must not be misclassified as a ledge fall.
         return PlayerLocomotionMode::Grounded;
     }
     if (sample.falling || std::abs(sample.velocity.z) >= 1.0F) {
@@ -395,9 +384,9 @@ struct LocalLocomotionIntent final {
     if (!state.has_value()) {
         return false;
     }
-    // Mission actors are exactly the entities the guest needs. The previous
-    // free-roam gate discarded the host graph as soon as InMission became
-    // true. Only a transition/cutscene is unsafe for proxy mutation.
+    // Mission actors are exactly the entities the guest needs.
+    // The previous free-roam gate discarded the host graph as soon as InMission became true.
+    // Only a transition/cutscene is unsafe for proxy mutation.
     constexpr auto kUnsafeFlags = static_cast<std::uint32_t>(
         PlayerStateFlag::InCutscene);
     return (state->flags & kUnsafeFlags) == 0U;
@@ -542,8 +531,7 @@ void BridgeRuntime::ResetAnimSceneHybridState(
     lastLocalAnimSceneState_.reset();
     localAnimSceneDefinitionRevision_ = 1U;
     // The local control action ID is session-scoped, not definition-scoped.
-    // Keeping it monotonic across same-session teardown/reprepare makes a
-    // replayed GuestReady newer than the value already accepted by the peer.
+    // Keeping it monotonic across same-session teardown/reprepare makes a replayed GuestReady newer than the value already accepted by the peer.
     remoteAnimSceneControlActionId_ = 0U;
     lastCapturedAnimSceneSequence_ = 0U;
     localAnimSceneDefinitionSentAtMs_ = 0U;
@@ -1001,9 +989,8 @@ void BridgeRuntime::SendHello(const bool reconnect) {
     }
     ResetGuestWorldMirror();
     DespawnRemoteReplica();
-    // DespawnRemoteReplica resets hybrid-only state when no exact definition
-    // exists. The mission cinematic reconnect snapshot is independent from
-    // that optional definition and must survive repeated Hello attempts too.
+    // DespawnRemoteReplica resets hybrid-only state when no exact definition exists.
+    // The mission cinematic reconnect snapshot is independent from that optional definition and must survive repeated Hello attempts too.
     hostAnimSceneReconnectPending_ = preserveHostCinematic;
     awaitingRestoredGuestStream_ = awaitRestoredGuestStream;
     hostWorldReplayAwaitingGuest_ = awaitHostWorldReplayGuest;
@@ -1370,12 +1357,9 @@ void BridgeRuntime::AcceptHelloAck(
     }
     if (!helloExpectedRole_.has_value() &&
         localSlot_.has_value() && *localSlot_ == slot) {
-        // A repeated acknowledgement on the already-authenticated pipe is
-        // idempotent. In particular, do not clear playerEntityIds_: the next
-        // PlayerState must remain bound to the established remote identity,
-        // and authenticated control lanes depend on that binding. SendHello
-        // sets helloExpectedRole_ for a real reconnect, so its acknowledgement
-        // still runs the full role/session restoration below.
+        // A repeated acknowledgement on the already-authenticated pipe is idempotent.
+        // In particular, do not clear playerEntityIds_: the next PlayerState must remain bound to the established remote identity, and authenticated control lanes depend on that binding.
+        // SendHello sets helloExpectedRole_ for a real reconnect, so its acknowledgement still runs the full role/session restoration below.
         facade_.Log("duplicate same-role pipe HelloAck ignored");
         return;
     }
@@ -1383,9 +1367,8 @@ void BridgeRuntime::AcceptHelloAck(
     const bool completingReconnect = helloExpectedRole_.has_value();
     localSlot_ = slot;
     helloExpectedRole_.reset();
-    // Only the authoritative host observes Story VM native calls. The guest
-    // still uses the exact-build handler validation to create its own
-    // bridge-owned scene, but must never detour game-owned private scenes.
+    // Only the authoritative host observes Story VM native calls.
+    // The guest still uses the exact-build handler validation to create its own bridge-owned scene, but must never detour game-owned private scenes.
     facade_.SetAnimSceneCaptureAuthority(slot == PlayerSlot::Host);
     if (slot == PlayerSlot::Guest) {
         hostInviteCode_.clear();
@@ -1394,8 +1377,8 @@ void BridgeRuntime::AcceptHelloAck(
                 "authenticated guest role");
         }
     } else if (guestMissionIsolationLeaseActive_) {
-        // A pending JOIN that is answered with a host role is a failed role
-        // negotiation, not a guest session. Do not retain a stale lease.
+        // A pending JOIN that is answered with a host role is a failed role negotiation, not a guest session.
+        // Do not retain a stale lease.
         ReleaseGuestMissionIsolationLease(
             "authenticated host role replaced pending JOIN");
     }
@@ -1412,8 +1395,7 @@ void BridgeRuntime::AcceptHelloAck(
             localMissionCinematicState_->phase);
     if (slot == PlayerSlot::Host && completingReconnect) {
         // SendHello(reconnect) preserves the host graph and its stable IDs.
-        // Replay those spawns after role restoration so the sidecar/guest can
-        // rebuild any state lost with the game pipe before live deltas resume.
+        // Replay those spawns after role restoration so the sidecar/guest can rebuild any state lost with the game pipe before live deltas resume.
         forceHostWorldMirrorReplay_ =
             worldMirrorHost_.has_value() &&
             worldMirrorHost_->Size() != 0U;
@@ -1462,6 +1444,7 @@ void BridgeRuntime::ApplyRemotePlayerState(
     const PlayerStatePayload& state,
     const std::uint32_t sequence,
     const std::uint64_t senderTickMs) {
+    // Ignore pre-role messages and never render our own network state as a second local player replica.
     if (!localSlot_.has_value() || state.slot == *localSlot_) {
         return;
     }
@@ -1475,11 +1458,15 @@ void BridgeRuntime::ApplyRemotePlayerState(
         return;
     }
 
+    // A new player ID means this is a new copy of that player, not just movement.
+    // Remove the old copy before making the new one.
     if (remoteReplicaId_.IsValid() &&
         remoteReplicaId_ != state.entityId) {
         DespawnRemoteReplica();
     }
 
+    // UDP can arrive in the wrong order.
+    // Ignore an old update instead of moving the remote player backwards.
     const auto disposition =
         remotePlayerSequences_.Observe(sequence);
     if (disposition == SequenceDisposition::Duplicate ||
@@ -1487,6 +1474,8 @@ void BridgeRuntime::ApplyRemotePlayerState(
         return;
     }
 
+    // The first accepted state creates a local RDR2 proxy.
+    // Appearance, identity and equipment were received independently and are applied if already known.
     if (!remoteReplicaId_.IsValid()) {
         const CommandPayload spawn{
             CommandOpcode::SpawnReplica,
@@ -1532,6 +1521,8 @@ void BridgeRuntime::ApplyRemotePlayerState(
             motionArrivalGapMaximumMs_,
             receivedAtMs - *lastRemoteStateMs_);
     }
+    // Save a few positions instead of moving the game player straight away.
+    // The game uses those saved positions to move them smoothly.
     if (!remoteSnapshots_.Push(
             state,
             receivedAtMs,
@@ -1598,6 +1589,8 @@ void BridgeRuntime::ApplyRemotePlayerState(
 }
 
 void BridgeRuntime::DespawnRemoteReplica() noexcept {
+    // Remove the remote player copy and clear its saved network data.
+    // This is used when reconnecting or when the copy breaks.
     facade_.MaintainMissionCompanionPresentation({});
     facade_.MaintainReplicatedMissionCamera(false, std::nullopt);
     (void)facade_.MaintainReplicatedAnimScene(false, std::nullopt);
@@ -1708,8 +1701,8 @@ void BridgeRuntime::Tick() {
         std::string receiveError;
         auto frames = transport_.Poll(receiveError);
         for (const auto& frame : frames) {
-            // HelloAck and forwarded LAN frames use independent sequence
-            // domains. A global window here would drop valid remote frames.
+            // HelloAck and forwarded LAN frames use independent sequence domains.
+            // A global window here would drop valid remote frames.
             HandleInboundFrame(frame);
         }
         if (!receiveError.empty()) {
@@ -1972,9 +1965,7 @@ void BridgeRuntime::Tick() {
         localMissionCinematicState_.has_value() &&
         IsCinematicPresentationPhase(
             localMissionCinematicState_->phase)) {
-        // Rebuild authority in dependency order on the first recovered
-        // stream tick: mission/cinematic identity, live presentation samples,
-        // stable world roles, then the cached exact definition.
+        // Rebuild authority in dependency order on the first recovered stream tick: mission/cinematic identity, live presentation samples, stable world roles, then the cached exact definition.
         nextMissionStateHeartbeatMs_ = now;
         nextMissionCinematicHeartbeatMs_ = now;
         nextMissionCameraSampleMs_ = now;
@@ -2016,10 +2007,8 @@ void BridgeRuntime::Tick() {
                        PlayerStateFlag::InMission)) != 0U;
     const bool guestMissionIsolationEnabled =
         guestMissionIsolationLeaseActive_;
-    // This is intentionally narrower than the lease: only a host-issued,
-    // exact-ID start barrier can let a guest reach their own vanilla mission
-    // prompt. The regular guard resumes automatically on timeout, rejection,
-    // or after that exact local MissionData entry ends.
+    // This is intentionally narrower than the lease: only a host-issued, exact-ID start barrier can let a guest reach their own vanilla mission prompt.
+    // The regular guard resumes automatically on timeout, rejection, or after that exact local MissionData entry ends.
     const bool guestMatchingMissionStartPermitted =
         localSlot_ == PlayerSlot::Guest &&
         remoteMissionStartBarrier_.has_value() &&
@@ -2060,8 +2049,8 @@ void BridgeRuntime::Tick() {
     if (guestMissionQuarantineActive_) {
         ++guestMissionQuarantineTicks_;
     }
-    // The guest's process-local Story state is never network authority. Do not
-    // advertise an accidental local mission/camera transition to the host.
+    // The guest's process-local Story state is never network authority.
+    // Do not advertise an accidental local mission/camera transition to the host.
     if (sample.has_value() && guestMissionIsolationEnabled &&
         !guestMatchingMissionStartPermitted) {
         sample->missionActive = false;
@@ -2144,11 +2133,9 @@ void BridgeRuntime::Tick() {
          !sample->cutsceneActive),
         synchronizedPaused_);
     if (remoteStreaming && localSlot_.has_value() && localEntityId_.IsValid()) {
-        // Every bridge-owned encounter is outside the map-pickup/capability
-        // lanes. Corpse interaction is local vanilla behavior, so even the
-        // itemless positive collection telemetry is discarded while a scene
-        // is preparing, active, or retained for corpse cleanup. This applies
-        // equally to the catalog profiles and the exact Extortion adaptation.
+        // Every bridge-owned encounter is outside the map-pickup/capability lanes.
+        // Corpse interaction is local vanilla behavior, so even the itemless positive collection telemetry is discarded while a scene is preparing, active, or retained for corpse cleanup.
+        // This applies equally to the catalog profiles and the exact Extortion adaptation.
         const auto bridgeEncounterLootWindowActive = [&]() noexcept {
             return ambientEncounterCoordinator_.Active().has_value() ||
                 remoteAmbientEncounter_.has_value();
@@ -2291,8 +2278,8 @@ void BridgeRuntime::Tick() {
                     now + kLocalShotLatchMilliseconds;
             }
         } else if (sample->weaponIsLasso) {
-            // RDR2 reports a lasso throw through the shooting predicate. Do
-            // not carry an earlier firearm latch across the weapon switch.
+            // RDR2 reports a lasso throw through the shooting predicate.
+            // Do not carry an earlier firearm latch across the weapon switch.
             localShotLatchExpiresMs_ = 0U;
             localShotAimTarget_ = {};
         }
@@ -2510,9 +2497,8 @@ void BridgeRuntime::Tick() {
         TickMissionDialogue(localSlot, now);
         TickAmbientEncounter(*sample, localSlot, now);
         TickMissionCinematic(sample, localSlot, now);
-        // TickMissionAuthority may have entered or left a host cutscene in
-        // this same frame. Re-evaluate after publishing the new phase so the
-        // remote guest never leaks into the vanilla camera for one full tick.
+        // TickMissionAuthority may have entered or left a host cutscene in this same frame.
+        // Re-evaluate after publishing the new phase so the remote guest never leaks into the vanilla camera for one full tick.
         maintainRemoteSceneIsolation();
         if (previousLocalLifecycle_.has_value() &&
             *previousLocalLifecycle_ != currentLocalLifecycle) {
@@ -2538,10 +2524,8 @@ void BridgeRuntime::Tick() {
                   (!remoteMissionCinematicState_.has_value() &&
                    (remoteMissionState_->phase == MissionPhase::Cutscene ||
                     remoteMissionState_->phase == MissionPhase::Loading))));
-            // During the authenticated matching-instance barrier the guest
-            // must retain its own vanilla conversation/camera controls long
-            // enough to enter the exact local mission. Outside that narrow
-            // window host presentation remains authoritative as before.
+            // During the authenticated matching-instance barrier the guest must retain its own vanilla conversation/camera controls long enough to enter the exact local mission.
+            // Outside that narrow window host presentation remains authoritative as before.
             const bool spectatorRequired =
                 (!guestMatchingMissionStartPermitted &&
                  hostRequiresSpectator) ||
@@ -3072,9 +3056,8 @@ void BridgeRuntime::Tick() {
 }
 
 void BridgeRuntime::AbortAfterNativeException() noexcept {
-    // A native AV means another native call during cleanup may hit the same
-    // stale RDR2 handle. Preserve diagnostics and disconnect the sidecar, but
-    // deliberately perform no facade/world/ped/camera cleanup in this path.
+    // A native AV means another native call during cleanup may hit the same stale RDR2 handle.
+    // Preserve diagnostics and disconnect the sidecar, but deliberately perform no facade/world/ped/camera cleanup in this path.
     active_ = false;
     shouldUnload_ = true;
     transport_.Disconnect();
@@ -3088,12 +3071,13 @@ void BridgeRuntime::TickWorldMirror(
     const std::optional<LocalPlayerSample>& localSample,
     const bool remoteStreaming) {
     if (localSlot_ == PlayerSlot::Host && !transport_.IsConnected()) {
-        // A game-pipe outage is not a session/world-authority boundary. The
-        // sidecar still owns the previous graph, so silently destroying stable
-        // host IDs here would leave orphan NPC/horse proxies after reconnect.
+        // A game-pipe outage is not a session/world-authority boundary.
+        // The sidecar still owns the previous graph, so silently destroying stable host IDs here would leave orphan NPC/horse proxies after reconnect.
         // Explicit Stop/Waiting/role-mismatch paths perform the real reset.
         return;
     }
+    // The guest only shows host NPC copies when it is safe.
+    // Do not mix them into a cutscene or a different mission state.
     const bool authorityAllowsWorldMirror =
         localSlot_.has_value() &&
         localSample.has_value() &&
@@ -3128,15 +3112,13 @@ void BridgeRuntime::TickWorldMirror(
     const bool safeMirrorWindow =
         normalMirrorWindow || hostCinematicMirrorWindow ||
         guestCinematicMirrorWindow;
+    // Leaving the safe window removes or retains graph state according to role; a full guest reset deletes proxy NPCs and restores suppressed ambient peds.
     if (!safeMirrorWindow) {
         if (localSlot_ == PlayerSlot::Host) {
             if (localSample.has_value() && localSample->cutsceneActive &&
                 !hostCinematicMirrorWindow) {
-                // The Story frontend briefly uses a cutscene camera while
-                // loading an ordinary save. It is unsafe to sample/update
-                // the graph in that window, but it is equally unsafe to
-                // destroy the stable graph: no mission cinematic authority
-                // exists yet to recreate it for the guest.
+                // The Story frontend briefly uses a cutscene camera while loading an ordinary save.
+                // It is unsafe to sample/update the graph in that window, but it is equally unsafe to destroy the stable graph: no mission cinematic authority exists yet to recreate it for the guest.
                 return;
             }
             if (forceHostWorldMirrorReplay_ &&
@@ -3144,10 +3126,8 @@ void BridgeRuntime::TickWorldMirror(
                 !remoteStreaming) {
                 if (hostWorldReplayGuestDeadlineMs_ == 0U ||
                     nowMs < hostWorldReplayGuestDeadlineMs_) {
-                    // HelloAck may legally precede the first restored LAN
-                    // PlayerState. Keep the stable graph until that stream
-                    // arrives; resetting it here would orphan the old IDs in
-                    // the sidecar/guest cache before replay can run.
+                    // HelloAck may legally precede the first restored LAN PlayerState.
+                    // Keep the stable graph until that stream arrives; resetting it here would orphan the old IDs in the sidecar/guest cache before replay can run.
                     return;
                 }
                 hostWorldReplayAwaitingGuest_ = false;
@@ -3163,13 +3143,13 @@ void BridgeRuntime::TickWorldMirror(
                      cutsceneSpectator_)) {
             ResetGuestWorldMirror();
         }
-        // During a host scene the spectator facade keeps the already-hidden
-        // guest population suppressed. Restoring it here exposed the guest's
-        // unrelated mission cast directly into the host camera.
+        // During a host scene the spectator facade keeps the already-hidden guest population suppressed.
+        // Restoring it here exposed the guest's unrelated mission cast directly into the host camera.
         return;
     }
 
     if (*localSlot_ == PlayerSlot::Host) {
+        // Build the bounded host graph lazily, once there is a connected safe session to own the stable entity IDs it allocates.
         if (!worldMirrorHost_.has_value()) {
             worldMirrorHost_.emplace(
                 sessionEpoch_ == 0U ? 1U : sessionEpoch_,
@@ -3194,6 +3174,8 @@ void BridgeRuntime::TickWorldMirror(
                 "[ENTITY_GRAPH_HOST][REPLAY] pending despawn tombstones were not fully delivered; new graph traffic remains paused to prevent orphan proxies");
             return;
         }
+    // After reconnecting, resend NPCs in the right order.
+    // This is a repair job, not something that should run every frame.
         if (forceHostWorldMirrorReplay_) {
             const auto replaySignals =
                 worldMirrorHost_->ReplayStableSpawns();
@@ -3219,6 +3201,8 @@ void BridgeRuntime::TickWorldMirror(
             return;
         }
 
+    // Ten times a second, look for nearby NPCs/objects.
+    // Pick the important ones and send make/remove/update messages.
         const auto samples =
             facade_.SampleWorldEntities(
                 kWorldMirrorRadiusMeters,
@@ -3290,6 +3274,8 @@ void BridgeRuntime::TickWorldMirror(
         nextWorldGraphDiagnosticsMs_ =
             nowMs + kWorldGraphDiagnosticsIntervalMilliseconds;
     }
+    // When the guest shoots a copied NPC, ask the host to check the shot.
+    // Only the host is allowed to damage the real NPC.
     if (const auto intent =
             facade_.SampleWorldDamageIntent(
                 localEntityId_);
@@ -3333,6 +3319,8 @@ bool BridgeRuntime::SendWorldMirrorSignal(
                     signal.state.entityId});
             break;
     }
+    // Send this NPC/object message to the sidecar.
+    // If a remove message fails, remember it so the guest does not keep a leftover NPC copy.
     const bool delivered = SendBestEffort(std::move(frame));
     if (signal.kind == WorldMirrorSignalKind::Despawn &&
         signal.state.entityId.IsValid()) {
@@ -3400,6 +3388,8 @@ void BridgeRuntime::ResetHostWorldMirror(
         }
         return;
     }
+    // Reset creates explicit world despawns.
+    // When connected they are sent so the guest can delete proxies instead of waiting for its own streaming.
     const auto signals = worldMirrorHost_->Reset();
     if (wasActive || entityCount != 0U) {
         facade_.Log(
@@ -3434,6 +3424,8 @@ void BridgeRuntime::ResetGuestWorldMirror(
     if (!preserveSequenceTombstones) {
         guestWorldAuthorityConfirmed_ = false;
     }
+    // Clear all guest NPC copies and their saved list.
+    // This is why using entity resync makes NPCs disappear for a moment.
     (void)guestWorldGraph_.Reset(preserveSequenceTombstones);
     nextWorldGraphDiagnosticsMs_ = previousTickMs_;
     try {
@@ -3478,6 +3470,7 @@ void BridgeRuntime::HandleEntitySpawn(
         }
         return;
     }
+    // The pure graph admits the desired state first; only its ordered signals are allowed to create RDR2 proxies through the facade.
     const auto signals = guestWorldGraph_.ApplyState(
         state,
         frame.header.sequence);
@@ -3514,8 +3507,7 @@ void BridgeRuntime::HandleEntityUpdate(
         }
         return;
     }
-    // The graph treats an update as an upsert, but does not expose a mounted
-    // child to the facade before its authoritative parent is registered.
+    // The graph treats an update as an upsert, but does not expose a mounted child to the facade before its authoritative parent is registered.
     const auto signals = guestWorldGraph_.ApplyState(
         state,
         frame.header.sequence);
@@ -3537,6 +3529,8 @@ void BridgeRuntime::HandleEntityDespawn(
 
 void BridgeRuntime::ApplyGuestWorldGraphSignals(
     const std::span<const WorldMirrorSignal> signals) {
+    // Keep the graph layer handle-free.
+    // This switch is the narrow boundary where a replicated instruction becomes an RDR2 SDK side effect.
     for (const auto& signal : signals) {
         switch (signal.kind) {
             case WorldMirrorSignalKind::Spawn:
@@ -3553,6 +3547,8 @@ void BridgeRuntime::ApplyGuestWorldGraphSignals(
     }
 }
 
+// Host samples the active Story mission and sends a small shared mission view.
+// The guest uses that view for presentation; it never runs the host's scripts.
 void BridgeRuntime::TickMissionAuthority(
     const LocalPlayerSample& sample,
     const PlayerSlot localSlot,
@@ -3610,20 +3606,17 @@ void BridgeRuntime::TickMissionAuthority(
         localMissionCinematicState_.has_value() &&
         IsCinematicPresentationPhase(
             localMissionCinematicState_->phase);
-    // RDR2 reports a short-lived cutscene/loading camera while an ordinary
-    // Story save is loading.  That is not mission authority and must never
-    // start the two-player cinematic resume barrier.  Once a real mission
-    // scene has been latched we retain it through its terminal hand-off,
-    // including the frame where the game has already cleared missionActive.
+    // RDR2 reports a short-lived cutscene/loading camera while an ordinary Story save is loading.
+    // That is not mission authority and must never start the two-player cinematic resume barrier.
+    // Once a real mission scene has been latched we retain it through its terminal hand-off, including the frame where the game has already cleared missionActive.
     const bool immediatePresentation =
         cinematicPresentationLatched ||
         (sample.missionActive &&
          ((sample.cutsceneActive && !localCinematicTerminalLatchActive_) ||
           sample.minigameActive));
-    // A mission-owned loss of control covers forced AnimScenes, QTE/button
-    // prompts, and scripted vehicle/horse entry.  Do not trigger on those
-    // raw observations in free roam: ordinary mounting and scenarios remain
-    // co-op gameplay.  A brief debounce also filters frontend hand-offs.
+    // A mission-owned loss of control covers forced AnimScenes, QTE/button prompts, and scripted vehicle/horse entry.
+    // Do not trigger on those raw observations in free roam: ordinary mounting and scenarios remain co-op gameplay.
+    // A brief debounce also filters frontend hand-offs.
     const bool debouncedMissionPresentation =
         sample.missionActive &&
         (sample.controlLocked ||
@@ -3730,9 +3723,8 @@ void BridgeRuntime::TickMissionAuthority(
         (heartbeatDue && anchorMateriallyChanged);
     if (localMissionState_.has_value() &&
         !publishNewAnchor) {
-        // Equal-revision heartbeats must be byte-equivalent for the sidecar
-        // cache. Keep the last published anchor until movement is material and
-        // the one-second heartbeat is due.
+        // Equal-revision heartbeats must be byte-equivalent for the sidecar cache.
+        // Keep the last published anchor until movement is material and the one-second heartbeat is due.
         next.hostAnchor = localMissionState_->hostAnchor;
         next.hostHeading = localMissionState_->hostHeading;
     }
@@ -3760,9 +3752,8 @@ void BridgeRuntime::TickMissionAuthority(
         completion.header.type = MessageType::MissionProgression;
         completion.header.sequence = sequencer_.Next();
         completion.header.tick = nowMs;
-        // Recognition does not imply save-write authority. A catalog entry
-        // must explicitly be marked verified after a controlled two-save
-        // test before this bit can be emitted.
+        // Recognition does not imply save-write authority.
+        // A catalog entry must explicitly be marked verified after a controlled two-save test before this bit can be emitted.
         const auto completionRating = completedMissionProbe.has_value() &&
                 completedMissionProbe->wasCompleted
             ? completedMissionProbe->rating
@@ -3799,9 +3790,8 @@ void BridgeRuntime::TickMissionAuthority(
         localProgressionMissionId_ = 0U;
     }
     if (missionStarted || checkpointChanged) {
-        // MissionState is queued first. The guest can therefore quarantine a
-        // competing local mission or defer a recovery teleport before the
-        // host anchor command reaches it.
+        // MissionState is queued first.
+        // The guest can therefore quarantine a competing local mission or defer a recovery teleport before the host anchor command reaches it.
         HandleTeleportGuestRequest();
         facade_.Log(
             missionStarted
@@ -3822,6 +3812,7 @@ void BridgeRuntime::TickMissionAuthority(
         std::to_string(sample.missionActive ? 1 : 0));
 }
 
+// Runs the "can both saves enter this mission?" handshake and keeps pending completion messages until the guest confirms it saved/applied them.
 void BridgeRuntime::TickMissionProgression(
     const LocalPlayerSample& sample,
     const std::uint64_t nowMs) {
@@ -3855,9 +3846,8 @@ void BridgeRuntime::TickMissionProgression(
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch())
                         .count());
-                // Mission epochs restart with the bridge process, so they are
-                // not a durable transaction identity. Keep wall-clock time in
-                // the high bits and a mission/epoch discriminator below it.
+                // Mission epochs restart with the bridge process, so they are not a durable transaction identity.
+                // Keep wall-clock time in the high bits and a mission/epoch discriminator below it.
                 const auto eventId =
                     ((unixMilliseconds & 0x0000FFFFFFFFFFFFULL) << 16U) |
                     static_cast<std::uint64_t>(
@@ -3928,8 +3918,8 @@ void BridgeRuntime::TickMissionProgression(
         return;
     }
 
-    // The guest never launches a script for the host. It may only report the
-    // exact MissionData entry that its own vanilla Story prompt activated.
+    // The guest never launches a script for the host.
+    // It may only report the exact MissionData entry that its own vanilla Story prompt activated.
     if (!remoteMissionStartBarrier_.has_value() ||
         remoteMissionStartBarrierRejected_) {
         return;
@@ -3982,8 +3972,7 @@ void BridgeRuntime::TickMissionProgression(
             return;
         }
         // The facade has no generic "start this exact MissionData" native.
-        // Detect a different known Story mission immediately and restore the
-        // normal quarantine on the next tick instead of accepting it.
+        // Detect a different known Story mission immediately and restore the normal quarantine on the next tick instead of accepting it.
         for (const auto& definition : kCampaignMissionCatalog) {
             if (definition.missionId == barrier.missionId) continue;
             const auto other = facade_.ProbeCampaignMission(definition.missionId);
@@ -4010,12 +3999,14 @@ void BridgeRuntime::TickMissionProgression(
             nowMs + kMissionStartBarrierRetryMilliseconds;
         facade_.Log("[MISSION_START_BARRIER] guest entered exact local MissionData instance; awaiting host release");
     }
-    // Once the exact instance is observed, keep the narrow permission for its
-    // lifetime. The next inactive probe above restores ordinary isolation.
+    // Once the exact instance is observed, keep the narrow permission for its lifetime.
+    // The next inactive probe above restores ordinary isolation.
     remoteMissionStartBarrierDeadlineMs_ = ~std::uint64_t{0U};
     (void)sample;
 }
 
+// Handles the other player's answer in the mission progression handshake.
+// Every branch matches mission ID, epoch, and event ID before changing state.
 void BridgeRuntime::HandleRemoteMissionProgression(
     const MissionProgressionPayload& payload) {
     if (!localSlot_.has_value()) return;
@@ -4132,8 +4123,8 @@ void BridgeRuntime::HandleRemoteMissionProgression(
                        *remoteMissionProgressionAppliedEventId_ ==
                            payload.eventId) {
                 facade_.Log("[MISSION_PROGRESSION] duplicate completion ignored after successful guest mapping");
-                // The host may have missed the first acknowledgement. Repeat
-                // it for every idempotent completion replay.
+                // The host may have missed the first acknowledgement.
+                // Repeat it for every idempotent completion replay.
                 sendAppliedAcknowledgement();
             } else if (!facade_.ApplyCampaignMissionCompletion(
                            payload.missionId, payload.eventId,
@@ -4142,9 +4133,8 @@ void BridgeRuntime::HandleRemoteMissionProgression(
             } else if (payload.completionCashAward > 0 &&
                        !facade_.ApplyCampaignMissionCashAward(
                            payload.eventId, payload.completionCashAward)) {
-                // Do not consume the event. The completion and catalog
-                // rewards are idempotent, so a retransmission can retry the
-                // one missing award instead of marking a partial result done.
+                // Do not consume the event.
+                // The completion and catalog rewards are idempotent, so a retransmission can retry the one missing award instead of marking a partial result done.
                 facade_.Log("[MISSION_PROGRESSION] guest cash award failed; completion event remains retryable");
             } else {
                 remoteMissionProgressionAppliedEventId_ = payload.eventId;
@@ -4206,6 +4196,7 @@ void BridgeRuntime::HandleRemoteMissionProgression(
     }
 }
 
+// Host reads the current Story objective text and sends it only when it changes.
 void BridgeRuntime::TickMissionObjective(
     const LocalPlayerSample& sample,
     const std::uint64_t nowMs) {
@@ -4245,6 +4236,8 @@ void BridgeRuntime::TickMissionObjective(
     }
 }
 
+// Guest receives host objective text for display.
+// It is never used to drive a mission script or change local Story Mode progress.
 void BridgeRuntime::HandleRemoteMissionObjective(
     const Frame& frame,
     const MissionObjectivePayload& objective) {
@@ -4265,6 +4258,7 @@ void BridgeRuntime::HandleRemoteMissionObjective(
         std::to_string(frame.header.tick));
 }
 
+// Sends the host's current state for a bridge-owned ambient encounter so both players see the same encounter phase, place, roster, and outcome.
 void BridgeRuntime::PublishAmbientEncounterState(
     const AmbientEncounterInstance& instance,
     const std::uint64_t nowMs) {
@@ -4285,6 +4279,8 @@ void BridgeRuntime::PublishAmbientEncounterState(
     }
 }
 
+// Creates a host-approved ambient encounter after the guest suggestion passed all safety/distance checks.
+// The host owns the spawned NPC graph from here.
 void BridgeRuntime::StartPreparedAmbientEncounter(const std::uint64_t nowMs) {
     if (localSlot_ != PlayerSlot::Host ||
         !ambientEncounterCoordinator_.Active().has_value()) {
@@ -4311,6 +4307,8 @@ void BridgeRuntime::StartPreparedAmbientEncounter(const std::uint64_t nowMs) {
     facade_.Log("[AMBIENT_ENCOUNTER] host could not materialize prepared scene");
 }
 
+// Host receives a guest suggestion for an ambient encounter.
+// It validates the request instead of allowing the guest to create arbitrary local NPC events.
 void BridgeRuntime::HandleRemoteAmbientEncounterProposal(
     const Frame& frame, const AmbientEncounterProposalPayload& payload) {
     if (localSlot_ != PlayerSlot::Host || !remoteReplicaId_.IsValid() ||
@@ -4322,10 +4320,9 @@ void BridgeRuntime::HandleRemoteAmbientEncounterProposal(
     const auto distance = facade_.HostGuestDistanceMeters();
     AmbientEncounterProposal proposal{payload.proposalId, payload.profile, payload.anchor,
         payload.radiusMeters, payload.localEvidenceHash, payload.suggestedRosterSeed};
-    // A host-originated exact event starts in Preparing.  The guest answers
-    // this authenticated preflight with the same instance ID, either the
-    // exact script ID (participant) or the companion sentinel.  It is not a
-    // second event proposal and cannot replace the host's anchor or outcome.
+    // A host-originated exact event starts in Preparing.
+    // The guest answers this authenticated preflight with the same instance ID, either the exact script ID (participant) or the companion sentinel.
+    // It is not a second event proposal and cannot replace the host's anchor or outcome.
     if (ambientEncounterCoordinator_.Active().has_value()) {
         auto& active = *ambientEncounterCoordinator_.Active();
         if (active.phase == AmbientEncounterPhase::Preparing &&
@@ -4380,9 +4377,8 @@ void BridgeRuntime::HandleRemoteAmbientEncounterProposal(
         return;
     }
     // Extortion is an exact-ID adaptation, not a generic hostage heuristic.
-    // A guest becomes a participant only when both save processes currently
-    // observe the same script-owned beat. Otherwise the host-owned bridge
-    // scene still starts as companion-only; it cannot change the guest save.
+    // A guest becomes a participant only when both save processes currently observe the same script-owned beat.
+    // Otherwise the host-owned bridge scene still starts as companion-only; it cannot change the guest save.
     if (exactExtortionEvidence) {
         const auto hostExact = facade_.SampleExactEncounterObservation();
         if (!hostExact.has_value() || !hostExact->locallyEligible ||
@@ -4428,8 +4424,8 @@ void BridgeRuntime::HandleRemoteAmbientEncounterProposal(
     }
     auto& instance = *ambientEncounterCoordinator_.Active();
     if (exactExtortionEvidence) {
-        // The guest found Extortion first. The host's exact-ID check above
-        // already proved both local saves are eligible.
+        // The guest found Extortion first.
+        // The host's exact-ID check above already proved both local saves are eligible.
         instance.exactEventId = kExtortionEncounter.scriptId;
         instance.guestDisposition =
             AmbientEncounterPeerDisposition::Participant;
@@ -4499,8 +4495,8 @@ void BridgeRuntime::HandleRemoteAmbientEncounterState(
                     facade_.Log("[EXACT_ENCOUNTER] guest preflight could not be sent");
                 }
             }
-            // The host starts only after it has recorded this reply (or a
-            // bounded timeout). A guest does not create a speculative roster.
+            // The host starts only after it has recorded this reply (or a bounded timeout).
+            // A guest does not create a speculative roster.
             return;
         }
         if (!facade_.BeginAmbientEncounterPresentation(presentation)) {
@@ -4539,9 +4535,7 @@ void BridgeRuntime::HandleRemoteAmbientEncounterState(
         }
     } else if (IsTerminalAmbientEncounterPhase(state.phase)) {
         // The host retains defeated bridge peds for the bounded loot window.
-        // Their normal world-entity despawns are the guest's cleanup signal;
-        // deleting presentation here would remove a corpse before the guest
-        // can use the ordinary local loot prompt.
+        // Their normal world-entity despawns are the guest's cleanup signal; deleting presentation here would remove a corpse before the guest can use the ordinary local loot prompt.
         notificationText_ = "Shared encounter resolved";
         notificationUntilMs_ = facade_.TickMilliseconds() + 3'000U;
         remoteAmbientEncounterTerminalAtMs_ = facade_.TickMilliseconds();
@@ -4549,6 +4543,7 @@ void BridgeRuntime::HandleRemoteAmbientEncounterState(
     (void)frame;
 }
 
+// Advances the host-owned ambient encounter and sends its state as it starts, runs, succeeds, fails, or is abandoned.
 void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
     const PlayerSlot localSlot, const std::uint64_t nowMs) {
     if (!transport_.IsConnected() || !localEntityId_.IsValid()) return;
@@ -4556,10 +4551,8 @@ void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
         sample.cutsceneActive || sample.screenTransition || sample.downed ||
         sample.ragdoll;
     if (unsafeForAmbientActivity) {
-        // A terminal encounter has no further player interaction or outcome
-        // work to do. Do not let a subsequent mission/loading transition pin
-        // its bridge-owned actors forever; the normal retention window still
-        // applies before host cleanup/despawn.
+        // A terminal encounter has no further player interaction or outcome work to do.
+        // Do not let a subsequent mission/loading transition pin its bridge-owned actors forever; the normal retention window still applies before host cleanup/despawn.
         if (localSlot == PlayerSlot::Host &&
             ambientEncounterCoordinator_.Active().has_value()) {
             const auto& instance = *ambientEncounterCoordinator_.Active();
@@ -4572,10 +4565,8 @@ void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
         }
         return;
     }
-    // A guest's own Story state may be quarantined by mission isolation, so
-    // also inspect the authoritative remote mission state before permitting a
-    // free-roam activity. This prevents a stale local observation from
-    // opening an encounter during the host's Story sequence.
+    // A guest's own Story state may be quarantined by mission isolation, so also inspect the authoritative remote mission state before permitting a free-roam activity.
+    // This prevents a stale local observation from opening an encounter during the host's Story sequence.
     if (remoteMissionState_.has_value() &&
         (remoteMissionState_->flags & static_cast<std::uint8_t>(
             MissionStateFlag::MissionActive)) != 0U) return;
@@ -4600,9 +4591,8 @@ void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
                 instance.exactEventId == kExtortionEncounter.scriptId &&
                 localExactEncounterPreflightDeadlineMs_ != 0U &&
                 nowMs >= localExactEncounterPreflightDeadlineMs_) {
-                // A missing guest reply is not an error. Start the same
-                // bridge scene as companion-only so the pair can still fight
-                // together without exposing a save reward.
+                // A missing guest reply is not an error.
+                // Start the same bridge scene as companion-only so the pair can still fight together without exposing a save reward.
                 instance.guestDisposition =
                     AmbientEncounterPeerDisposition::Companion;
                 facade_.Log("[EXACT_ENCOUNTER] guest preflight timed out; companion scene selected");
@@ -4620,10 +4610,8 @@ void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
             }
             return;
         }
-        // Host detection starts an Extortion scene even when the guest does
-        // not have the encounter available. The eventual guest presentation
-        // is companion-only in that case: it can fight and loot only generic
-        // bridge-bandit supplies, never an exact-event reward.
+        // Host detection starts an Extortion scene even when the guest does not have the encounter available.
+        // The eventual guest presentation is companion-only in that case: it can fight and loot only generic bridge-bandit supplies, never an exact-event reward.
         if (const auto exact = facade_.SampleExactEncounterObservation();
             exact.has_value() && exact->locallyEligible &&
             exact->scriptId == kExtortionEncounter.scriptId) {
@@ -4667,8 +4655,7 @@ void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
             return;
         }
         // Host WorldMirror despawns arrive while the terminal window is held.
-        // Clear the local state afterwards so one completed encounter cannot
-        // permanently block a later guest proposal.
+        // Clear the local state afterwards so one completed encounter cannot permanently block a later guest proposal.
         facade_.ClearAmbientEncounterPresentation(
             remoteAmbientEncounter_->instanceId);
         remoteAmbientEncounter_.reset();
@@ -4711,6 +4698,8 @@ void BridgeRuntime::TickAmbientEncounter(const LocalPlayerSample& sample,
     } catch (...) { localAmbientEncounterProposalExpiresMs_ = 0U; }
 }
 
+// Host watches admitted Story dialogue and sends only approved catalogue cues.
+// This shares presentation, not private mission script control.
 void BridgeRuntime::TickMissionDialogue(
     const PlayerSlot localSlot,
     const std::uint64_t nowMs) {
@@ -4813,6 +4802,7 @@ void BridgeRuntime::TickMissionDialogue(
     }
 }
 
+// Guest receives a host dialogue cue, checks its matching local resources, and later replies with a ready/failure state for this exact cue identity.
 void BridgeRuntime::HandleRemoteMissionDialogueCue(
     const Frame& frame,
     const MissionDialogueCuePayload& cue) {
@@ -4847,10 +4837,8 @@ void BridgeRuntime::HandleRemoteMissionDialogueCue(
     remoteMissionDialogueCue_ = cue;
     MissionDialogueReadyState state = MissionDialogueReadyState::ProfileUnavailable;
     if (!remoteMissionStartBarrierReleased_) {
-        // Host and guest clocks have independent origins. Preserve the
-        // host's intentional lead time as a bounded local delay measured
-        // from the received host frame, rather than treating its raw tick as
-        // an absolute guest timestamp.
+        // Host and guest clocks have independent origins.
+        // Preserve the host's intentional lead time as a bounded local delay measured from the received host frame, rather than treating its raw tick as an absolute guest timestamp.
         const auto leadMs = cue.hostStartTick > frame.header.tick
             ? std::min<std::uint64_t>(cue.hostStartTick - frame.header.tick,
                   500U)
@@ -4929,6 +4917,7 @@ void BridgeRuntime::HandleRemoteMissionDialogueReady(
     (void)frame;
 }
 
+// Keeps host/guest mission loading and spectator rules in a safe state while RDR2 transitions between checkpoints, loading screens, and normal play.
 void BridgeRuntime::TickMissionLoadingAuthority(
     const std::uint64_t nowMs) {
     if (localSlot_ != PlayerSlot::Host ||
@@ -4980,6 +4969,8 @@ void BridgeRuntime::TickMissionLoadingAuthority(
             : "[MISSION_TX] loading-phase heartbeat");
 }
 
+// Guest applies a newer host mission snapshot.
+// Older epoch/revision packets are ignored so reconnect traffic cannot roll mission presentation backward.
 void BridgeRuntime::HandleRemoteMissionState(
     const Frame& frame,
     const MissionStatePayload& state) {
@@ -4997,10 +4988,8 @@ void BridgeRuntime::HandleRemoteMissionState(
         return;
     }
     if (!expectedHostId.IsValid()) {
-        // The authenticated sidecar deliberately replays MissionState before
-        // the cached world graph. Allow that reliable control frame to seed
-        // the host identity; the first PlayerState must naturally carry the
-        // same ID or the next mission frame is rejected.
+        // The authenticated sidecar deliberately replays MissionState before the cached world graph.
+        // Allow that reliable control frame to seed the host identity; the first PlayerState must naturally carry the same ID or the next mission frame is rejected.
         expectedHostId = state.hostEntityId;
         facade_.Log(
             "[MISSION_RX] bootstrapped authenticated host identity from mission-state replay");
@@ -5039,9 +5028,8 @@ void BridgeRuntime::HandleRemoteMissionState(
          !isPresentationUnsafe(remoteMissionState_->phase));
     remoteMissionState_ = state;
     if (checkpointChanged || state.phase != MissionPhase::Active) {
-        // The facade owns only the companion-only conversation and its hidden
-        // proxy actors. Never leave that audio scene alive across a retry,
-        // cutscene/loading transition, mission end, or disconnect replay.
+        // The facade owns only the companion-only conversation and its hidden proxy actors.
+        // Never leave that audio scene alive across a retry, cutscene/loading transition, mission end, or disconnect replay.
         facade_.ClearHostMissionDialoguePresentation();
         pendingHostMissionDialogueCue_.reset();
         pendingHostMissionDialogueDueMs_ = 0U;
@@ -5055,9 +5043,8 @@ void BridgeRuntime::HandleRemoteMissionState(
         remoteMissionCameraState_.reset();
         remoteMissionCameraReceivedAtMs_.reset();
         remoteMissionCameraSequences_.Reset();
-        // Clear only host-derived proxies. Keep the reversible local-population
-        // mask alive until spectator exits, otherwise guest-local mission NPCs
-        // leak into the host's cutscene and fight with the next graph rebuild.
+        // Clear only host-derived proxies.
+        // Keep the reversible local-population mask alive until spectator exits, otherwise guest-local mission NPCs leak into the host's cutscene and fight with the next graph rebuild.
         const auto resetSignals = guestWorldGraph_.Reset(true);
         ApplyGuestWorldGraphSignals(resetSignals);
         guestWorldMirrorActive_ = false;
@@ -5067,12 +5054,9 @@ void BridgeRuntime::HandleRemoteMissionState(
         facade_.Log(
             "[MISSION_CHECKPOINT][MISSION_RX] new checkpoint generation; guest proxies and interpolation history reset while the local population mask stays quarantined");
     } else if (enteredPresentationIsolation) {
-        // A cinematic phase is not a world-generation boundary. The V31.7
-        // horse cinematic entered with 26 valid host nodes, erased them here,
-        // and immediately selected PROXY_CAST_FALLBACK with no cast left to
-        // render. Retain the stable graph; spectator masking already hides the
-        // guest-local Story population, while the exact/fallback presentation
-        // decides which host proxies remain visible.
+        // A cinematic phase is not a world-generation boundary.
+        // The V31.7 horse cinematic entered with 26 valid host nodes, erased them here, and immediately selected PROXY_CAST_FALLBACK with no cast left to render.
+        // Retain the stable graph; spectator masking already hides the guest-local Story population, while the exact/fallback presentation decides which host proxies remain visible.
         facade_.Log(
             "[MISSION_SPECTATOR][MISSION_WORLD] host scene entered; retained stable host cast while local mission actors remain masked; nodes=" +
             std::to_string(guestWorldGraph_.Stats().nodeCount));
@@ -5089,6 +5073,7 @@ void BridgeRuntime::HandleRemoteMissionState(
         ", local-tick=" + std::to_string(previousTickMs_));
 }
 
+// Host broadcasts a compact cinematic snapshot so the guest can enter, resume, or leave the same presentation without sharing RDR2-only scene handles.
 void BridgeRuntime::PublishMissionCinematicState(
     const MissionCinematicPhase phase,
     const std::uint16_t flags,
@@ -5221,10 +5206,8 @@ void BridgeRuntime::RequestCutsceneSkip(const std::uint64_t nowMs) {
              MissionCinematicPhase::Playing ||
          localMissionCinematicState_->phase ==
              MissionCinematicPhase::Loading)) {
-        // Consent is scoped to the current cinematic generation. Requiring
-        // both players to hit the key inside the same five-second window made
-        // a valid vote look like a broken skip on ordinary Hamachi latency
-        // and when one player was reading subtitles.
+        // Consent is scoped to the current cinematic generation.
+        // Requiring both players to hit the key inside the same five-second window made a valid vote look like a broken skip on ordinary Hamachi latency and when one player was reading subtitles.
         localCutsceneSkipVoteUntilMs_ = 1U;
         facade_.Log(
             "[MISSION_SKIP][VOTE] host vote registered for this cutscene; waiting for the guest vote");
@@ -5276,6 +5259,7 @@ void BridgeRuntime::TryCommitCutsceneSkip(
             : "[MISSION_SKIP][CONSENSUS] no guest is present; host skip accepted");
 }
 
+// Drives the local cinematic presentation state and handles safe skip/resume timing while preserving the host as the final decision maker.
 void BridgeRuntime::TickMissionCinematic(
     const std::optional<LocalPlayerSample>& sample,
     const PlayerSlot localSlot,
@@ -5304,9 +5288,8 @@ void BridgeRuntime::TickMissionCinematic(
             return;
         }
 
-        // The frontend uses a cutscene camera while loading a normal Story
-        // save. Only the mission authority classifier may promote that raw
-        // signal into the replicated cinematic FSM.
+        // The frontend uses a cutscene camera while loading a normal Story save.
+        // Only the mission authority classifier may promote that raw signal into the replicated cinematic FSM.
         const bool missionPresentationActive =
             localMissionState_->phase == MissionPhase::Cutscene ||
             localMissionState_->phase == MissionPhase::Loading;
@@ -5314,11 +5297,9 @@ void BridgeRuntime::TickMissionCinematic(
             missionPresentationActive && sample.has_value() &&
             sample->cutsceneActive;
 
-        // PrepareResume is a one-way commit. RDR2 briefly reports its
-        // cinematic camera as active again while restoring the HUD and
-        // player task graph. Treating that rebound as a new Playing phase
-        // produced the V26.1 0.8s loop which repeatedly hid/spawned NPCs,
-        // toggled the minimap and dropped the guest back to follow-camera.
+        // PrepareResume is a one-way commit.
+        // RDR2 briefly reports its cinematic camera as active again while restoring the HUD and player task graph.
+        // Treating that rebound as a new Playing phase produced the V26.1 0.8s loop which repeatedly hid/spawned NPCs, toggled the minimap and dropped the guest back to follow-camera.
         if (localMissionCinematicState_.has_value() &&
             localMissionCinematicState_->phase ==
                 MissionCinematicPhase::PrepareResume) {
@@ -5511,9 +5492,8 @@ void BridgeRuntime::TickMissionCinematic(
             return;
         }
 
-        // The next tick owns the one-way PrepareResume branch above. Keeping
-        // this path free of completion logic makes the transition explicit
-        // and prevents raw cutscene detection from pre-empting it.
+        // The next tick owns the one-way PrepareResume branch above.
+        // Keeping this path free of completion logic makes the transition explicit and prevents raw cutscene detection from pre-empting it.
         return;
     }
 
@@ -5532,13 +5512,10 @@ void BridgeRuntime::TickMissionCinematic(
                nowMs > guestPostCinematicSkipUntilMs_) {
         guestPostCinematicSkipUntilMs_ = 0U;
     }
-    // Do not continuously inject the global cutscene-skip control for the
-    // whole host mission. The V31.3 traces proved that it did not prevent the
-    // delayed guest Story VM and could itself advance a queued private scene
-    // toward Mission Failed. The full lease still blocks Story interactions;
-    // skip is now used only after positive quarantine detection (below) or in
-    // the short terminal grace. Captured game-owned scenes are independently
-    // fast-forwarded by the facade, while bridge-owned exact scenes are exempt.
+    // Do not continuously inject the global cutscene-skip control for the whole host mission.
+    // The V31.3 traces proved that it did not prevent the delayed guest Story VM and could itself advance a queued private scene toward Mission Failed.
+    // The full lease still blocks Story interactions; skip is now used only after positive quarantine detection (below) or in the short terminal grace.
+    // Captured game-owned scenes are independently fast-forwarded by the facade, while bridge-owned exact scenes are exempt.
     const bool preemptiveStorySkipActive = false;
     const bool exactGuestSceneInFlight =
         remoteAnimSceneDefinition_.has_value() &&
@@ -5563,10 +5540,8 @@ void BridgeRuntime::TickMissionCinematic(
     }
 
     if (!remoteMissionCinematicState_.has_value()) {
-        // A guest-local Story scene can surface long after the host has
-        // completed its presentation. The host-mission lease and quarantine
-        // therefore remain authoritative even while no cinematic state is
-        // currently cached.
+        // A guest-local Story scene can surface long after the host has completed its presentation.
+        // The host-mission lease and quarantine therefore remain authoritative even while no cinematic state is currently cached.
         facade_.MaintainCutsceneSkipInput(
             !exactGuestSceneInFlight &&
             (preemptiveStorySkipActive || quarantineSkipActive));
@@ -5579,11 +5554,9 @@ void BridgeRuntime::TickMissionCinematic(
         (remoteMissionCinematicState_->flags &
          static_cast<std::uint16_t>(
              MissionCinematicStateFlag::SkipPending)) != 0U;
-    // The guest's own Story VM may create its local scene at any later point in
-    // the mission. Keep the vanilla skip context asserted for the complete
-    // host mission, except while the exact bridge-owned scene is in flight.
-    // The synchronized vote remains a separate protocol action and still
-    // decides whether the host scene skips.
+    // The guest's own Story VM may create its local scene at any later point in the mission.
+    // Keep the vanilla skip context asserted for the complete host mission, except while the exact bridge-owned scene is in flight.
+    // The synchronized vote remains a separate protocol action and still decides whether the host scene skips.
     facade_.MaintainCutsceneSkipInput(
         hostSkipCommitted ||
         (!exactGuestSceneInFlight &&
@@ -5721,11 +5694,9 @@ void BridgeRuntime::HandleRemoteMissionCinematicState(
         remoteCinematicPresentationReadySent_ = false;
         remoteCinematicResumeReadySent_ = false;
         remoteCinematicResumeFallbackUsed_ = false;
-        // This cursor is scoped to the authenticated co-op session. A guest
-        // pipe reconnect and its ResyncRequest replay the current cinematic
-        // as a locally new generation, while the uninterrupted host retains
-        // the last accepted action id. Keeping the cursor monotonic makes the
-        // next Skip/PresentationReady/ResumeReady unambiguously newer.
+        // This cursor is scoped to the authenticated co-op session.
+        // A guest pipe reconnect and its ResyncRequest replay the current cinematic as a locally new generation, while the uninterrupted host retains the last accepted action id.
+        // Keeping the cursor monotonic makes the next Skip/PresentationReady/ResumeReady unambiguously newer.
     }
     remoteMissionCinematicState_ = state;
     remoteMissionCinematicReceivedAtMs_ = previousTickMs_;
@@ -5928,6 +5899,7 @@ void BridgeRuntime::TryCommitHostAnimSceneDefinition(
         std::to_string(phase));
 }
 
+// Host captures a portable description of an animation scene and waits for the guest to prepare it before committing the shared cutscene presentation.
 void BridgeRuntime::TickAnimSceneHybridDefinition(
     const PlayerSlot localSlot,
     const std::optional<LocalPlayerSample>& localSample,
@@ -5975,9 +5947,8 @@ void BridgeRuntime::TickAnimSceneHybridDefinition(
             !localMissionCinematicState_.has_value() ||
             !IsCinematicPresentationPhase(
                 localMissionCinematicState_->phase)) {
-            // Drain nothing outside an authoritative presentation. A future
-            // capture hook retains incomplete records until CREATE/SET_ENTITY
-            // has produced one complete definition.
+            // Drain nothing outside an authoritative presentation.
+            // A future capture hook retains incomplete records until CREATE/SET_ENTITY has produced one complete definition.
             return;
         }
 
@@ -6065,10 +6036,8 @@ void BridgeRuntime::TickAnimSceneHybridDefinition(
                         mappedEntityIds.begin(),
                         mappedEntityIds.end(),
                         entityId) != mappedEntityIds.end()) {
-                    // The protocol deliberately permits one AnimScene role per
-                    // replicated entity. A repeated SET_ENTITY alias is kept
-                    // in the definition as an optional unbound role instead
-                    // of invalidating the complete scene.
+                    // The protocol deliberately permits one AnimScene role per replicated entity.
+                    // A repeated SET_ENTITY alias is kept in the definition as an optional unbound role instead of invalidating the complete scene.
                     entityId = NetEntityId{};
                     duplicateAlias = true;
                     ++duplicateMappings;
@@ -6250,6 +6219,8 @@ void BridgeRuntime::TickAnimSceneHybridDefinition(
     }
 }
 
+// Guest receives a host animation-scene recipe.
+// It validates resources and role bindings before making any local RDR2 scene replica.
 void BridgeRuntime::HandleRemoteAnimSceneDefinition(
     const Frame& frame,
     const AnimSceneDefinitionPayload& definition) {
@@ -6529,6 +6500,8 @@ void BridgeRuntime::CommitPreparedGuestAnimSceneDefinition(
     }
 }
 
+// Handles ready/rejected/commit/abort answers for one exact animation-scene generation.
+// Late answers cannot change a newer cinematic.
 void BridgeRuntime::HandleRemoteAnimSceneControl(
     const Frame& frame,
     const AnimSceneControlPayload& control) {
@@ -6682,6 +6655,7 @@ void BridgeRuntime::HandleRemoteAnimSceneControl(
     CommitPreparedGuestAnimSceneDefinition(control);
 }
 
+// Sends/applies the portable camera view used during mission transitions when a full local cinematic scene cannot be safely reproduced on the guest.
 void BridgeRuntime::TickMissionCamera(
     const PlayerSlot localSlot,
     const std::uint64_t nowMs) {
@@ -6937,6 +6911,7 @@ void BridgeRuntime::HandleRemoteAnimSceneReplicaState(
     }
 }
 
+// Final per-tick mission presentation decision: spectator, camera, input lock, and replica visibility are chosen from the current host-owned state.
 void BridgeRuntime::MaintainMissionPresentation(
     const std::optional<LocalPlayerSample>& localSample,
     const bool remoteStreaming,
@@ -7066,6 +7041,7 @@ void BridgeRuntime::MaintainMissionPresentation(
                 : std::string{}});
 }
 
+// Writes compact counters/state markers used to diagnose stalls, missing world updates, reconnects, and other multiplayer problems without changing state.
 void BridgeRuntime::EmitRuntimeDiagnostics(
     const bool remoteStreaming,
     const std::uint64_t nowMs) {
@@ -7555,14 +7531,14 @@ bool BridgeRuntime::IsMissionWorldMirrorSafe() const noexcept {
     return IsWorldMirrorSafeRemoteState(latestRemoteState_);
 }
 
+// Samples local combat/action intent, sends allowed requests, and keeps action revisions in sync so delayed packets cannot restart an old action.
 void BridgeRuntime::TickLocalPlayerActions(
     const LocalPlayerSample& sample,
     const PlayerSlot localSlot,
     const std::uint64_t nowMs) {
     if (!transport_.IsConnected() || !localEntityId_.IsValid()) {
-        // A named-pipe outage does not end the LAN session. Keep the active
-        // runtime so the first sample after reconnect can emit End/Cancel with
-        // the original action id (especially the authoritative lasso release).
+        // A named-pipe outage does not end the LAN session.
+        // Keep the active runtime so the first sample after reconnect can emit End/Cancel with the original action id (especially the authoritative lasso release).
         // Fresh sessions and role mismatch paths clear this array explicitly.
         return;
     }
@@ -7655,9 +7631,8 @@ void BridgeRuntime::TickLocalPlayerActions(
             continue;
         }
         auto& runtime = localPlayerActions_[index];
-        // Each melee click is its own transaction. A fresh edge preempts a
-        // still-finishing visual pulse instead of extending one autonomous
-        // combat task for the whole time the button is held.
+        // Each melee click is its own transaction.
+        // A fresh edge preempts a still-finishing visual pulse instead of extending one autonomous combat task for the whole time the button is held.
         const bool begin =
             input.active &&
             (!runtime.active || input.restartOnEdge);
@@ -7763,11 +7738,8 @@ void BridgeRuntime::TickLocalPlayerActions(
         action.actorAnchor = sample.position;
         action.targetPoint = runtime.targetPoint;
         action.facingHeading = NormalizeHeading(sample.heading);
-        // This is the normalized phase of the reliable semantic transaction,
-        // not a claim that the underlying RAGE clip cursor was read. It gives
-        // paired-action receivers a stable shared clock today and can be
-        // correlated with an exact clip sample when the versioned reader is
-        // available later.
+        // This is the normalized phase of the reliable semantic transaction, not a claim that the underlying RAGE clip cursor was read.
+        // It gives paired-action receivers a stable shared clock today and can be correlated with an exact clip sample when the versioned reader is available later.
         action.normalizedPhase =
             duration == 0U
                 ? 0.0F
@@ -7835,6 +7807,8 @@ void BridgeRuntime::TickLocalPlayerActions(
     }
 }
 
+// Samples hold-to-interact actions such as revive/mount/dismount.
+// The host validates each request before either game applies the result.
 void BridgeRuntime::TickLocalInteractions(
     const LocalPlayerSample& sample,
     const PlayerSlot localSlot,
@@ -8090,6 +8064,8 @@ void BridgeRuntime::ApplyPendingRestraintState(
         std::to_string(state.revision));
 }
 
+// Applies a host-approved remote action or forwards a guest request to the host policy.
+// Action IDs and revisions protect against delayed repeats.
 void BridgeRuntime::HandleRemotePlayerAction(
     const Frame& frame,
     const PlayerActionPayload& action) {
@@ -8100,10 +8076,8 @@ void BridgeRuntime::HandleRemotePlayerAction(
     if (localSlot_.has_value() &&
         (action.actorSlot == *localSlot_ ||
          action.actorEntityId == localEntityId_)) {
-        // The host sidecar echoes its authoritative rewrite back to the actor
-        // as an acknowledgement. The local game already owns that animation,
-        // so consuming it without applying a second task avoids both feedback
-        // loops and false rejection counters.
+        // The host sidecar echoes its authoritative rewrite back to the actor as an acknowledgement.
+        // The local game already owns that animation, so consuming it without applying a second task avoids both feedback loops and false rejection counters.
         if (action.authoritySlot == PlayerSlot::Host &&
             (action.flags & kAuthoritative) != 0U &&
             (action.flags & kIntent) == 0U) {
@@ -8141,9 +8115,7 @@ void BridgeRuntime::HandleRemotePlayerAction(
     }
     lastRemotePlayerActionReceivedAtMs_ = previousTickMs_;
     if (remoteParticipantSceneIsolated_) {
-        // Consume the reliable revision so stale combat cannot replay after a
-        // cutscene, but never give an action task ownership of the host camera
-        // scene.
+        // Consume the reliable revision so stale combat cannot replay after a cutscene, but never give an action task ownership of the host camera scene.
         ++playerActionsReceived_;
         return;
     }
@@ -8298,6 +8270,8 @@ void BridgeRuntime::HandleDamageIntent(
             std::to_string(intent.shotSequence));
     };
 
+    // Only the host can turn a guest shot request into real RDR2 damage.
+    // The guest only sees a copied NPC, so it cannot decide damage by itself.
     if (localSlot_ != PlayerSlot::Host ||
         !worldMirrorHost_.has_value() ||
         !hostWorldMirrorActive_) {
@@ -8339,11 +8313,9 @@ void BridgeRuntime::HandleDamageIntent(
         return;
     }
 
-    // DamageIntent is reliable TCP control while PlayerState is best-effort
-    // UDP. Requiring the latest snapshot's transient Firing bit creates a
-    // cross-channel reorder drop. Authentication, guest identity, fresh
-    // transform, equipped weapon, target ownership, range, rate and replay
-    // checks below remain authoritative.
+    // DamageIntent is reliable TCP control while PlayerState is best-effort UDP.
+    // Requiring the latest snapshot's transient Firing bit creates a cross-channel reorder drop.
+    // Authentication, guest identity, fresh transform, equipped weapon, target ownership, range, rate and replay checks below remain authoritative.
     const auto disposition =
         worldDamageIntentSequences_.Observe(
             intent.shotSequence);
@@ -8361,6 +8333,8 @@ void BridgeRuntime::HandleDamageIntent(
         return;
     }
 
+    // The target must still belong to this host's currently mirrored graph.
+    // A shot at an NPC outside its 48-entity/radius selection is rejected.
     const auto targetState =
         worldMirrorHost_->FindState(intent.targetId);
     const auto localHandle =
@@ -8413,6 +8387,8 @@ void BridgeRuntime::HandleDamageIntent(
             intent.damage,
             1.0F,
             kWorldDamageMaximumPerIntent);
+    // Script-owned mission targets take the attributed projectile route; ambient peds use direct authoritative damage.
+    // Either way the host reports outcome.
     const bool applied =
         scriptOwned
             ? facade_.ApplyMissionWorldEntityDamage(
@@ -8604,6 +8580,8 @@ void BridgeRuntime::ResetPauseVoteState(
     }
 }
 
+// Main pipe receive switch.
+// It decodes each Sidecar message and sends it to the correct multiplayer subsystem; it does not trust a type without validation.
 void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
     if (frame.header.type == MessageType::HelloAck) {
         AcceptHelloAck(frame.payload);
@@ -9211,12 +9189,8 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
                         }
                         break;
                     case CommandOpcode::RetryCheckpoint:
-                        // A host retry is meaningful on the guest only after
-                        // the exact matching MissionData instance crossed the
-                        // start barrier. Never send a generic checkpoint
-                        // reload into a companion-only/free-roam guest: that
-                        // would act on a private Story VM and defeat the
-                        // host-authority invariant.
+                        // A host retry is meaningful on the guest only after the exact matching MissionData instance crossed the start barrier.
+                        // Never send a generic checkpoint reload into a companion-only/free-roam guest: that would act on a private Story VM and defeat the host-authority invariant.
                         if (*localSlot_ != PlayerSlot::Guest ||
                             !remoteMissionStartBarrier_.has_value() ||
                             !remoteMissionStartBarrierReleased_ ||
@@ -9398,8 +9372,7 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
             break;
         }
         case MessageType::InteractionIntent:
-            // Intents are consumed by the host sidecar and never arrive from
-            // an authenticated peer as direct bridge authority.
+            // Intents are consumed by the host sidecar and never arrive from an authenticated peer as direct bridge authority.
             break;
         case MessageType::ReviveRequest: {
             const auto request = DecodeReviveRequest(frame.payload);
@@ -9484,11 +9457,11 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
             nextReconnectMs_ = facade_.TickMilliseconds() + 1'000U;
             break;
         case MessageType::ResyncRequest: {
-            // A ResyncRequest is a same-session transport boundary, not a
-            // synchronized-pause vote. Both game processes already own the
-            // authoritative pause generation, and the sidecar replay plan has
-            // no PauseVote snapshot. Preserve it across replica teardown so a
-            // short pipe/TCP recovery cannot split the two pause states.
+            // Resync removes and rebuilds copies once after a reconnect.
+            // Calling it every frame would keep deleting NPCs before they can come back.
+            // A ResyncRequest is a same-session transport boundary, not a synchronized-pause vote.
+            // Both game processes already own the authoritative pause generation, and the sidecar replay plan has no PauseVote snapshot.
+            // Preserve it across replica teardown so a short pipe/TCP recovery cannot split the two pause states.
             const bool preservedSynchronizedPaused = synchronizedPaused_;
             const bool preservedHostPauseVoted = hostPauseVoted_;
             const bool preservedGuestPauseVoted = guestPauseVoted_;
@@ -9505,10 +9478,8 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
             if (*localSlot_ == PlayerSlot::Host) {
                 const bool preserveActiveAnimSceneGraph =
                     HasActiveHostAnimSceneDefinition();
-                // ResyncRequest and the first replacement PlayerState may be
-                // delivered by one Poll. Force the same recovery edge and
-                // authority dependencies even though the previous tick still
-                // considered the remote stream live.
+                // ResyncRequest and the first replacement PlayerState may be delivered by one Poll.
+                // Force the same recovery edge and authority dependencies even though the previous tick still considered the remote stream live.
                 previousRemoteStreaming_ = false;
                 nextMissionStateHeartbeatMs_ = previousTickMs_;
                 nextMissionCinematicHeartbeatMs_ = previousTickMs_;
@@ -9540,6 +9511,8 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
     }
 }
 
+// Turns an in-game session-menu click into a safe request for the Sidecar.
+// The Bridge owns the UI; the Sidecar owns actual LAN session creation.
 void BridgeRuntime::HandleSessionOverlayAction(
     const SessionOverlayAction action) {
     if (action == SessionOverlayAction::StopSession) {
@@ -9849,10 +9822,9 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
                 command == BridgeCommand::EnableRepeatingShotgunShopUnlock
                     ? CampaignCapabilityKind::WeaponShopEligibility
                     : CampaignCapabilityKind::Recipe;
-            // The journal persists beyond a bridge process.  A simple counter would
-            // restart at one after each game launch and could be mistaken for an
-            // already-applied grant.  Keep a per-millisecond sequence in the low
-            // bits and use wall-clock milliseconds as the restart-safe prefix.
+            // The journal persists beyond a bridge process.
+            // A simple counter would restart at one after each game launch and could be mistaken for an already-applied grant.
+            // Keep a per-millisecond sequence in the low bits and use wall-clock milliseconds as the restart-safe prefix.
             const auto grantedAtUnixMilliseconds = static_cast<std::int64_t>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count());
@@ -9936,6 +9908,7 @@ void BridgeRuntime::HandleMenuCommand(const BridgeCommand command) {
         HandlePlayerSignals(
             players_.SetSpectator(PlayerSlot::Guest, soloOverride_));
     } else if (command == BridgeCommand::ResyncEntities) {
+        // The F9 button uses the same repair code: clear local NPC copies, then ask the other PC to rebuild its side.
         if (localSlot_ == PlayerSlot::Host) {
             ResetHostWorldMirror(true);
             nextWorldMirrorSampleMs_ = 0U;
@@ -10257,13 +10230,14 @@ void BridgeRuntime::VerifyPendingTeleport(
     }
 }
 
+// Converts local RDR2 downed/revive/respawn signals into shared lifecycle messages, then applies matching remote lifecycle changes to the local proxy.
 void BridgeRuntime::HandlePlayerSignals(
     const std::span<const PlayerRuntimeSignal> signals) {
     for (const auto& signal : signals) {
         switch (signal.kind) {
             case PlayerRuntimeSignalKind::ReviveStarted:
-                // The request already arrived from the sidecar. Do not echo it
-                // back and create an IPC feedback loop.
+                // The request already arrived from the sidecar.
+                // Do not echo it back and create an IPC feedback loop.
                 break;
             case PlayerRuntimeSignalKind::ReviveCancelled:
                 pendingRevive_.reset();

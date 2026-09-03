@@ -24,8 +24,8 @@ internal readonly record struct AnimSceneDefinitionCacheUpdate(
 
 /// <summary>
 /// Retains the latest validated, active host-authored AnimScene definition.
-/// Mission epoch, cinematic generation and definition revision establish
-/// ordering. An equal version must keep the same host, fingerprint and bytes.
+/// Mission epoch, cinematic generation and definition revision establish ordering.
+/// An equal version must keep the same host, fingerprint and bytes.
 /// </summary>
 internal sealed class AuthoritativeAnimSceneDefinitionCache
 {
@@ -45,6 +45,7 @@ internal sealed class AuthoritativeAnimSceneDefinitionCache
 
         var candidate = BinaryPayloadCodec.DecodeAnimSceneDefinition(
             envelope.Payload.Span);
+        // The key binds an AnimScene definition to its mission/cinematic owner and fingerprint, so a cached definition cannot attach to another scene.
         var candidateKey = CreateKey(candidate);
         var frozen = Freeze(envelope);
         lock (_sync)
@@ -69,6 +70,7 @@ internal sealed class AuthoritativeAnimSceneDefinitionCache
                     candidateKey);
             }
 
+            // Equal definition revision must be the same exact bytes; changing roles/fingerprint without advancing revision is protocol-invalid.
             if (ordering == 0)
             {
                 if (candidateKey != _key.Value ||
@@ -133,6 +135,7 @@ internal sealed class AuthoritativeAnimSceneDefinitionCache
         }
     }
 
+    // A completed/aborted cinematic owns no active definition to replay later.
     public bool ClearTerminal(MissionCinematicStatePayload state)
     {
         if (state.Phase is not MissionCinematicPhase.Completed and

@@ -3,11 +3,14 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Networking;
 
+// Admits UDP only after TCP authentication.
+// It pins the observed UDP endpoint, restricts frame types, and rejects duplicate/out-of-order replayed packets.
 internal sealed class UdpPeerBinding
 {
     private readonly IPAddress _expectedAddress;
     private readonly int? _expectedPort;
     private readonly uint? _controlSequenceFloor;
+    // UDP has no built-in ordering or replay defense, so retain a small window of the packet sequence numbers already delivered to gameplay code.
     private readonly SequenceReplayWindow _sequences = new();
     private IPEndPoint? _pinnedEndpoint;
 
@@ -17,6 +20,7 @@ internal sealed class UdpPeerBinding
         uint? controlSequenceFloor = null,
         Guid? expectedInstanceId = null)
     {
+        // TCP tells us which remote IP is authenticated; UDP must originate there even before its dynamic source port has been learned/pinned.
         _expectedAddress = expectedAddress
             ?? throw new ArgumentNullException(nameof(expectedAddress));
         if (expectedPort is < IPEndPoint.MinPort or > IPEndPoint.MaxPort)
@@ -51,6 +55,7 @@ internal sealed class UdpPeerBinding
             return false;
         }
 
+        // The first accepted UDP packet pins the port too, stopping a second socket on the same IP from injecting snapshot frames mid-session.
         return _pinnedEndpoint is null ||
             EndpointsEqual(_pinnedEndpoint, source);
     }
@@ -68,12 +73,14 @@ internal sealed class UdpPeerBinding
             return false;
         }
 
+        // Spawn/despawn and resync are TCP-only because losing one of them would leave a different entity graph at each peer.
         if (!IsUdpMessageType(envelope.Type))
         {
             rejectionReason = "message-type";
             return false;
         }
 
+        // Never let an older UDP packet that predates this TCP handshake become the initial snapshot in the newly authenticated session.
         if (_controlSequenceFloor.HasValue &&
             !SequenceNumber.IsNewer(
                 envelope.Sequence,
@@ -89,6 +96,7 @@ internal sealed class UdpPeerBinding
             return false;
         }
 
+        // Only bind a port after its authenticated, allowable first frame wins.
         _pinnedEndpoint ??= new IPEndPoint(source.Address, source.Port);
         rejectionReason = string.Empty;
         return true;
@@ -97,8 +105,8 @@ internal sealed class UdpPeerBinding
     private static bool IsUdpMessageType(MessageType type) =>
         type switch
         {
-            // Definitions and 2PC controls are ordered/reliable-only. Keep
-            // this rejection explicit even if the UDP allow-list expands.
+            // Definitions and 2PC controls are ordered/reliable-only.
+            // Keep this rejection explicit even if the UDP allow-list expands.
             MessageType.AnimSceneDefinition or
                 MessageType.AnimSceneControl => false,
             MessageType.Heartbeat or

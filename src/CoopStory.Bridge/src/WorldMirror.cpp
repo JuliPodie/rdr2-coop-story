@@ -7,6 +7,8 @@
 namespace coopstory::bridge {
 namespace {
 
+// RDR2 may hide an ambient NPC for a moment while loading.
+// Wait a short time before telling the guest to remove that NPC.
 constexpr std::uint64_t kMissingEntityGraceMilliseconds = 750U;
 constexpr std::uint64_t kMinimumResidenceMilliseconds = 3'000U;
 constexpr float kIncumbentDistanceHysteresisMeters = 12.0F;
@@ -16,9 +18,8 @@ constexpr float kRecentAdmissionHysteresisMeters = 6.0F;
     const HostWorldEntityPriority priority) noexcept {
     switch (priority) {
         case HostWorldEntityPriority::ScriptOwned:
-            // Mission actors can briefly leave the ped pool during camera,
-            // interior and streaming transitions. Retain their stable
-            // NetEntityId long enough to avoid visible despawn/spawn churn.
+            // Mission actors can briefly leave the ped pool during camera, interior and streaming transitions.
+            // Retain their stable NetEntityId long enough to avoid visible despawn/spawn churn.
             return 15'000U;
         case HostWorldEntityPriority::Interactive:
             return 5'000U;
@@ -44,6 +45,7 @@ WorldMirrorHost::WorldMirrorHost(
     const std::uint32_t epoch,
     const std::uint32_t firstCounter,
     const std::size_t maximumNodes)
+    // Give each host session its own ID group so old NPC IDs are not reused after reconnecting.
     : generator_(epoch, firstCounter),
       maximumNodes_(std::max<std::size_t>(maximumNodes, 1U)) {}
 
@@ -57,6 +59,7 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
     std::vector<const HostWorldEntitySample*> candidates;
     candidates.reserve(samples.size());
 
+    // Ignore bad or duplicate RDR2 handles before choosing NPCs to share.
     for (const auto& sample : samples) {
         if (!IsValid(sample) ||
             !candidateHandles.insert(sample.localHandle).second) {
@@ -65,6 +68,7 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
         candidates.push_back(&sample);
     }
 
+    // Do not share a rider unless we also share its horse/mount.
     std::erase_if(
         candidates,
         [&](const HostWorldEntitySample* sample) {
@@ -88,6 +92,7 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
         candidatesByHandle.emplace(candidate->localHandle, candidate);
     }
 
+    // Prefer NPCs we already shared so nearby NPCs do not keep swapping places.
     const auto selectionDistance = [&](
                                        const HostWorldEntitySample* sample) {
         auto distance = sample->selectionDistanceMeters;
@@ -130,6 +135,8 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
     accepted.reserve(std::min(maximumNodes_, candidates.size()));
     std::unordered_set<LocalEntityHandle> observed;
     observed.reserve(maximumNodes_);
+    // There is a hard NPC limit.
+    // Extra NPCs are not sent, so far-away NPCs can disappear from the guest view.
     for (const auto* candidate : candidates) {
         if (observed.contains(candidate->localHandle)) {
             continue;
@@ -158,9 +165,9 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
         observed.insert(candidate->localHandle);
     }
 
-    // A reused pool handle is a new generation. If it is a parent, retire the
-    // complete old subtree child-first so no rider can remain attached to a
-    // deleted mount. Every recreated node receives a fresh NetEntityId.
+    // A reused pool handle is a new generation.
+    // If it is a parent, retire the complete old subtree child-first so no rider can remain attached to a deleted mount.
+    // Every recreated node receives a fresh NetEntityId.
     std::unordered_set<LocalEntityHandle> replacedHandles;
     for (const auto* samplePointer : accepted) {
         const auto iterator = entries_.find(
@@ -211,8 +218,8 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
         return depth;
     };
 
-    // Expired nodes leave normally. Nodes still inside the short grace window
-    // may stay only while the strict graph budget has spare room.
+    // Expired nodes leave normally.
+    // Nodes still inside the short grace window may stay only while the strict graph budget has spare room.
     std::unordered_set<LocalEntityHandle> retireHandles = replacedHandles;
     for (const auto& [handle, entry] : entries_) {
         const auto missing = !observed.contains(handle);
@@ -237,6 +244,7 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
         return surviving;
     };
 
+    // If the list is full, remove the least important old NPCs first.
     while (projectedNodeCount() > maximumNodes_) {
         std::optional<LocalEntityHandle> victim;
         for (const auto& [handle, entry] : entries_) {
@@ -284,8 +292,11 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
             }
             return lhs < rhs;
         });
+    // Remove riders/attached objects before removing their horse/parent.
     for (const auto handle : retireOrder) {
         const auto iterator = entries_.find(handle);
+        // First time we see this RDR2 thing: give it a multiplayer ID.
+        // Keep using that ID until the thing is removed.
         if (iterator == entries_.end()) {
             continue;
         }
@@ -301,6 +312,7 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
 
     std::unordered_set<LocalEntityHandle> createdHandles;
     createdHandles.reserve(accepted.size());
+    // Send horses/parents before riders/children so attachments work.
     for (const auto* samplePointer : accepted) {
         const auto& sample = *samplePointer;
         auto iterator = entries_.find(sample.localHandle);
@@ -332,8 +344,8 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
             sample.selectionDistanceMeters;
     }
 
-    // Parent nodes are emitted before children. This ordering is stable even
-    // when worldGetAllPeds changes its pool order between frames.
+    // Parent nodes are emitted before children.
+    // This ordering is stable even when worldGetAllPeds changes its pool order between frames.
     std::unordered_map<LocalEntityHandle, const HostWorldEntitySample*>
         samplesByHandle;
     samplesByHandle.reserve(accepted.size());
@@ -412,6 +424,7 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::Update(
 }
 
 std::vector<WorldMirrorSignal> WorldMirrorHost::ReplayStableSpawns() {
+    // After reconnecting, resend all current NPCs in the right order.
     std::vector<WorldMirrorSignal> signals;
     signals.reserve(entries_.size());
     std::vector<LocalEntityHandle> order;
@@ -461,6 +474,7 @@ std::vector<WorldMirrorSignal> WorldMirrorHost::ReplayStableSpawns() {
 }
 
 std::vector<WorldMirrorSignal> WorldMirrorHost::Reset() {
+    // On a full reset, tell the guest to remove children first, then forget IDs.
     std::vector<WorldMirrorSignal> signals;
     signals.reserve(entries_.size());
     std::vector<LocalEntityHandle> order;
@@ -702,6 +716,7 @@ std::vector<WorldMirrorSignal> WorldMirrorGuestGraph::ApplyState(
         return {};
     }
     TrimSequenceTombstones();
+    // Each NPC remembers its last update number so old UDP updates are ignored.
     auto& window = sequences_[state.entityId];
     const auto disposition = window.Observe(sequence);
     if (disposition == SequenceDisposition::Duplicate) {
@@ -722,6 +737,7 @@ std::vector<WorldMirrorSignal> WorldMirrorGuestGraph::ApplyState(
     ++acceptedMessages_;
     ++graphRevision_;
     std::vector<WorldMirrorSignal> signals;
+    // If an NPC model changed, remove its old copy and make a new one.
     if (iterator != nodes_.end() &&
         iterator->second.state.modelHash != state.modelHash &&
         iterator->second.locallyActive) {
@@ -769,6 +785,8 @@ std::vector<WorldMirrorSignal> WorldMirrorGuestGraph::ApplyDespawn(
     ++acceptedMessages_;
     ++graphRevision_;
 
+    // Removing a parent also removes riders/children.
+    // Remember their last update number so an old packet cannot bring a child back.
     const auto order = DescendantsChildFirst(entityId);
     std::vector<WorldMirrorSignal> signals;
     signals.reserve(order.size());
@@ -778,8 +796,7 @@ std::vector<WorldMirrorSignal> WorldMirrorGuestGraph::ApplyDespawn(
             continue;
         }
         if (current != entityId) {
-            // A parent tombstone also protects its subtree from a delayed UDP
-            // update when the child's own reliable despawn was lost.
+            // A parent tombstone also protects its subtree from a delayed UDP update when the child's own reliable despawn was lost.
             (void)sequences_[current].Observe(sequence);
             ++cascadedDespawns_;
         }
@@ -799,6 +816,7 @@ std::vector<WorldMirrorSignal> WorldMirrorGuestGraph::ApplyDespawn(
 
 std::vector<WorldMirrorSignal> WorldMirrorGuestGraph::Reset(
     const bool preserveSequenceTombstones) {
+    // Turn every live NPC into a remove message, children first.
     std::vector<NetEntityId> order;
     order.reserve(nodes_.size());
     for (const auto& [entityId, node] : nodes_) {
@@ -863,6 +881,7 @@ WorldMirrorGraphStats WorldMirrorGuestGraph::Stats() const noexcept {
 }
 
 std::vector<WorldMirrorSignal> WorldMirrorGuestGraph::Reconcile() {
+    // Do not make a rider/child until all its parents exist.
     std::unordered_set<NetEntityId, NetEntityIdHash> ready;
     ready.reserve(nodes_.size());
     for (const auto& [entityId, node] : nodes_) {
@@ -912,6 +931,8 @@ std::vector<WorldMirrorSignal> WorldMirrorGuestGraph::Reconcile() {
 
     std::vector<WorldMirrorSignal> signals;
     signals.reserve(deactivate.size() + activateOrUpdate.size());
+    // Remove children first, then make/update parents first.
+    // This keeps mounts and attachments working.
     for (const auto entityId : deactivate) {
         auto& node = nodes_.at(entityId);
         signals.push_back(

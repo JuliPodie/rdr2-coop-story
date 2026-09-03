@@ -9,6 +9,8 @@ public sealed record SessionInviteCode(
     ushort UdpPort,
     string SessionToken);
 
+// Compact, copyable invitation format.
+// It carries connection coordinates and the session token, but no game state or player identity.
 public static class SessionInviteCodeCodec
 {
     public const string Prefix = "R2C1.";
@@ -28,6 +30,7 @@ public static class SessionInviteCodeCodec
         ValidatePorts(invite.TcpPort, invite.UdpPort);
         _ = SessionCredentials.ParseToken(tokenText);
 
+        // The binary form has explicit byte lengths, then Base64URL makes it safe to paste into the in-game UI/clipboard without separators.
         var bytes = new byte[HeaderSize + host.Length + token.Length];
         bytes[0] = FormatVersion;
         bytes[1] = checked((byte)host.Length);
@@ -58,6 +61,7 @@ public static class SessionInviteCodeCodec
             throw new FormatException("Invite code contains invalid Base64URL data.", exception);
         }
 
+        // Validate structure and every bounded field before interpreting text or attempting a connection to an address supplied by the invite.
         if (bytes.Length < HeaderSize || bytes[0] != FormatVersion)
         {
             throw new FormatException("Invite code has an unsupported format.");

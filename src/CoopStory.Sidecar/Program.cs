@@ -8,6 +8,8 @@ using System.Net.Sockets;
 
 namespace CoopStory.Sidecar;
 
+// Command-line entry point for the C# multiplayer helper.
+// It can run a real Sidecar, create/join setup data, run local tests, or export diagnostics.
 internal static class Program
 {
     public static async Task<int> Main(string[] args)
@@ -63,9 +65,8 @@ internal static class Program
                 "a matched host.config.json and guest.config.json pair.");
         }
 
-        // A guest must target another PC. The host binds its listeners to
-        // all IPv4 interfaces, so hostAddress is descriptive for that role
-        // and may remain loopback in a locally generated launcher config.
+        // A guest must target another PC.
+        // The host binds its listeners to all IPv4 interfaces, so hostAddress is descriptive for that role and may remain loopback in a locally generated launcher config.
         HostAddressValidator.Validate(
             config.HostAddress,
             requireRemote: config.Role == SessionRole.Guest);
