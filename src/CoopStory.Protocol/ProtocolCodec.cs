@@ -2,29 +2,41 @@ using System.Buffers.Binary;
 
 namespace CoopStory.Protocol;
 
-// Binary frame format shared by named pipes, TCP control, and UDP snapshots.
-// The fixed header makes stream reads unambiguous and bounds allocations before a payload is accepted by higher-level game logic.
+// Packs and reads one complete multiplayer message using the format both computers agree on.
+// Each message starts with a header describing its type, sequence, time, and payload length.
+// The payload is the message contents, such as the bytes representing PlayerStatePayload.
+// BinaryPayloadCodec and the other payload codecs interpret those contents after this file reads the envelope.
+// The same format is used between RDR2 and its local Sidecar, and between the two players' Sidecars.
 public static class ProtocolCodec
 {
+    // Turn an envelope into bytes that the connection can carry.
+    // This only builds the bytes; the caller still needs to send them.
     public static byte[] Encode(ProtocolEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
         ValidateEnvelope(envelope);
 
-        // Serialize a fixed little-endian header followed by opaque message-type payload bytes.
-        // Payload-specific codecs own the bytes after the header.
+        // Reserve space for both the 24-byte header and the already-packed payload.
+        // A Span is a view into that array, so writing into header changes bytes directly.
+        // Little-endian means a number's least significant byte is stored first.
+        // Both the C# and C++ readers must use this same order to get the original numbers back.
         var bytes = new byte[ProtocolConstants.HeaderSize + envelope.Payload.Length];
         var header = bytes.AsSpan(0, ProtocolConstants.HeaderSize);
+        // These offsets are byte positions in the agreed header layout, starting at zero.
+        // Magic identifies our format, while Version identifies which layout the sender uses.
         BinaryPrimitives.WriteUInt32LittleEndian(header, ProtocolConstants.Magic);
         BinaryPrimitives.WriteUInt16LittleEndian(header[4..], envelope.Version);
         BinaryPrimitives.WriteUInt16LittleEndian(header[6..], (ushort)envelope.Type);
         BinaryPrimitives.WriteUInt32LittleEndian(header[8..], envelope.Sequence);
         BinaryPrimitives.WriteUInt64LittleEndian(header[12..], envelope.Tick);
         BinaryPrimitives.WriteUInt32LittleEndian(header[20..], (uint)envelope.Payload.Length);
+        // Append the payload exactly as supplied, without changing positions, health, or other game values.
         envelope.Payload.Span.CopyTo(bytes.AsSpan(ProtocolConstants.HeaderSize));
         return bytes;
     }
 
+    // Read a message when its complete byte array is already available, as with a received UDP datagram.
+    // Reject missing or extra bytes instead of letting a damaged message reach multiplayer gameplay code.
     public static ProtocolEnvelope Decode(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length < ProtocolConstants.HeaderSize)
@@ -46,14 +58,18 @@ public static class ProtocolCodec
             bytes[ProtocolConstants.HeaderSize..].ToArray());
     }
 
+    // Read one envelope from a stream, such as TCP or the local named pipe to RDR2.
+    // Return null if the connection ends cleanly before a new message starts.
+    // Ending partway through a message is an error because the missing fields cannot be guessed.
     public static async ValueTask<ProtocolEnvelope?> ReadAsync(
         Stream stream,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
-        // TCP/named pipes may return fewer bytes than requested.
-        // Read the whole header first, learn the checked payload size, then read that payload.
+        // One read is allowed to return only some of the requested bytes.
+        // First collect the complete header so we know how many payload bytes to read next.
+        // Check that length before allocating an array based on information from the other computer.
         var header = new byte[ProtocolConstants.HeaderSize];
         var hasFrame = await ReadExactlyAsync(
             stream,
@@ -79,6 +95,8 @@ public static class ProtocolCodec
         return DecodeParts(header, payload);
     }
 
+    // Package the envelope, write all of its bytes, and ask the stream to flush any buffered data.
+    // Completing this write does not prove that the other player's game has applied the message.
     public static async ValueTask WriteAsync(
         Stream stream,
         ProtocolEnvelope envelope,
@@ -90,6 +108,9 @@ public static class ProtocolCodec
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    // Rebuild the envelope after the header and payload have been collected separately.
+    // Sequence and Tick are carried to the next layer for its ordering and timing decisions.
+    // This method itself does not sort messages or move a player.
     private static ProtocolEnvelope DecodeParts(
         ReadOnlySpan<byte> header,
         ReadOnlyMemory<byte> payload)
@@ -112,6 +133,8 @@ public static class ProtocolCodec
         };
     }
 
+    // Check the identifying number, protocol version, and declared payload size.
+    // For example, a player running a different protocol version is rejected before its bytes are misread.
     private static int ValidateAndReadPayloadLength(ReadOnlySpan<byte> header)
     {
         // Validate framing/version/size before allocating or decoding payload fields.
@@ -139,6 +162,8 @@ public static class ProtocolCodec
         return checked((int)payloadLength);
     }
 
+    // Check our outgoing envelope too, so a local mistake cannot produce a message the other PC cannot read.
+    // Payload-specific rules, such as whether a health value is allowed, belong to the payload codec.
     private static void ValidateEnvelope(ProtocolEnvelope envelope)
     {
         if (envelope.Version != ProtocolConstants.Version)
@@ -159,6 +184,8 @@ public static class ProtocolCodec
         }
     }
 
+    // Keep filling the destination until the requested header or payload is complete.
+    // offset remembers how many bytes are already present so each read continues in the right place.
     private static async ValueTask<bool> ReadExactlyAsync(
         Stream stream,
         Memory<byte> destination,
@@ -173,6 +200,7 @@ public static class ProtocolCodec
                 .ConfigureAwait(false);
             if (read == 0)
             {
+                // A zero-byte read means the stream ended, rather than a temporary lack of game updates.
                 if (allowCleanEndOfStream && offset == 0)
                 {
                     return false;

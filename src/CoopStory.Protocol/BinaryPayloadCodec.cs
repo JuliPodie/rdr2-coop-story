@@ -5,10 +5,17 @@ using System.Text;
 
 namespace CoopStory.Protocol;
 
-// Fixed-layout payload serializers for multiplayer state.
-// Every encoder writes a canonical byte layout; every decoder checks exact length, reserved fields, enums, IDs, and numeric ranges before a frame reaches game/session logic.
+// Turn the records from Contracts.cs into payload bytes and turn received payload bytes back into records.
+// Encode methods write an agreed layout, while Decode methods read that layout and run the checks defined for that message type.
+// Both PCs need the same field offsets and byte order, otherwise the same bytes could be read as different values.
+// Little-endian means a number's least significant byte is stored first, and BinaryPrimitives handles that conversion explicitly.
+// A payload is only the message's contents, with ProtocolCodec handling the separate envelope header around it.
+// This class does not choose when to send, decide who has authority, spawn NPCs, or apply damage in the game.
+// Validation checks the data rather than fixing it, and failing a check throws ProtocolException for the caller to handle.
 public static class BinaryPayloadCodec
 {
+    // Size constants count payload bytes, not messages per second or milliseconds between updates.
+    // Variable-length payloads use a fixed header plus the bytes needed for text or list entries.
     public const int PlayerStateSize = 104;
     public const int PlayerTraversalSize = 88;
     public const int PlayerActionSize = 88;
@@ -56,9 +63,12 @@ public static class BinaryPayloadCodec
     public const int AmbientEncounterProposalSize = 48;
     public const int AmbientEncounterStateSize = 56;
 
+    // Pack the host's objective text and its mission/revision identifiers into the agreed payload byte layout.
+    // The stored text length tells the receiver where the objective text ends.
     public static byte[] EncodeMissionObjective(MissionObjectivePayload payload)
     {
         ValidateMissionObjective(payload);
+        // Measure encoded text bytes rather than C# character count because some UTF-8 characters use more than one byte.
         var text = Encoding.UTF8.GetBytes(payload.Text);
         var bytes = new byte[MissionObjectiveHeaderSize + text.Length];
         BinaryPrimitives.WriteUInt64LittleEndian(bytes, payload.HostEntityId.Value);
@@ -71,10 +81,13 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the host's objective text and its mission/revision identifiers back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static MissionObjectivePayload DecodeMissionObjective(ReadOnlySpan<byte> payload)
     {
         if (payload.Length < MissionObjectiveHeaderSize)
             throw new ProtocolException("Mission objective payload is truncated.");
+        // Check the announced text length against the actual payload before reading the text portion.
         var textLength = BinaryPrimitives.ReadUInt16LittleEndian(payload[24..]);
         if (payload[26] != 0 || payload[27] != 0 ||
             textLength == 0 || textLength > MaximumMissionObjectiveUtf8Bytes ||
@@ -90,6 +103,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack one mission dialogue cue and its scheduled host time into the agreed payload byte layout.
+    // Profile, root, and line IDs let the game look up the supported line.
     public static byte[] EncodeMissionDialogueCue(MissionDialogueCuePayload payload)
     {
         ValidateMissionDialogueCue(payload);
@@ -106,6 +121,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read one mission dialogue cue and its scheduled host time back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static MissionDialogueCuePayload DecodeMissionDialogueCue(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, MissionDialogueCueSize, nameof(MissionDialogueCuePayload));
@@ -124,6 +141,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the guest's preparation result for one dialogue cue into the agreed payload byte layout.
+    // Repeated mission and cue IDs let the host match this reply to the requested line.
     public static byte[] EncodeMissionDialogueReady(MissionDialogueReadyPayload payload)
     {
         ValidateMissionDialogueReady(payload);
@@ -140,6 +159,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the guest's preparation result for one dialogue cue back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static MissionDialogueReadyPayload DecodeMissionDialogueReady(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, MissionDialogueReadySize, nameof(MissionDialogueReadyPayload));
@@ -158,6 +179,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the guest's encounter suggestion, location, and proposed group seed into the agreed payload byte layout.
+    // The host decides whether to accept the suggestion; packing it does not create NPCs.
     public static byte[] EncodeAmbientEncounterProposal(AmbientEncounterProposalPayload payload)
     {
         ValidateAmbientEncounterProposal(payload);
@@ -172,6 +195,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the guest's encounter suggestion, location, and proposed group seed back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static AmbientEncounterProposalPayload DecodeAmbientEncounterProposal(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, AmbientEncounterProposalSize, nameof(AmbientEncounterProposalPayload));
@@ -187,6 +212,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the host's encounter decision or current encounter state into the agreed payload byte layout.
+    // The instance ID names the encounter and the roster fields describe its intended participant group.
     public static byte[] EncodeAmbientEncounterState(AmbientEncounterStatePayload payload)
     {
         ValidateAmbientEncounterState(payload);
@@ -204,6 +231,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the host's encounter decision or current encounter state back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static AmbientEncounterStatePayload DecodeAmbientEncounterState(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, AmbientEncounterStateSize, nameof(AmbientEncounterStatePayload));
@@ -221,6 +250,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack one mission-entry, completion, or acknowledgement message into the agreed payload byte layout.
+    // Phase describes this particular message; the codec does not advance through enum values.
     public static byte[] EncodeMissionProgression(MissionProgressionPayload payload)
     {
         ValidateMissionProgression(payload);
@@ -235,6 +266,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read one mission-entry, completion, or acknowledgement message back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static MissionProgressionPayload DecodeMissionProgression(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, MissionProgressionSize, nameof(MissionProgressionPayload));
@@ -252,6 +285,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the collector, pickup type, and collection event ID into the agreed payload byte layout.
+    // The event identity lets receiving logic recognise a collection it has already handled.
     public static byte[] EncodePickupCollected(PickupCollectedPayload payload)
     {
         ValidatePickupCollected(payload);
@@ -262,6 +297,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the collector, pickup type, and collection event ID back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static PickupCollectedPayload DecodePickupCollected(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, PickupCollectedSize, nameof(PickupCollectedPayload));
@@ -275,6 +312,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the guest's acknowledgement of one host unlock event into the agreed payload byte layout.
+    // The repeated event and record IDs identify exactly which unlock was acknowledged.
     public static byte[] EncodeCampaignCapabilityAck(CampaignCapabilityAckPayload payload)
     {
         ValidateCampaignCapabilityAck(payload);
@@ -285,6 +324,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the guest's acknowledgement of one host unlock event back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static CampaignCapabilityAckPayload DecodeCampaignCapabilityAck(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, CampaignCapabilityAckSize, nameof(CampaignCapabilityAckPayload));
@@ -293,6 +334,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack one host-issued campaign unlock event and its timestamp into the agreed payload byte layout.
+    // This describes a permission grant rather than copying a player's entire save.
     public static byte[] EncodeCampaignCapability(CampaignCapabilityPayload payload)
     {
         ValidateCampaignCapability(payload);
@@ -304,6 +347,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read one host-issued campaign unlock event and its timestamp back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static CampaignCapabilityPayload DecodeCampaignCapability(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, CampaignCapabilitySize, nameof(CampaignCapabilityPayload));
@@ -313,25 +358,35 @@ public static class BinaryPayloadCodec
     }
 
     // Realtime player snapshot: identity, transform, health and locomotion are kept together so a remote puppet can present one coherent point in time.
+    // Pack one player's identity, position, velocity, health, aim, and movement details into the agreed payload byte layout.
+    // Keeping these fields together describes one sampled player state.
     public static byte[] EncodePlayerState(PlayerStatePayload payload)
     {
         ValidatePlayerState(payload);
+        // Allocate the agreed 104-byte payload and use a Span to write into that same array without making another copy.
+        // New arrays start at zero, so unused gaps remain zero unless explicitly written.
         var bytes = new byte[PlayerStateSize];
         var span = bytes.AsSpan();
+        // Bytes 0 through 9 identify the player, its slot, and lifecycle rather than its position.
         BinaryPrimitives.WriteUInt64LittleEndian(span, payload.EntityId.Value);
         span[8] = payload.Slot;
         span[9] = (byte)payload.Lifecycle;
+        // Write movement and health at fixed byte offsets that the receiver must read in the same order.
+        // For example, span[12..] starts writing at byte 12 rather than at the twelfth player field.
         WriteVector3(span[12..], payload.Position);
         WriteVector3(span[24..], payload.Velocity);
         BinaryPrimitives.WriteSingleLittleEndian(span[36..], payload.Heading);
         BinaryPrimitives.WriteSingleLittleEndian(span[40..], payload.HealthFraction);
         BinaryPrimitives.WriteUInt32LittleEndian(span[44..], (uint)payload.Flags);
+        // Include the sampled aim point and firing sequence with this state, but do not apply weapon damage here.
         WriteVector3(span[48..], payload.AimTarget);
         BinaryPrimitives.WriteUInt32LittleEndian(span[60..], payload.FireSequence);
+        // Movement heading, local speeds, and blend describe how the player is moving, not just where the player is.
         BinaryPrimitives.WriteSingleLittleEndian(span[64..], payload.MovementHeading);
         BinaryPrimitives.WriteSingleLittleEndian(span[68..], payload.LocalForwardSpeed);
         BinaryPrimitives.WriteSingleLittleEndian(span[72..], payload.LocalRightSpeed);
         BinaryPrimitives.WriteSingleLittleEndian(span[76..], payload.DesiredMoveBlend);
+        // Movement and traversal IDs let later code associate these details with the intended movement action.
         BinaryPrimitives.WriteUInt16LittleEndian(span[80..], payload.LocomotionEpoch);
         BinaryPrimitives.WriteUInt16LittleEndian(span[82..], payload.TraversalActionId);
         span[84] = (byte)payload.TraversalKind;
@@ -341,11 +396,14 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read one player's identity, position, velocity, health, aim, and movement details back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static PlayerStatePayload DecodePlayerState(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, PlayerStateSize, nameof(PlayerStatePayload));
-        // Decode first, then run semantic validation.
+        // Read the field values first, then check whether those values make sense for this payload.
         // A correctly-sized buffer is not sufficient if it carries NaN coordinates or an invalid role.
+        // Each read below reverses the matching write in EncodePlayerState, producing data rather than moving an entity.
         var result = new PlayerStatePayload(
             new NetEntityId(BinaryPrimitives.ReadUInt64LittleEndian(payload)),
             payload[8],
@@ -368,6 +426,7 @@ public static class BinaryPayloadCodec
             ReadVector3(payload[88..]),
             BinaryPrimitives.ReadSingleLittleEndian(payload[100..]));
         ValidatePlayerState(result);
+        // Bytes 86 and 87 are reserved by this layout, so nonzero contents are rejected instead of interpreted as movement data.
         if (BinaryPrimitives.ReadUInt16LittleEndian(payload[86..]) != 0)
         {
             throw new ProtocolException(
@@ -376,6 +435,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack a traversal action and its takeoff, obstacle, and landing information into the agreed payload byte layout.
+    // Action and revision IDs distinguish a new movement action from an older description.
     public static byte[] EncodePlayerTraversal(PlayerTraversalPayload payload)
     {
         ValidatePlayerTraversal(payload);
@@ -389,6 +450,7 @@ public static class BinaryPayloadCodec
         BinaryPrimitives.WriteUInt16LittleEndian(span[14..], payload.LocomotionEpoch);
         BinaryPrimitives.WriteUInt32LittleEndian(span[16..], (uint)payload.Flags);
         BinaryPrimitives.WriteSingleLittleEndian(span[20..], payload.TakeoffHeading);
+        // Describe the geometry of the reported jump or climb so the other game can interpret the same traversal attempt.
         WriteVector3(span[24..], payload.TakeoffPosition);
         WriteVector3(span[36..], payload.ApproachVelocity);
         WriteVector3(span[48..], payload.ObstaclePoint);
@@ -398,6 +460,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read a traversal action and its takeoff, obstacle, and landing information back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static PlayerTraversalPayload DecodePlayerTraversal(
         ReadOnlySpan<byte> payload)
     {
@@ -421,6 +485,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack an action request or host-approved action state with its actor, target, and timing into the agreed payload byte layout.
+    // Validity flags say which optional targets and animation fields contain useful information.
     public static byte[] EncodePlayerAction(PlayerActionPayload payload)
     {
         ValidatePlayerAction(payload);
@@ -432,6 +498,7 @@ public static class BinaryPayloadCodec
         BinaryPrimitives.WriteUInt64LittleEndian(
             span[8..],
             payload.TargetEntityId.Value);
+        // The action's own sequence, ID, and revision identify the action and its update independently of the outer envelope sequence.
         BinaryPrimitives.WriteUInt32LittleEndian(span[16..], payload.Sequence);
         BinaryPrimitives.WriteUInt32LittleEndian(span[20..], payload.ActionId);
         BinaryPrimitives.WriteUInt16LittleEndian(span[24..], payload.Revision);
@@ -459,6 +526,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read an action request or host-approved action state with its actor, target, and timing back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static PlayerActionPayload DecodePlayerAction(
         ReadOnlySpan<byte> payload)
     {
@@ -493,6 +562,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack a requested interaction and the entities involved into the agreed payload byte layout.
+    // The host still has to decide whether the requested revive, mount use, or other interaction is allowed.
     public static byte[] EncodeInteractionIntent(
         InteractionIntentPayload payload)
     {
@@ -515,6 +586,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read a requested interaction and the entities involved back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static InteractionIntentPayload DecodeInteractionIntent(
         ReadOnlySpan<byte> payload)
     {
@@ -539,6 +612,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the host's result and progress for an interaction attempt into the agreed payload byte layout.
+    // Request identity and revision connect the answer to the correct attempt.
     public static byte[] EncodeInteractionResult(
         InteractionResultPayload payload)
     {
@@ -560,6 +635,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the host's result and progress for an interaction attempt back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static InteractionResultPayload DecodeInteractionResult(
         ReadOnlySpan<byte> payload)
     {
@@ -585,6 +662,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the host-approved restraint state and its subject and owner IDs into the agreed payload byte layout.
+    // The subject is the restrained entity and the owner identifies who holds it while restrained.
     public static byte[] EncodeRestraintState(RestraintStatePayload payload)
     {
         ValidateRestraintState(payload);
@@ -600,6 +679,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the host-approved restraint state and its subject and owner IDs back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static RestraintStatePayload DecodeRestraintState(
         ReadOnlySpan<byte> payload)
     {
@@ -620,6 +701,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the player's network ID, slot, and nickname into the agreed payload byte layout.
+    // UTF-8 nickname byte length can differ from its character count.
     public static byte[] EncodePlayerIdentity(PlayerIdentityPayload payload)
     {
         ValidatePlayerIdentity(payload);
@@ -633,6 +716,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the player's network ID, slot, and nickname back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static PlayerIdentityPayload DecodePlayerIdentity(
         ReadOnlySpan<byte> payload)
     {
@@ -662,6 +747,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the player's model and appearance component list into the agreed payload byte layout.
+    // A component count describes the variable-length part after the fixed appearance header.
     public static byte[] EncodePlayerAppearanceState(
         PlayerAppearanceStatePayload payload)
     {
@@ -689,6 +776,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the player's model and appearance component list back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static PlayerAppearanceStatePayload DecodePlayerAppearanceState(
         ReadOnlySpan<byte> payload)
     {
@@ -709,6 +798,8 @@ public static class BinaryPayloadCodec
             throw new ProtocolException(
                 "Player appearance component count or reserved field is invalid.");
         }
+        // Read exactly the validated number of four-byte appearance IDs after the fixed header.
+        // This reconstructs the description without loading any clothing or model assets here.
         var components = new uint[componentCount];
         for (var index = 0; index < components.Length; index++)
         {
@@ -729,6 +820,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack a player's mount relationship and the mount's sampled state into the agreed payload byte layout.
+    // Different player and mount IDs link the rider to the correct copy on the other computer.
     public static byte[] EncodePlayerMountState(
         PlayerMountStatePayload payload)
     {
@@ -755,6 +848,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read a player's mount relationship and the mount's sampled state back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static PlayerMountStatePayload DecodePlayerMountState(
         ReadOnlySpan<byte> payload)
     {
@@ -785,6 +880,8 @@ public static class BinaryPayloadCodec
 
     // Host-authoritative NPC/object snapshot.
     // ParentEntityId connects riders and attachments; TaskKind/flags describe how the guest should present it.
+    // Pack the host's NPC/object identity, movement, health, equipment, and task into the agreed payload byte layout.
+    // ParentEntityId connects a rider or attached entity to its corresponding parent.
     public static byte[] EncodeWorldEntityState(
         WorldEntityStatePayload payload)
     {
@@ -792,11 +889,13 @@ public static class BinaryPayloadCodec
         var bytes = new byte[WorldEntityStateSize];
         var span = bytes.AsSpan();
         BinaryPrimitives.WriteUInt64LittleEndian(span, payload.EntityId.Value);
+        // The network entity ID names this particular NPC or object, while the model hash says what model it uses.
         BinaryPrimitives.WriteUInt32LittleEndian(span[8..], payload.ModelHash);
         span[12] = (byte)payload.Kind;
         span[13] = (byte)payload.Flags;
         span[14] = (byte)payload.CombatTargetSlot;
         span[15] = (byte)payload.TaskKind;
+        // Store the host's sampled transform and health for the guest's replica to follow later.
         WriteVector3(span[16..], payload.Position);
         WriteVector3(span[28..], payload.Velocity);
         BinaryPrimitives.WriteSingleLittleEndian(span[40..], payload.Heading);
@@ -804,14 +903,18 @@ public static class BinaryPayloadCodec
             span[44..],
             payload.HealthFraction);
         BinaryPrimitives.WriteUInt32LittleEndian(span[48..], payload.WeaponHash);
+        // For a mounted rider, ParentEntityId identifies the shared mount rather than either PC's local game handle.
         BinaryPrimitives.WriteUInt64LittleEndian(
             span[52..],
             payload.ParentEntityId.Value);
+        // TaskTarget is a task destination or target point, separate from the entity's current Position.
         WriteVector3(span[60..], payload.TaskTarget);
         BinaryPrimitives.WriteUInt32LittleEndian(span[72..], 0);
         return bytes;
     }
 
+    // Read the host's NPC/object identity, movement, health, equipment, and task back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static WorldEntityStatePayload DecodeWorldEntityState(
         ReadOnlySpan<byte> payload)
     {
@@ -844,6 +947,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the network ID of the entity to remove into the agreed payload byte layout.
+    // The receiving Bridge removes the actual RDR2 copy later.
     public static byte[] EncodeEntityDespawn(EntityDespawnPayload payload)
     {
         ValidateEntityDespawn(payload);
@@ -852,6 +957,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the network ID of the entity to remove back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static EntityDespawnPayload DecodeEntityDespawn(
         ReadOnlySpan<byte> payload)
     {
@@ -864,6 +971,8 @@ public static class BinaryPayloadCodec
 
     // A guest asks the host to validate/apply this hit.
     // It is not proof that a local proxy was damaged, which is why host-side range/state checks remain.
+    // Pack a claimed hit's attacker, target, weapon, damage, and shot sequence into the agreed payload byte layout.
+    // Successful encoding or decoding is not confirmation that the host applied any damage.
     public static byte[] EncodeDamageIntent(DamageIntentPayload payload)
     {
         ValidateDamageIntent(payload);
@@ -873,11 +982,15 @@ public static class BinaryPayloadCodec
         BinaryPrimitives.WriteUInt64LittleEndian(span[8..], payload.TargetId.Value);
         BinaryPrimitives.WriteUInt32LittleEndian(span[16..], payload.WeaponHash);
         BinaryPrimitives.WriteSingleLittleEndian(span[20..], payload.Damage);
+        // Include the reported shot number so later damage-handling code has an identifier for this attempt.
+        // The codec does not decide whether the bullet hit or whether this shot was already handled.
         BinaryPrimitives.WriteUInt32LittleEndian(span[24..], payload.ShotSequence);
         BinaryPrimitives.WriteUInt32LittleEndian(span[28..], 0);
         return bytes;
     }
 
+    // Read a claimed hit's attacker, target, weapon, damage, and shot sequence back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static DamageIntentPayload DecodeDamageIntent(
         ReadOnlySpan<byte> payload)
     {
@@ -898,6 +1011,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the shared date, time, and weather transition into the agreed payload byte layout.
+    // The blend value describes how far the weather transition has progressed.
     public static byte[] EncodeWorldState(WorldStatePayload payload)
     {
         ValidateWorldState(payload);
@@ -917,6 +1032,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the shared date, time, and weather transition back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static WorldStatePayload DecodeWorldState(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, WorldStateSize, nameof(WorldStatePayload));
@@ -943,6 +1060,8 @@ public static class BinaryPayloadCodec
 
     // Mission state is an ordered host record.
     // Epoch/revision/checkpoint values let a guest reject an old scene after a recovery or checkpoint restart.
+    // Pack the host's mission phase, checkpoint information, and optional anchor into the agreed payload byte layout.
+    // Epoch and revision let later logic distinguish this state from an older mission run.
     public static byte[] EncodeMissionState(MissionStatePayload payload)
     {
         ValidateMissionState(payload);
@@ -963,6 +1082,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the host's mission phase, checkpoint information, and optional anchor back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static MissionStatePayload DecodeMissionState(
         ReadOnlySpan<byte> payload)
     {
@@ -987,6 +1108,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the mission camera transform, field of view, and screen-fade state into the agreed payload byte layout.
+    // Mission and cinematic IDs associate the sample with the correct scene.
     public static byte[] EncodeMissionCameraState(
         MissionCameraStatePayload payload)
     {
@@ -1006,6 +1129,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the mission camera transform, field of view, and screen-fade state back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static MissionCameraStatePayload DecodeMissionCameraState(
         ReadOnlySpan<byte> payload)
     {
@@ -1034,6 +1159,8 @@ public static class BinaryPayloadCodec
     }
 
     // Cinematic state and camera are separate: the first is reliable authority while camera samples can be replaced as the presentation advances.
+    // Pack the host's cutscene stage and return-to-gameplay information into the agreed payload byte layout.
+    // The resume anchor gives the return position when that phase requires one.
     public static byte[] EncodeMissionCinematicState(
         MissionCinematicStatePayload payload)
     {
@@ -1056,6 +1183,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the host's cutscene stage and return-to-gameplay information back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static MissionCinematicStatePayload DecodeMissionCinematicState(
         ReadOnlySpan<byte> payload)
     {
@@ -1085,6 +1214,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack one cutscene control action or readiness response into the agreed payload byte layout.
+    // Action and cinematic IDs let receiving logic match responses to the intended scene.
     public static byte[] EncodeMissionCinematicAction(
         MissionCinematicActionPayload payload)
     {
@@ -1103,6 +1234,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read one cutscene control action or readiness response back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static MissionCinematicActionPayload DecodeMissionCinematicAction(
         ReadOnlySpan<byte> payload)
     {
@@ -1129,6 +1262,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack a shared animation scene's playback progress, rate, and origin into the agreed payload byte layout.
+    // Scene resources and role bindings are supplied separately from these frequent playback samples.
     public static byte[] EncodeAnimSceneReplicaState(
         AnimSceneReplicaStatePayload payload)
     {
@@ -1154,6 +1289,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read a shared animation scene's playback progress, rate, and origin back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static AnimSceneReplicaStatePayload DecodeAnimSceneReplicaState(
         ReadOnlySpan<byte> payload)
     {
@@ -1187,6 +1324,8 @@ public static class BinaryPayloadCodec
 
     // An AnimScene definition is a bounded, role-addressed description of a scripted scene.
     // It is larger than realtime data and must be reliable.
+    // Pack the scene resource, playback list, and role-to-entity bindings into the agreed payload byte layout.
+    // A role names an actor or object in the scene and can map it to a shared entity.
     public static byte[] EncodeAnimSceneDefinition(
         AnimSceneDefinitionPayload payload)
     {
@@ -1194,6 +1333,8 @@ public static class BinaryPayloadCodec
         return SerializeAnimSceneDefinition(payload, clearFingerprint: false);
     }
 
+    // Compute a repeatable content identifier from the serialized scene definition.
+    // Zero the fingerprint fields while hashing so the answer does not depend on a previous fingerprint.
     public static AnimSceneDefinitionFingerprint
         ComputeAnimSceneDefinitionFingerprint(
             AnimSceneDefinitionPayload payload)
@@ -1208,6 +1349,8 @@ public static class BinaryPayloadCodec
             BinaryPrimitives.ReadUInt64LittleEndian(digest.AsSpan(8)));
     }
 
+    // Write the scene header followed by variable-length resource names and role bindings.
+    // The clearFingerprint option is used while calculating the definition's own content identifier.
     private static byte[] SerializeAnimSceneDefinition(
         AnimSceneDefinitionPayload payload,
         bool clearFingerprint)
@@ -1291,6 +1434,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the scene resource, playback list, and role-to-entity bindings back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static AnimSceneDefinitionPayload DecodeAnimSceneDefinition(
         ReadOnlySpan<byte> payload)
     {
@@ -1308,6 +1453,7 @@ public static class BinaryPayloadCodec
                 "AnimScene definition reserved field must be zero.");
         }
 
+        // Read the sizes and count first so later reads can stay inside this message even when scene names vary in length.
         var resourceLength = BinaryPrimitives.ReadUInt16LittleEndian(payload[44..]);
         var playbackLength = BinaryPrimitives.ReadUInt16LittleEndian(payload[46..]);
         var roleCount = BinaryPrimitives.ReadUInt16LittleEndian(payload[48..]);
@@ -1338,7 +1484,8 @@ public static class BinaryPayloadCodec
             "AnimScene playback list");
         offset += playbackLength;
 
-        // Consume each variable-length role exactly once; leftover/truncated bytes are rejected so incompatible scene schemas cannot silently work.
+        // Read each role's fixed fields and variable-length name once, checking that enough bytes remain before every read.
+        // Reject incomplete roles or leftover bytes instead of guessing how a different scene layout should be interpreted.
         var roles = new AnimSceneRoleBindingPayload[roleCount];
         for (var index = 0; index < roles.Length; index++)
         {
@@ -1373,6 +1520,8 @@ public static class BinaryPayloadCodec
             roles[index] = role;
             offset += AnimSceneRoleBindingHeaderSize + roleNameLength;
         }
+        // After every name and role has been read, the offset should point exactly to the end of the message.
+        // Extra bytes may mean the sender and receiver disagree about this layout.
         if (offset != payload.Length)
         {
             throw new ProtocolException(
@@ -1397,6 +1546,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack one scene readiness, rejection, play, or abort control into the agreed payload byte layout.
+    // The definition revision and fingerprint identify the exact scene setup this control concerns.
     public static byte[] EncodeAnimSceneControl(AnimSceneControlPayload payload)
     {
         ValidateAnimSceneControl(payload);
@@ -1422,6 +1573,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read one scene readiness, rejection, play, or abort control back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static AnimSceneControlPayload DecodeAnimSceneControl(
         ReadOnlySpan<byte> payload)
     {
@@ -1451,6 +1604,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the player's weapon, ammunition values, and equipment flags into the agreed payload byte layout.
+    // Receiving logic uses this description to present the remote player's equipment.
     public static byte[] EncodeEquipmentState(EquipmentStatePayload payload)
     {
         ValidateEquipmentState(payload);
@@ -1464,6 +1619,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the player's weapon, ammunition values, and equipment flags back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static EquipmentStatePayload DecodeEquipmentState(
         ReadOnlySpan<byte> payload)
     {
@@ -1484,6 +1641,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack a pause request or shared vote state into the agreed payload byte layout.
+    // The pause policy elsewhere decides whether this information should pause gameplay.
     public static byte[] EncodePauseVote(PauseVotePayload payload)
     {
         ValidatePauseVote(payload);
@@ -1498,6 +1657,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read a pause request or shared vote state back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static PauseVotePayload DecodePauseVote(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, PauseVoteSize, nameof(PauseVotePayload));
@@ -1517,6 +1678,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack a known Bridge command and its arguments into the agreed payload byte layout.
+    // The runtime checks whether the sender may issue that command before acting on it.
     public static byte[] EncodeCommand(CommandPayload payload)
     {
         if (!Enum.IsDefined(payload.Opcode))
@@ -1542,6 +1705,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read a known Bridge command and its arguments back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static CommandPayload DecodeCommand(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, CommandSize, nameof(CommandPayload));
@@ -1556,6 +1721,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the player's lifecycle and health fraction into the agreed payload byte layout.
+    // Receiving gameplay code applies this alive/downed/reviving/spectator description.
     public static byte[] EncodeDownedState(DownedStatePayload payload)
     {
         ValidateDownedState(payload);
@@ -1566,6 +1733,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the player's lifecycle and health fraction back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static DownedStatePayload DecodeDownedState(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, DownedStateSize, nameof(DownedStatePayload));
@@ -1584,6 +1753,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the IDs of the helper and the player being revived into the agreed payload byte layout.
+    // Gameplay rules still decide whether this attempt can succeed.
     public static byte[] EncodeReviveRequest(ReviveRequestPayload payload)
     {
         ValidateReviveRequest(payload);
@@ -1593,6 +1764,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the IDs of the helper and the player being revived back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static ReviveRequestPayload DecodeReviveRequest(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, ReviveRequestSize, nameof(ReviveRequestPayload));
@@ -1603,6 +1776,8 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Pack the revive participants and the resulting health fraction into the agreed payload byte layout.
+    // The receiving game uses this result to restore the intended health.
     public static byte[] EncodeReviveComplete(ReviveCompletePayload payload)
     {
         ValidateReviveComplete(payload);
@@ -1613,6 +1788,8 @@ public static class BinaryPayloadCodec
         return bytes;
     }
 
+    // Read the revive participants and the resulting health fraction back from payload bytes.
+    // Apply this payload type's decoding checks before returning its Contracts.cs record.
     public static ReviveCompletePayload DecodeReviveComplete(ReadOnlySpan<byte> payload)
     {
         RequireLength(payload, ReviveCompleteSize, nameof(ReviveCompletePayload));
@@ -1624,6 +1801,7 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    // Check the player ID, known lifecycle enum, and usable health fraction.
     private static void ValidateDownedState(DownedStatePayload payload)
     {
         if (!payload.EntityId.IsValid)
@@ -1646,6 +1824,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Require valid and different helper and target IDs.
     private static void ValidateReviveRequest(ReviveRequestPayload payload)
     {
         if (!payload.ReviverId.IsValid ||
@@ -1657,6 +1836,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Reuse the participant checks and require the resulting health fraction to be between zero and one.
     private static void ValidateReviveComplete(ReviveCompletePayload payload)
     {
         ValidateReviveRequest(
@@ -1671,6 +1851,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check identity, supported movement choices, numeric ranges, and consistency of optional aim and traversal fields.
     private static void ValidatePlayerState(PlayerStatePayload payload)
     {
         if (!payload.EntityId.IsValid)
@@ -1690,6 +1871,8 @@ public static class BinaryPayloadCodec
             throw new ProtocolException($"Unknown lifecycle {(byte)payload.Lifecycle}.");
         }
 
+        // Reject undefined numbers such as NaN and infinity before they can reach movement or health logic.
+        // The range checks below reject the whole payload rather than silently clamping its values.
         if (!IsFinite(payload.Position) ||
             !IsFinite(payload.Velocity) ||
             !float.IsFinite(payload.Heading) ||
@@ -1711,6 +1894,7 @@ public static class BinaryPayloadCodec
             throw new ProtocolException("Player state contains an invalid numeric value.");
         }
 
+        // The validity bit says whether AimTarget is meaningful, and an unused aim point must be zero.
         var aimTargetValid =
             (payload.Flags & PlayerStateFlags.AimTargetValid) != 0;
         if (!aimTargetValid && payload.AimTarget != Vector3.Zero)
@@ -1727,8 +1911,10 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Require a real traversal kind and action identity, then check its geometry and optional-field flags.
     private static void ValidatePlayerTraversal(PlayerTraversalPayload payload)
     {
+        // Combine the recognized flag bits into a mask so the check below can reject unknown bits.
         const PlayerTraversalFlags allowedFlags =
             PlayerTraversalFlags.InputEdgeDetected |
             PlayerTraversalFlags.ObstacleValid |
@@ -1757,6 +1943,7 @@ public static class BinaryPayloadCodec
                 "Player traversal contains an invalid identity, enum, flag or numeric value.");
         }
 
+        // An absent obstacle or landing flag requires its matching geometry fields to be empty rather than leftover data.
         if (!obstacleValid &&
             (payload.ObstaclePoint != Vector3.Zero ||
              payload.ObstacleNormal != Vector3.Zero ||
@@ -1772,6 +1959,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check request versus host-approved status, targets, optional animation fields, durations, and persistent replay rules.
     private static void ValidatePlayerAction(PlayerActionPayload payload)
     {
         const PlayerActionFlags allowedFlags =
@@ -1788,6 +1976,7 @@ public static class BinaryPayloadCodec
             PlayerActionFlags.NormalizedPhaseValid;
         const uint maximumActionTimeMilliseconds = 3_600_000;
 
+        // Read the flag bits into named booleans so the checks can distinguish a request from a host-approved result.
         var intent = (payload.Flags & PlayerActionFlags.Intent) != 0;
         var authoritative =
             (payload.Flags & PlayerActionFlags.Authoritative) != 0;
@@ -1804,6 +1993,8 @@ public static class BinaryPayloadCodec
         var normalizedPhaseValid =
             (payload.Flags & PlayerActionFlags.NormalizedPhaseValid) != 0;
 
+        // Intent and Authoritative must differ, meaning exactly one is set rather than both or neither.
+        // The bit-mask check also rejects any flag bit that this protocol does not recognize.
         if (!payload.ActorEntityId.IsValid ||
             payload.Sequence == 0 ||
             payload.ActionId == 0 ||
@@ -1829,6 +2020,7 @@ public static class BinaryPayloadCodec
                 "Player action authority does not match its actor or host resolver.");
         }
 
+        // A claimed entity target must be valid and different from the actor, while an unused target ID must be None.
         if (targetEntityValid
                 ? !payload.TargetEntityId.IsValid ||
                   payload.TargetEntityId == payload.ActorEntityId
@@ -1838,6 +2030,7 @@ public static class BinaryPayloadCodec
                 "Player action target entity validity is inconsistent.");
         }
 
+        // Optional points and animation data must agree with their validity flags so the receiver knows which fields to use.
         if (!targetPointValid && payload.TargetPoint != Vector3.Zero ||
             !actorAnchorValid && payload.ActorAnchor != Vector3.Zero ||
             !variantValid && payload.VariantHash != 0 ||
@@ -1850,6 +2043,8 @@ public static class BinaryPayloadCodec
                 "Player action optional fields do not match their validity flags.");
         }
 
+        // Check headings, normalized animation progress, and timing ranges before accepting the action description.
+        // A nonzero total duration cannot be shorter than the time already reported as elapsed.
         if (!IsFinite(payload.ActorAnchor) ||
             !IsFinite(payload.TargetPoint) ||
             !float.IsFinite(payload.FacingHeading) ||
@@ -1872,6 +2067,7 @@ public static class BinaryPayloadCodec
                 "A physical player action effect requires a target entity.");
         }
 
+        // Only a host-approved persistent action may be described as resync state, because replay describes an ongoing state rather than a fresh one-shot request.
         if ((payload.Flags & PlayerActionFlags.ResyncSnapshot) != 0 &&
             (!authoritative ||
              (payload.Flags & PlayerActionFlags.Persistent) == 0))
@@ -1881,6 +2077,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check participants, target type, duration, and any secondary entity required by this interaction.
     private static void ValidateInteractionIntent(
         InteractionIntentPayload payload)
     {
@@ -1958,6 +2155,7 @@ public static class BinaryPayloadCodec
 
     }
 
+    // Check attempt identity and agreement between result status, rejection reason, and progress.
     private static void ValidateInteractionResult(
         InteractionResultPayload payload)
     {
@@ -2006,6 +2204,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Require a separate valid owner for an active restraint and clear owner information when the subject is free.
     private static void ValidateRestraintState(
         RestraintStatePayload payload)
     {
@@ -2040,6 +2239,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Validate player identity and nickname rules, converting nickname errors into protocol errors.
     private static void ValidatePlayerIdentity(PlayerIdentityPayload payload)
     {
         if (!payload.EntityId.IsValid)
@@ -2066,6 +2266,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Require a supported layout and a bounded list of nonzero, unique appearance component IDs.
     private static void ValidatePlayerAppearanceState(
         PlayerAppearanceStatePayload payload)
     {
@@ -2096,6 +2297,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check rider/mount identities and agreement between presence, riding, borrowing, and vehicle-seat flags.
     private static void ValidatePlayerMountState(
         PlayerMountStatePayload payload)
     {
@@ -2142,6 +2344,7 @@ public static class BinaryPayloadCodec
             throw new ProtocolException(
                 "Vehicle seat flags require a shared vehicle.");
         }
+        // When the mount is absent, old model and movement fields must be cleared so they cannot describe a ghost mount.
         if (!present &&
             (payload.Flags != PlayerMountStateFlags.None ||
              payload.ModelHash != 0 ||
@@ -2173,6 +2376,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check that type, flags, task, parent, equipment, and numeric state form a consistent NPC/object description.
     private static void ValidateWorldEntityState(
         WorldEntityStatePayload payload)
     {
@@ -2242,6 +2446,7 @@ public static class BinaryPayloadCodec
 
         var mounted =
             (payload.Flags & WorldEntityStateFlags.Mounted) != 0;
+        // Objects cannot claim rider, weapon, or other character-only state merely because those fields exist in the shared payload.
         if (payload.Kind == WorldEntityKind.Object &&
             (human || horse || inCombat || mounted ||
              payload.CombatTargetSlot != WorldCombatTargetSlot.None ||
@@ -2252,6 +2457,8 @@ public static class BinaryPayloadCodec
             throw new ProtocolException(
                 "World object state contains ped-only semantics.");
         }
+        // A mounted rider must be a human with a distinct valid parent ID and a Mounted task.
+        // This checks the relationship's shape but does not prove the parent has already spawned in the guest game.
         if (mounted != payload.ParentEntityId.IsValid ||
             (mounted && (!human ||
                          payload.TaskKind != WorldTaskKind.Mounted ||
@@ -2274,6 +2481,7 @@ public static class BinaryPayloadCodec
                 "Non-human world entity state requires a zero weapon hash.");
         }
 
+        // An aiming or firing flag only makes sense here for a human with a nonzero weapon model identifier.
         var usesWeapon =
             (payload.Flags &
              (WorldEntityStateFlags.Firing |
@@ -2298,6 +2506,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Require a usable network ID before asking receiving gameplay code to remove anything.
     private static void ValidateEntityDespawn(EntityDespawnPayload payload)
     {
         if (!payload.EntityId.IsValid)
@@ -2307,6 +2516,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check the hit's basic IDs, weapon, positive bounded damage, and shot sequence.
     private static void ValidateDamageIntent(DamageIntentPayload payload)
     {
         if (!payload.AttackerId.IsValid ||
@@ -2336,6 +2546,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check date/time ranges and agreement between weather fields and the WeatherValid flag.
     private static void ValidateWorldState(WorldStatePayload payload)
     {
         const WorldStateFlags allowedFlags = WorldStateFlags.WeatherValid;
@@ -2382,6 +2593,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check identity, supported flags, optional anchor, and agreement between phase and active/recovery flags.
     private static void ValidateMissionState(MissionStatePayload payload)
     {
         const MissionStateFlags allowedFlags =
@@ -2445,6 +2657,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check camera identity, exclusive fade/source choices, and usable numeric settings.
     private static void ValidateMissionCameraState(
         MissionCameraStatePayload payload)
     {
@@ -2469,6 +2682,8 @@ public static class BinaryPayloadCodec
             (MissionCameraStateFlags.ScreenFadedOut |
              MissionCameraStateFlags.ScreenFadingOut |
              MissionCameraStateFlags.ScreenFadingIn);
+        // The expression bits & (bits - 1) removes one set bit, so a nonzero result means multiple choices were set.
+        // That catches contradictory fade states such as fading in and fading out at the same time.
         var fadeBits = (uint)fadeFlags;
         if (fadeBits != 0 && (fadeBits & (fadeBits - 1)) != 0)
         {
@@ -2476,6 +2691,7 @@ public static class BinaryPayloadCodec
                 "Mission camera state may contain only one fade flag.");
         }
 
+        // An active camera needs exactly one source, while an inactive camera must not claim any source.
         var sourceFlags = payload.Flags &
             (MissionCameraStateFlags.SourceRenderingScriptCamera |
              MissionCameraStateFlags.SourceCinematicGameplayCamera |
@@ -2524,6 +2740,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check scene identity and whether skip/resume flags agree with the reported cutscene phase.
     private static void ValidateMissionCinematicState(
         MissionCinematicStatePayload payload)
     {
@@ -2589,6 +2806,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check scene/action identity and restrict fallback reporting to readiness-to-resume actions.
     private static void ValidateMissionCinematicAction(
         MissionCinematicActionPayload payload)
     {
@@ -2619,6 +2837,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Require a valid active scene sample with supported timing, playback rate, and optional origin.
     private static void ValidateAnimSceneReplicaState(
         AnimSceneReplicaStatePayload payload)
     {
@@ -2655,6 +2874,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check the scene shape and compare its advertised fingerprint with the one calculated from its actual contents.
     private static void ValidateAnimSceneDefinition(
         AnimSceneDefinitionPayload payload)
     {
@@ -2665,6 +2885,8 @@ public static class BinaryPayloadCodec
                 "AnimScene definition fingerprint must not be all zero.");
         }
 
+        // Recalculate the content fingerprint so a message cannot claim one scene definition while carrying different definition bytes.
+        // This is a content-consistency check, not a replacement for checking who sent the message.
         var expected = ComputeAnimSceneDefinitionFingerprint(payload);
         if (payload.FingerprintLow != expected.Low ||
             payload.FingerprintHigh != expected.High)
@@ -2674,6 +2896,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check names, actor bindings, order, counts, and total size before serializing or calculating a fingerprint.
     private static void ValidateAnimSceneDefinitionShape(
         AnimSceneDefinitionPayload payload)
     {
@@ -2713,7 +2936,9 @@ public static class BinaryPayloadCodec
             "AnimScene playback list");
         var encodedSize = checked(
             AnimSceneDefinitionHeaderSize + resourceLength + playbackLength);
+        // Require unique role names in a fixed ordering so the same scene description has a repeatable byte layout and fingerprint.
         string? previousRoleName = null;
+        // Remember bound entity IDs while checking roles so conflicting duplicate bindings can be detected.
         var mappedEntities = new HashSet<ulong>();
         foreach (var role in payload.Roles)
         {
@@ -2784,6 +3009,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Apply different sender, flag, reason, and timing rules for guest readiness, rejection, host play, and abort.
     private static void ValidateAnimSceneControl(AnimSceneControlPayload payload)
     {
         const AnimSceneControlFlags allowedFlags =
@@ -2809,8 +3035,10 @@ public static class BinaryPayloadCodec
                 "AnimScene control contains invalid identity, fingerprint, kind, sender, reason, flags, or timing.");
         }
 
+        // Validate only the selected control kind, not a sequence of steps through the enum.
         switch (payload.Kind)
         {
+            // Ready reports that resources and required role bindings are prepared, without choosing when playback starts.
             case AnimSceneControlKind.GuestReady:
             {
                 const AnimSceneControlFlags readyFlags =
@@ -2845,6 +3073,7 @@ public static class BinaryPayloadCodec
                         "GuestRejected must carry only a guest rejection reason.");
                 }
                 break;
+            // Only the host's play command supplies the scheduled start tick, starting progress, and playback rate.
             case AnimSceneControlKind.HostPlayCommit:
                 if (payload.SenderSlot != 0 ||
                     payload.Reason != AnimSceneControlReason.None ||
@@ -2874,6 +3103,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check a scene resource/role string and convert its printable ASCII characters to bytes.
     private static byte[] EncodePrintableAscii(
         string value,
         bool allowEmpty,
@@ -2884,6 +3114,7 @@ public static class BinaryPayloadCodec
         return Encoding.ASCII.GetBytes(value);
     }
 
+    // Reject unsupported bytes before turning a scene resource or role name into text.
     private static string DecodePrintableAscii(
         ReadOnlySpan<byte> bytes,
         bool allowEmpty,
@@ -2906,6 +3137,7 @@ public static class BinaryPayloadCodec
         return Encoding.ASCII.GetString(bytes);
     }
 
+    // Require bounded printable ASCII strings whose characters each occupy one byte.
     private static int ValidatePrintableAscii(
         string value,
         bool allowEmpty,
@@ -2929,6 +3161,7 @@ public static class BinaryPayloadCodec
         return value.Length;
     }
 
+    // Check entity identity and allowed equipment flags before returning or sending this description.
     private static void ValidateEquipmentState(EquipmentStatePayload payload)
     {
         const EquipmentStateFlags allowedFlags =
@@ -2947,6 +3180,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Check vote kind and slot, and prevent a state request from claiming completed votes for the players.
     private static void ValidatePauseVote(PauseVotePayload payload)
     {
         const PauseVoteFlags allowedFlags =
@@ -2973,17 +3207,21 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Require a known unlock category, record ID, event ID, and positive timestamp.
     private static void ValidateCampaignCapability(CampaignCapabilityPayload payload)
     {
         if (!Enum.IsDefined(payload.Kind) || payload.RecordHash == 0 || payload.HostEventId == 0 || payload.GrantedAtUnixMilliseconds <= 0)
             throw new ProtocolException("Campaign capability payload is invalid.");
     }
 
+    // Check which fields are meaningful for the selected phase, including completion rewards and acknowledgement flags.
     private static void ValidateMissionProgression(MissionProgressionPayload payload)
     {
         const MissionProgressionFlags allowed =
             MissionProgressionFlags.GuestCanStart |
             MissionProgressionFlags.VerifiedCompletionMapping;
+        // Only a Completion message may carry completion rating or cash fields, and an Applied acknowledgement must have no flags.
+        // This validates the chosen phase's data rather than advancing the mission or writing rewards to a save.
         var completion = payload.Phase == MissionProgressionPhase.Completion;
         var applied = payload.Phase == MissionProgressionPhase.Applied;
         var appliesMapping =
@@ -3002,6 +3240,7 @@ public static class BinaryPayloadCodec
         }
     }
 
+    // Require mission-linked nonblank bounded text with no control characters.
     private static void ValidateMissionObjective(MissionObjectivePayload payload)
     {
         if (!payload.HostEntityId.IsValid || payload.MissionEpoch == 0 ||
@@ -3012,6 +3251,7 @@ public static class BinaryPayloadCodec
             throw new ProtocolException("Mission objective payload is invalid.");
     }
 
+    // Require the mission, checkpoint, cue identifiers, and host start time needed to locate the dialogue.
     private static void ValidateMissionDialogueCue(MissionDialogueCuePayload payload)
     {
         if (!payload.HostEntityId.IsValid || payload.MissionEpoch == 0 ||
@@ -3020,6 +3260,7 @@ public static class BinaryPayloadCodec
             throw new ProtocolException("Mission dialogue cue payload is invalid.");
     }
 
+    // Require cue identifiers and a known readiness result so the host can match the reply.
     private static void ValidateMissionDialogueReady(MissionDialogueReadyPayload payload)
     {
         if (!payload.HostEntityId.IsValid || payload.MissionEpoch == 0 ||
@@ -3029,6 +3270,7 @@ public static class BinaryPayloadCodec
             throw new ProtocolException("Mission dialogue readiness payload is invalid.");
     }
 
+    // Check the proposing player, profile, location, radius, evidence ID, and suggested group seed.
     private static void ValidateAmbientEncounterProposal(AmbientEncounterProposalPayload payload)
     {
         if (!payload.GuestEntityId.IsValid || payload.ProposalId == 0 ||
@@ -3038,6 +3280,7 @@ public static class BinaryPayloadCodec
             throw new ProtocolException("Ambient encounter proposal is invalid.");
     }
 
+    // Validate rejected suggestions separately from accepted encounters, then check any exact-event fields.
     private static void ValidateAmbientEncounterState(AmbientEncounterStatePayload payload)
     {
         var rejectedProposal = payload.Phase == AmbientEncounterPhase.Proposed &&
@@ -3046,6 +3289,7 @@ public static class BinaryPayloadCodec
             !Enum.IsDefined(payload.Profile) || !Enum.IsDefined(payload.Phase) ||
             !Enum.IsDefined(payload.Rejection) || !Enum.IsDefined(payload.GuestDisposition))
             throw new ProtocolException("Ambient encounter state is invalid.");
+        // A rejected suggestion is not a running encounter, so it cannot announce participants or a start time.
         if (rejectedProposal)
         {
             if (payload.RosterCount != 0 || payload.HostStartTick != 0 ||
@@ -3054,6 +3298,7 @@ public static class BinaryPayloadCodec
                 throw new ProtocolException("Rejected ambient encounter state is invalid.");
             return;
         }
+        // Accepted encounter state needs usable placement, participant information, and a host start time.
         if (payload.Rejection != AmbientEncounterRejection.None ||
             payload.Phase == AmbientEncounterPhase.Proposed || !IsFinite(payload.Anchor) ||
             !float.IsFinite(payload.RadiusMeters) || payload.RadiusMeters is < 8 or > 80 ||
@@ -3069,23 +3314,28 @@ public static class BinaryPayloadCodec
             throw new ProtocolException("Exact ambient encounter state is invalid.");
     }
 
+    // Require the unlock category, record ID, and original event ID needed to identify this acknowledgement.
     private static void ValidateCampaignCapabilityAck(CampaignCapabilityAckPayload payload)
     {
         if (!Enum.IsDefined(payload.Kind) || payload.RecordHash == 0 || payload.HostEventId == 0)
             throw new ProtocolException("Campaign capability acknowledgement is invalid.");
     }
 
+    // Require a valid collector, collection event ID, and pickup type.
     private static void ValidatePickupCollected(PickupCollectedPayload payload)
     {
         if (!payload.ActorEntityId.IsValid || payload.CollectionId == 0 || payload.PickupHash == 0)
             throw new ProtocolException("Pickup collection payload is invalid.");
     }
 
+    // Check all three coordinates for infinity or NaN, an undefined numeric result that cannot be used for movement.
     private static bool IsFinite(Vector3 value) =>
         float.IsFinite(value.X) &&
         float.IsFinite(value.Y) &&
         float.IsFinite(value.Z);
 
+    // Write X, Y, and Z as three consecutive four-byte floats in the agreed byte order.
+    // A position therefore occupies 12 bytes regardless of its coordinate values.
     private static void WriteVector3(Span<byte> destination, Vector3 value)
     {
         BinaryPrimitives.WriteSingleLittleEndian(destination, value.X);
@@ -3093,12 +3343,15 @@ public static class BinaryPayloadCodec
         BinaryPrimitives.WriteSingleLittleEndian(destination[8..], value.Z);
     }
 
+    // Read those same three four-byte floats back into a C# Vector3.
     private static Vector3 ReadVector3(ReadOnlySpan<byte> source) =>
         new(
             BinaryPrimitives.ReadSingleLittleEndian(source),
             BinaryPrimitives.ReadSingleLittleEndian(source[4..]),
             BinaryPrimitives.ReadSingleLittleEndian(source[8..]));
 
+    // Reject a fixed-size payload unless its byte count exactly matches the expected layout.
+    // Missing or extra bytes mean this reader cannot safely interpret the supplied message.
     private static void RequireLength(ReadOnlySpan<byte> payload, int expected, string name)
     {
         if (payload.Length != expected)

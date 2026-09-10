@@ -14,14 +14,19 @@ namespace CoopStory.Sidecar.Session;
 // Says why the game should wait before sending normal multiplayer messages.
 internal enum BridgeOutboundDeferReason
 {
+    // Neither of this policy's waiting conditions applies.
     None,
+    // The peer has connected but has not yet agreed to the same movement replication mode.
     MotionModeNegotiation,
+    // The guest still needs to finish its local reconnect reset and request the host replay.
     GuestReconnectResync
 }
 
 // Keeps the two wait rules in one place: agree on movement mode, then finish guest reconnect repair.
 internal static class BridgeOutboundSessionPolicy
 {
+    // Choose whether normal outgoing gameplay must wait for movement-mode agreement or guest reconnect cleanup.
+    // This only returns the reason to wait and does not queue, send, or repair a message.
     public static BridgeOutboundDeferReason Evaluate(
         SessionRole localRole,
         bool networkConnected,
@@ -47,7 +52,7 @@ internal static class BridgeOutboundSessionPolicy
 public sealed class SidecarRuntime : IAsyncDisposable
 {
     // RDR2 can stop reading the pipe while loading/paused.
-    // Important messages reset after two seconds; simple position updates get more time.
+    // A blocked important-message write can reset the pipe after two seconds, while replaceable state writes get longer.
     private const int BridgeDeliveryWatchdogIntervalMs = 250;
     private const int BridgeCriticalDeliveryStallAbortMs = 2_000;
     private const int BridgeSnapshotDeliveryStallAbortMs = 60_000;
@@ -66,6 +71,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
     private readonly bool _allowLoopbackGuestWorldView;
     private readonly TaskCompletionSource<Exception> _fatalSessionFailure =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // This queue hands selected sessions to one background worker so session shutdown finishes before the next run starts.
     private readonly Channel<NetworkSessionRun> _networkSessions =
         Channel.CreateUnbounded<NetworkSessionRun>(
             new UnboundedChannelOptions
@@ -82,15 +88,18 @@ public sealed class SidecarRuntime : IAsyncDisposable
     private readonly ReplicatedEntityRegistry _entities;
     private readonly AuthoritativeWorldGraphRegistry _worldGraph;
     private readonly AuthoritativeInteractionRegistry _interactions = new();
-    // This gate owns semantic progression for combat and physics-affecting actions.
-    // It is deliberately separate from the bridge replica: a remote task is never allowed to promote an intent into a state transition.
+    // These rules decide whether an action may start, continue, or end with host approval.
+    // A guest's animation or requested action is not itself permission to apply a physical effect to another player.
     private readonly AuthoritativePlayerActionStateMachine _playerActions = new();
     private readonly PlayerIdentityPublisher _identityPublisher;
+    // These caches remember the latest host-controlled state needed when a peer or the local game reconnects.
+    // They hold protocol data rather than RDR2 entity handles.
     private readonly AuthoritativeMissionStateCache _missionStateCache = new();
     private readonly AuthoritativeMissionCinematicStateCache
         _missionCinematicStateCache = new();
     private readonly AuthoritativeAnimSceneDefinitionCache
         _animSceneDefinitionCache = new();
+    // Journals remember grants and mission completions across runs so retries can refer to the same event IDs.
     private readonly CapabilityJournal _capabilityJournal = new();
     private readonly CapabilityJournalStore _capabilityJournalStore = new();
     private readonly MissionProgressionJournal _missionProgressionJournal = new();
@@ -101,10 +110,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
     private readonly SemaphoreSlim _missionProgressionJournalPersistenceGate = new(1, 1);
     private readonly GuestReconnectResyncGate
         _guestReconnectResyncGate = new();
+    // A gate lets one related operation run at a time, similar to taking turns through a protected section.
+    // The control gate preserves control-message order and the bridge gate separates old and new game sessions.
     private readonly PeerControlSendGate _peerControlSendGate = new();
     private readonly BridgeSessionGenerationGate
         _bridgeSessionGenerationGate = new();
     private readonly RemoteBridgeMappingGate _remoteBridgeMapping = new();
+    // Track where messages were observed, forwarded, replaced by newer samples, or dropped.
+    // These transport counters cannot prove that the game visibly applied a message.
     private readonly MessageFlowDiagnostics _messageFlowDiagnostics = new();
     private readonly HashSet<(MessageFlowDirection Direction, MessageType Type)>
         _openTransportGaps = [];
@@ -151,8 +164,11 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     private enum MotionNegotiationMarkDisposition
     {
+        // The current peer's movement-mode agreement was recorded for the first time.
         Accepted,
+        // Agreement for this same peer was already recorded.
         Duplicate,
+        // The announcement belongs to a peer or session that is no longer current.
         StalePeer
     }
 
@@ -162,6 +178,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     internal event Func<bool>? GhostReplayToggleRequested;
     internal event Func<bool>? GuestWorldViewToggleRequested;
 
+    // Connect the local game pipe, outgoing delivery queue, state caches, and event handlers used by this session.
+    // With the in-game menu enabled, hosting or joining starts later when the player chooses it.
     public SidecarRuntime(
         SidecarConfig config,
         SessionCredentials credentials,
@@ -201,6 +219,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         _bridge.ConnectionClosed += OnBridgeClosedAsync;
     }
 
+    // Run the game connection, network sessions, identity updates, and diagnostics together until shutdown or failure.
+    // The cleanup path stops the other background jobs so a failed session cannot leave them sending old data.
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -299,6 +319,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Stop accepting new delivery work and release this runtime's connections and synchronization helpers.
+    // The disposed flag makes repeated cleanup calls harmless.
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -324,6 +346,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         _missionProgressionJournalPersistenceGate.Dispose();
     }
 
+    // Load the host's saved list of campaign unlock grants so they can be resent after reconnecting.
+    // The journal remembers grants and acknowledgements rather than recreating them as new rewards.
     private async Task RestoreCapabilityJournalAsync(CancellationToken cancellationToken)
     {
         // The host owns the source-of-truth log.
@@ -363,6 +387,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Save the current unlock journal while preventing two saves from writing it at the same time.
+    // The finally block releases the save lock even if writing fails.
     private async Task PersistCapabilityJournalAsync(CancellationToken cancellationToken)
     {
         if (_config.Role != SessionRole.Host || _config.InGameMenuEnabled)
@@ -386,6 +412,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Load saved mission-completion records and their guest acknowledgements for the selected host save.
+    // Pending completions can then be retried without pretending that a network send proves the guest saved them.
     private async Task RestoreMissionProgressionJournalAsync(
         CancellationToken cancellationToken)
     {
@@ -421,6 +449,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Save the mission-completion journal under its own write lock so concurrent requests cannot overlap.
     private async Task PersistMissionProgressionJournalAsync(
         CancellationToken cancellationToken)
     {
@@ -442,6 +471,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Load remembered pickup claims used to recognize items that have already been collected.
     private async Task RestorePickupClaimsAsync(CancellationToken cancellationToken)
     {
         if (_config.Role != SessionRole.Host || _config.InGameMenuEnabled) return;
@@ -453,11 +483,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Write the current pickup-claim snapshot to storage so it is available on a later run.
     private Task PersistPickupClaimsAsync(CancellationToken cancellationToken) =>
         _config.Role == SessionRole.Host && !_config.InGameMenuEnabled
             ? _pickupClaimStateStore.SaveAsync(_config.ExpandedPickupClaimStatePath, _pickupClaims.CaptureReconnectState(), cancellationToken)
             : Task.CompletedTask;
 
+    // Run selected host or guest sessions one at a time and clean up each session when it ends.
+    // The menu can then start another session without needing to restart the whole Sidecar process.
     private async Task RunNetworkAfterSelectionAsync(
         CancellationToken cancellationToken)
     {
@@ -521,6 +554,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Register a newly selected network session and queue it for the network worker to run.
+    // Reject a second active session so callbacks from two sessions cannot share the same game state.
     private void StartNetworkSession(ILanSession network)
     {
         ArgumentNullException.ThrowIfNull(network);
@@ -555,6 +590,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Return to the menu's starting state and clear connection-specific caches, counters, and queued deliveries.
+    // Changing the bridge connection token makes work captured for the previous session no longer valid.
     private async ValueTask ResetInGameSessionStateAsync()
     {
         await using var authorityBoundary =
@@ -615,6 +652,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         Volatile.Write(ref _hasLoggedMissionTxVersion, 0);
     }
 
+    // Optionally tell the peer we are leaving, request the active network session to stop, and wait for its cleanup.
+    // If there is no active session, still restore the reusable menu state.
     private async ValueTask StopActiveSessionAsync(
         bool notifyPeer,
         CancellationToken cancellationToken)
@@ -652,6 +691,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    // Choose the LAN implementation for our role: the host listens for a guest and the guest connects to a host.
     private ILanSession CreateNetwork(
         SidecarConfig config,
         SessionCredentials credentials) =>
@@ -670,6 +710,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 $"Unsupported role {config.Role}.")
         };
 
+    // Subscribe to this network object's incoming messages, authentication failures, and connection changes.
+    // Passing that source object into callbacks lets later checks reject events from a replaced session.
     private void AttachNetwork(ILanSession network)
     {
         network.EnvelopeReceived += OnNetworkEnvelopeAsync;
@@ -681,6 +723,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 cancellationToken);
     }
 
+    // Handle the game's host, join, stop, and test-mode menu requests.
+    // For host or join, build the selected configuration, start its network session, and tell the local bridge its role.
     private async ValueTask ActivateSessionFromMenuAsync(
         SessionMenuRequestPayload request,
         CancellationToken cancellationToken)
@@ -736,6 +780,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
             return;
         }
+        // Reserve session activation once so repeated menu clicks cannot start two hosts or two join attempts.
         if (Interlocked.CompareExchange(
                 ref _sessionActivationStarted,
                 1,
@@ -855,6 +900,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Ask the optional solo-test handler to turn the local movement mirror on or off and report the result in-game.
+    // This method requests the toggle rather than performing the movement replay itself.
     private async ValueTask ToggleSoloTestFromMenuAsync(
         CancellationToken cancellationToken)
     {
@@ -917,6 +964,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    // Ask the solo-test handler to switch between the original host NPCs and the test guest replicas.
+    // Report an unavailable feature or a failed toggle through the game's session status display.
     private async ValueTask ToggleGuestWorldViewFromMenuAsync(
         CancellationToken cancellationToken)
     {
@@ -979,6 +1028,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    // Choose the optional record or replay handler and report whether ghost recording or playback is now active.
+    // The handler owns the actual recorded route and playback behavior.
     private async ValueTask ToggleGhostModeFromMenuAsync(
         bool record,
         CancellationToken cancellationToken)
@@ -1052,6 +1103,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    // Tell this exact game-pipe connection whether it is host or guest and which movement replication mode to use.
+    // Only mark the bridge ready after both configuration messages were written and its connection is still current.
     private async ValueTask SendRoleAcknowledgementAsync(
         BridgePipeConnectionToken bridgeConnection,
         CancellationToken cancellationToken)
@@ -1121,6 +1174,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    // Pause normal queued delivery while replacing the bridge's session token and sending its role configuration.
+    // For a guest, replay cached host state only when the current peer is negotiated and reconnect cleanup permits it.
     private async ValueTask AcknowledgeAndReplayBridgeStateUnderBoundaryAsync(
         CancellationToken cancellationToken)
     {
@@ -1134,6 +1189,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 "Bridge disconnected before role negotiation started.");
         }
 
+        // Wait for any active queued write and prevent another from starting during the bridge's reset and replay.
         await using var deliveryBarrier = await _networkBridgePump
             .EnterDeliveryBarrierAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -1146,6 +1202,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             throw new IOException(
                 "Bridge connection changed before role negotiation started.");
         }
+        // Discard queued work from before the token change instead of feeding old gameplay into the newly configured bridge.
         _networkBridgePump.ClearPending();
 
         await SendRoleAcknowledgementAsync(
@@ -1211,6 +1268,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    // Return a token identifying the currently configured game connection, or false if none is ready.
+    // The token is a connection version so later code can notice that the pipe changed while it was waiting.
     private bool TryCaptureReadyBridgeConnection(
         out BridgePipeConnectionToken connection)
     {
@@ -1235,15 +1294,19 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return false;
     }
 
+    // Check that this token still names the ready game connection rather than an older connection.
     private bool IsReadyBridgeConnection(
         BridgePipeConnectionToken connection) =>
         connection.IsValid &&
         Volatile.Read(ref _bridgeReadyGeneration) == connection.Generation &&
         _bridge.IsConnectionCurrent(connection);
 
+    // Check whether any currently configured game connection can be captured for delivery.
     private bool IsBridgeReady() =>
         TryCaptureReadyBridgeConnection(out _);
 
+    // Check for a recent guest-player update delivered to this host bridge for this exact actor and connection pair.
+    // This is delivery-based evidence that the host bridge knows the actor, not a direct query of the RDR2 entity.
     private bool IsRemoteBridgeMappingReady(
         ILanSession network,
         ControlPeerToken peer,
@@ -1257,6 +1320,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             Environment.TickCount64,
             RemoteBridgeMappingFreshnessMs);
 
+    // Remember a guest player's successful delivery to the host's current game connection.
+    // Old network callbacks cannot make a replacement peer or bridge appear ready.
     private void MarkRemoteBridgeMappingDelivered(
         ILanSession sourceNetwork,
         ControlPeerToken sourcePeer,
@@ -1278,6 +1343,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             Environment.TickCount64);
     }
 
+    // Get a new local bridge configuration revision and skip zero, which is reserved as an unset value.
     private uint NextMotionReplicationConfigRevision()
     {
         while (true)
@@ -1291,6 +1357,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Get a new movement-mode announcement revision for the peer and skip the reserved zero value.
     private uint NextPeerMotionModeAnnouncementRevision()
     {
         while (true)
@@ -1304,6 +1371,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Remember movement-mode agreement only for the network session and peer connection that supplied it.
+    // Report whether this is new agreement, a repeated announcement, or an announcement from an old connection.
     private MotionNegotiationMarkDisposition TryMarkMotionModeNegotiated(
         ILanSession network,
         ControlPeerToken peer)
@@ -1339,6 +1408,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return disposition;
     }
 
+    // Check that movement-mode agreement belongs to the current peer connection rather than a previous connection.
     private bool IsMotionModeNegotiated(
         ILanSession network,
         ControlPeerToken peer)
@@ -1357,6 +1427,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Check that movement-mode agreement belongs to the current peer connection rather than a previous connection.
     private bool IsMotionModeNegotiated()
     {
         var network = _network;
@@ -1365,6 +1436,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             IsMotionModeNegotiated(network, peer);
     }
 
+    // Forget the previous peer's movement-mode agreement so a new connection must negotiate for itself.
     private void ResetMotionModeNegotiation()
     {
         lock (_peerMotionModeSync)
@@ -1375,6 +1447,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Translate the local movement configuration enum into the enum used in multiplayer payloads.
+    // Reject unknown modes instead of silently choosing a different movement system.
     private static MotionReplicationWireMode ToWireMotionMode(
         MotionReplicationMode mode) =>
         mode switch
@@ -1387,6 +1461,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 $"Unsupported motion replication mode {mode}.")
         };
 
+    // Send a status message to the local game's session menu, such as connecting, ready, or error.
+    // This is a local pipe message rather than a gameplay update sent to the other player.
     private async ValueTask SendSessionStatusAsync(
         SessionMenuStatusPayload status,
         CancellationToken cancellationToken)
@@ -1412,6 +1488,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Send the cached host NPC and object list as spawn messages so a reconnected game bridge can rebuild it.
+    // Stop if the captured bridge connection changes instead of sending the remaining list to a new connection.
     private async ValueTask ReplayWorldGraphToBridgeAsync(
         BridgePipeConnectionToken bridgeConnection,
         CancellationToken cancellationToken)
@@ -1453,6 +1531,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    // Restore the cached host mission state before replaying the NPC and object list that depends on it.
     private async ValueTask ReplayMissionStateToBridgeAsync(
         BridgePipeConnectionToken bridgeConnection,
         CancellationToken cancellationToken)
@@ -1486,6 +1565,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    // Restore the latest cached cinematic state after mission state and before rebuilding the shared world.
     private async ValueTask ReplayMissionCinematicStateToBridgeAsync(
         BridgePipeConnectionToken bridgeConnection,
         CancellationToken cancellationToken)
@@ -1518,6 +1598,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    // Restore the cached animation-scene definition after its shared entity list has been replayed.
+    // The definition tells the bridge which scene and roles belong together rather than playing the scene here.
     private async ValueTask ReplayAnimSceneDefinitionToBridgeAsync(
         BridgePipeConnectionToken bridgeConnection,
         CancellationToken cancellationToken)
@@ -1552,6 +1634,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    // Build and send the host's ordered reconnect snapshot to the captured guest connection.
+    // After a complete replay, also retry recorded campaign grants and pending mission completions.
     private async ValueTask ReplayAuthoritativeStateToPeerAsync(
         ILanSession network,
         ControlPeerToken peer,
@@ -1577,8 +1661,10 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
                     peerAccepted = true;
                     // Block stale remote-to-bridge mappings while authoritative frames are replayed to this new/reconnected peer.
+                    // Stop trusting the old guest actor mapping while the host prepares the guest's replacement world snapshot.
                     _remoteBridgeMapping.BeginResync(network, peer);
                     _entities.Clear();
+                    // Capture the related caches together under the control gate so the replay uses a consistent mission and entity list.
                     capturedPlan = AuthoritativePeerResyncReplay.Create(
                         _missionStateCache.Capture(),
                         _missionCinematicStateCache.Capture(),
@@ -1619,6 +1705,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 },
                 cancellationToken)
             .ConfigureAwait(false);
+        // Only follow a completed world replay with durable-event retries, keeping each grant or completion's original identity.
         if (peerAccepted && result.Completed)
         {
             foreach (var grant in _capabilityJournal.CaptureReplay())
@@ -1686,6 +1773,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Identify host messages whose cache changes must wait their turn alongside a reconnect replay.
+    // This keeps a replay from mixing mission or entity-list changes from different moments.
     private bool ShouldSerializeHostReplayStateMutation(
         MessageType type) =>
         _config.Role == SessionRole.Host &&
@@ -1696,6 +1785,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             MessageType.EntitySpawn or
             MessageType.EntityDespawn;
 
+    // Send a reliable control message through the shared send gate so it keeps its order with other control work.
+    // The overload with an already-held gate avoids trying to acquire that same gate again.
     private ValueTask<bool> SendPeerControlAsync(
         ILanSession expectedNetwork,
         MessageType type,
@@ -1724,6 +1815,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken);
     }
 
+    // With the send gate already held, verify the requested session or peer is still current before sending.
+    // Return false if its connection was replaced rather than sending the message to the replacement peer.
     private async ValueTask<bool> SendPeerControlUnderGateAsync(
         ILanSession expectedNetwork,
         MessageType type,
@@ -1746,6 +1839,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    // Send a reliable control message through the shared send gate so it keeps its order with other control work.
+    // The overload with an already-held gate avoids trying to acquire that same gate again.
     private ValueTask<bool> SendPeerControlAsync(
         ILanSession expectedNetwork,
         ControlPeerToken expectedPeer,
@@ -1763,6 +1858,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 token),
             cancellationToken);
 
+    // With the send gate already held, verify the requested session or peer is still current before sending.
+    // Return false if its connection was replaced rather than sending the message to the replacement peer.
     private async ValueTask<bool> SendPeerControlUnderGateAsync(
         ILanSession expectedNetwork,
         ControlPeerToken expectedPeer,
@@ -1786,6 +1883,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    // Take a turn through the control gate before restoring cached restraint states to the local game.
     private async ValueTask ReplayRestraintsToBridgeAsync(
         CancellationToken cancellationToken)
     {
@@ -1800,6 +1898,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    // Send each remembered restraint state to the captured ready bridge while the caller holds the control gate.
+    // Stop if that bridge disappears so the replay does not spill into another connection.
     private async ValueTask ReplayRestraintsToBridgeUnderGateAsync(
         CancellationToken cancellationToken)
     {
@@ -1827,6 +1927,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Wrap payload bytes with their message type, a new local pipe sequence number, and the current network-clock tick.
+    // This constructs a message but does not send it.
     private ProtocolEnvelope CreateBridgeEnvelope(
         MessageType type,
         ReadOnlyMemory<byte> payload) =>
@@ -1836,12 +1938,15 @@ public sealed class SidecarRuntime : IAsyncDisposable
             NetworkClock.Tick,
             payload);
 
+    // Look up the most recently stored player snapshot for authority checks, or return null if it is unknown.
     private ReplicatedPlayerSnapshot? LookupLatestPlayer(
         NetEntityId entityId) =>
         _entities.TryGetLatest(entityId, out var snapshot)
             ? snapshot
             : null;
 
+    // Send a host-approved interaction result or state to both the local game and the peer.
+    // Log partial delivery because writing to one endpoint does not guarantee the other received the same decision.
     private async ValueTask BroadcastAuthoritativeControlAsync(
         MessageType type,
         ReadOnlyMemory<byte> payload,
@@ -1892,6 +1997,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Deliver a peer-triggered, host-approved result to the exact host bridge captured before the decision.
+    // A replacement game connection must not receive a decision made for the old one.
     private async ValueTask<bool>
         DeliverPeerAuthoritativeControlToBridgeUnderGateAsync(
             BridgePipeConnectionToken expectedBridge,
@@ -1937,6 +2044,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return bridgeDelivered;
     }
 
+    // Send a local host decision to the peer and optional bridge captured before the state change.
+    // Keep using those connection tokens so a reconnect cannot redirect half of the decision to new endpoints.
     private async ValueTask<bool>
         BroadcastLocalAuthoritativeControlUnderGateAsync(
             ILanSession expectedNetwork,
@@ -1990,6 +2099,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return bridgeDelivered && peerDelivered;
     }
 
+    // Deliver emergency local recovery to the captured game connection and notify a captured peer if one exists.
+    // Its return value reports local game delivery, even when peer notification fails.
     private async ValueTask<bool>
         BroadcastLocalSelfRecoveryUnderGateAsync(
             BridgePipeConnectionToken expectedBridge,
@@ -2040,6 +2151,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     }
 
     // Host checks an interaction requested by its own RDR2 bridge, records the accepted state, then sends the same result to the guest when needed.
+    // Ask the host's interaction rules to resolve a local request and distribute the resulting interaction and restraint states.
+    // Emergency self-recovery can still reach the local game without requiring a negotiated peer.
     private async ValueTask<bool> ResolveLocalHostInteractionAsync(
         InteractionIntentPayload intent,
         CancellationToken cancellationToken)
@@ -2175,6 +2288,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // Host checks a guest interaction request.
     // Guest input is never forwarded straight into RDR2 without range/state/role validation here.
+    // Resolve a guest interaction under checks tying the peer, host game connection, and guest actor mapping together.
+    // Capture the previous registry state so a failure before any local control delivery can be rolled back.
     private async ValueTask<bool> ResolvePeerInteractionAsync(
         InteractionIntentPayload intent,
         ILanSession sourceNetwork,
@@ -2278,6 +2393,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return true;
     }
 
+    // Check the requested guest actor, optional host target, snapshot ages, and action range before producing a host-approved action.
+    // Ending an action relaxes the age and distance checks so stale movement does not by itself prevent cleanup.
     private (
         PlayerActionPayload? Resolved,
         string Rejection,
@@ -2295,6 +2412,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             ? LookupLatestPlayer(intent.TargetEntityId)
             : null;
         var rejection = string.Empty;
+        // A missing or old actor snapshot cannot support a new action decision based on the player's current position.
         if (actor is null ||
             actor.Value.State.Slot != (byte)SessionRole.Guest ||
             (!terminal && actor.Value.AgeMilliseconds > 2_000))
@@ -2314,6 +2432,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             var distance = System.Numerics.Vector3.Distance(
                 actor.Value.State.Position,
                 target.Value.State.Position);
+            // Different actions have different allowed ranges, so a valid aim distance would not automatically allow melee at that distance.
             var maximumDistance = intent.Kind switch
             {
                 PlayerActionKind.Lasso or PlayerActionKind.Hogtie => 15.0f,
@@ -2335,6 +2454,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 target?.AgeMilliseconds);
         }
 
+        // Change the message from a guest request into a host-approved result only after the checks above pass.
         var resolvedFlags =
             (intent.Flags & ~PlayerActionFlags.Intent) |
             PlayerActionFlags.Authoritative;
@@ -2358,6 +2478,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         target?.AgeMilliseconds);
     }
 
+    // Turn an ending lasso or hogtie action into host-approved cleanup without requiring fresh movement samples.
+    // The caller separately checks that it matches an existing restraint before using this special path.
     internal static (
         PlayerActionPayload? Resolved,
         string Rejection,
@@ -2395,6 +2517,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             null);
     }
 
+    // Record why an action was rejected together with the actor and target snapshot ages.
+    // These values help distinguish stale movement data from an invalid action or out-of-range target.
     private ValueTask LogRejectedGuestPlayerActionAsync(
         PlayerActionPayload intent,
         string rejection,
@@ -2420,6 +2544,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // Host validates a guest action transaction and returns a host-owned action state.
     // This is the control boundary for lasso/melee/crafting requests.
+    // Validate a guest action, check its allowed action-state transition, and prepare any resulting restraint change.
+    // Deliver through the captured host bridge and peer connection, with rollback available until the first local control delivery.
     private async ValueTask<bool> ResolvePeerGuestPlayerActionAsync(
         PlayerActionPayload intent,
         ILanSession sourceNetwork,
@@ -2555,6 +2681,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     }
 
     // Host turns its own sampled action into the shared authoritative version before broadcasting it to the guest and its local RDR2 bridge.
+    // Check a locally reported host action against the action rules, then send it and any related restraint change.
+    // The negotiated-peer transaction keeps that restraint change tied to the peer captured before it was made.
     private async ValueTask<bool> ProcessLocalHostPlayerActionAsync(
         ProtocolEnvelope envelope,
         CancellationToken cancellationToken)
@@ -2638,6 +2766,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     }
 
     // Guest forwards allowed local action intent to the host and waits for the later authoritative action/result instead of deciding it locally.
+    // Check a guest action and broadcast the host-approved action plus any restraint state it produces.
+    // Unlike ResolvePeerGuestPlayerActionAsync, this helper does not take explicit source-peer tokens itself.
     private async ValueTask ResolveGuestPlayerActionAsync(
         PlayerActionPayload intent,
         CancellationToken cancellationToken)
@@ -2682,6 +2812,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Show one useful handshake error in the game menu without repeatedly showing the same rejection.
+    // If the bridge cannot display it, allow a later rejection to try again.
     internal async ValueTask OnNetworkAuthenticationRejectedAsync(
         string reason,
         CancellationToken cancellationToken)
@@ -2733,6 +2865,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // First entry point for messages from the local RDR2 Bridge.
     // It validates the pipe/session boundary before the message can enter LAN logic.
+    // Receive a message from this PC's RDR2 bridge and handle connection or menu messages first.
+    // For gameplay, verify the bridge connection, payload, and local role before recording durable events or forwarding the message.
     private async ValueTask OnBridgeEnvelopeAsync(
         ProtocolEnvelope envelope,
         BridgePipeConnectionToken receiveConnection,
@@ -2748,6 +2882,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             throw new BridgeShutdownException(reason);
         }
 
+        // Hello is the local game's connection setup message, not a player-position update.
         if (envelope.Type == MessageType.Hello)
         {
             if (!envelope.Payload.IsEmpty)
@@ -2820,6 +2955,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
         // The receive token is captured before BridgePipeServer begins reading the frame.
         // Holding this gate through every bridge-originated mutation makes a logical rotation atomic with cache/entity clearing: either the old handler finishes first and the boundary clears after it, or the boundary wins and this exact old generation is rejected here.
+        // A ready connection token prevents a delayed local message from crossing a host, guest, or reconnect boundary.
         await using var inboundAuthority =
             await _bridgeSessionGenerationGate.TryEnterInboundAsync(
                     receiveConnection,
@@ -2834,6 +2970,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             return;
         }
 
+        // First reject malformed data, then separately decide whether the local role is allowed to produce that message.
         ValidateBinaryControlPayload(envelope);
 
         if (envelope.Type == MessageType.CampaignCapability &&
@@ -2914,6 +3051,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
         }
 
+        // Wait behind any host replay before changing its cached mission or entity list, so the replay is not assembled from mixed states.
         if (ShouldSerializeHostReplayStateMutation(envelope.Type))
         {
             _ = await _peerControlSendGate.RunAsync(
@@ -2939,6 +3077,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     }
 
     // Routes a permitted local Bridge message: cache host state, send it to the peer, answer it locally, or deliberately keep only its latest snapshot.
+    // Process a local game message after its initial payload and authority checks have passed.
+    // Update relevant caches, resolve host-owned actions, and choose snapshot or reliable control delivery to the peer.
     private async ValueTask ProcessAuthorizedBridgeEnvelopeAsync(
         ProtocolEnvelope envelope,
         bool controlSendGateHeld,
@@ -3049,6 +3189,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 return;
             }
 
+            // Remember our latest local player sample for later authority checks before trying to forward it to the peer.
             _ = _entities.ApplyPlayerState(envelope);
             _identityPublisher.ObservePlayerState(state);
             var network = _network;
@@ -3061,6 +3202,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 return;
             }
             var peerConnected = network.IsConnected;
+            // Player movement uses the snapshot path, where later samples replace the need to retransmit every old position.
+            // A successful send here reports transport delivery status rather than remote game application.
             var delivered = await network.SendSnapshotAsync(
                 envelope.Type,
                 envelope.Payload,
@@ -3133,6 +3276,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 MessageType.EntityUpdate or
                 MessageType.EntityDespawn)
         {
+            // Keep a Sidecar copy of the host's shared NPC list so reconnect replay can rebuild the guest's world.
             _ = _worldGraph.Apply(envelope);
         }
 
@@ -3200,6 +3344,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             }
         }
 
+        // Choose the fast snapshot route for these frequently changing samples and the reliable control route for the remaining types.
+        // The MessageType enum only names message kinds and does not make this routing choice itself.
         var snapshot =
             envelope.Type is
                 MessageType.EntityUpdate or
@@ -3322,6 +3468,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // First entry point for messages from the other PC.
     // It checks the active peer/session, then validates, authorizes, caches, or forwards the frame.
+    // Receive a message from the peer, check its current connection and role, and update the appropriate local cache.
+    // Resolve guest requests on the host or queue approved state for the local game instead of changing RDR2 entities directly here.
     private async ValueTask OnNetworkEnvelopeAsync(
         ProtocolEnvelope envelope,
         ControlPeerToken sourcePeer,
@@ -3344,6 +3492,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             ReferenceEquals(_network, sourceNetwork) &&
             sourceNetwork.IsControlPeerCurrent(sourcePeer);
 
+        // Recheck the peer while changing shared state so a disconnect or replacement cannot slip between the check and the change.
         bool TryRunSourcePeerMutation(Action mutation)
         {
             var applied = false;
@@ -3412,6 +3561,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
 
         // Heartbeats have no gameplay side effect; they feed liveness and a best-effort remote clock diagnostic, then bypass bridge delivery.
+        // Heartbeat timing is useful for diagnostics, but it is not a movement sample and does not move the remote player.
+        // The wall-clock difference estimate can also include network delay and is not a precise clock synchronization result.
         if (envelope.Type == MessageType.Heartbeat)
         {
             Interlocked.Exchange(
@@ -3454,6 +3605,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
         // Both PCs must use the same movement system.
         // Until they agree, only keep the guest reset message; drop other game messages.
+        // Hold normal gameplay behind movement-mode agreement so the two games do not interpret motion using different systems.
         if (!IsMotionModeNegotiated(sourceNetwork, sourcePeer))
         {
             if (_config.Role == SessionRole.Guest &&
@@ -3461,6 +3613,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             {
                 var disposition = default(
                     GuestReconnectResyncDeferDisposition);
+                // Unlike ordinary pre-negotiation traffic, this guest reconnect reset is remembered so it can be completed later.
                 if (!TryRunSourcePeerMutation(() =>
                     disposition = _guestReconnectResyncGate.Defer(envelope)))
                 {
@@ -3552,6 +3705,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             return;
         }
 
+        // The explicitly enabled solo-test view can feed guest-world samples back into the host process for inspection.
+        // Normal LAN traffic still has to pass the peer-role checks.
         var loopbackGuestWorldEnvelope =
             _allowLoopbackGuestWorldView &&
             _config.Role == SessionRole.Host &&
@@ -3582,6 +3737,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         {
             var acknowledgement = BinaryPayloadCodec.DecodeCampaignCapabilityAck(
                 envelope.Payload.Span);
+            // Match the acknowledgement to a recorded grant before marking it saved, rather than trusting an arbitrary event ID.
             var matchingGrant = _capabilityJournal.CaptureState().SingleOrDefault(
                 grant => grant.HostEventId == acknowledgement.HostEventId &&
                     grant.Kind == (CapabilityKind)acknowledgement.Kind &&
@@ -3716,6 +3872,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         MissionStateCacheUpdate? missionStateUpdate = null;
         MissionCinematicStateCacheUpdate? cinematicStateUpdate = null;
         AnimSceneDefinitionCacheUpdate? animSceneDefinitionUpdate = null;
+        // For a guest PlayerState received by the host, remember which actor needs mapping evidence after the pipe write succeeds.
         var remotePlayerMappingEntity = NetEntityId.None;
         // PlayerState is high-frequency latest-only state.
         // Reject a peer that claims the local role, then store accepted snapshots for smoothing.
@@ -3724,6 +3881,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             _ = Interlocked.Increment(ref _networkToBridgeObserved);
             var playerState = BinaryPayloadCodec.DecodePlayerState(
                 envelope.Payload.Span);
+            // The peer reports its own player, so a payload claiming our local slot is invalid.
             if (playerState.Slot == (byte)_config.Role)
             {
                 throw new ProtocolException(
@@ -3967,6 +4125,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 return;
             }
         }
+        // Resync has different work on each side: the guest clears its cached host state, while the host replays its saved authoritative state.
         else if (envelope.Type == MessageType.ResyncRequest)
         {
             if (_config.Role == SessionRole.Guest)
@@ -4033,6 +4192,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             return;
         }
 
+        // Do not mark the host's remote actor mapping ready just because its PlayerState arrived over the network.
+        // The callback runs only after successful delivery from the queue to the local game pipe.
         Action<ProtocolEnvelope>? afterBridgeDelivery = null;
         if (remotePlayerMappingEntity.IsValid)
         {
@@ -4053,17 +4214,21 @@ public sealed class SidecarRuntime : IAsyncDisposable
                     sourcePeer);
         }
 
+        // Queue the approved message without waiting for RDR2 to read it, and attach a check that its source peer is still current.
         var enqueue = _networkBridgePump.TryEnqueue(
             envelope,
             () => ReferenceEquals(_network, sourceNetwork) &&
                 sourceNetwork.IsControlPeerCurrent(sourcePeer),
             afterBridgeDelivery);
+        // Coalesced means this state shares an existing waiting entry that keeps the newest usable sample.
+        // An older arriving sample may be ignored, and the counter does not mean both samples were delivered.
         if (enqueue.Disposition == NetworkBridgeEnqueueDisposition.Coalesced)
         {
             _messageFlowDiagnostics.MarkCoalesced(
                 MessageFlowDirection.NetworkToBridge,
                 envelope.Type);
         }
+        // A full or stopping queue cannot accept this message, so record the drop instead of reporting game delivery.
         if (enqueue.Disposition == NetworkBridgeEnqueueDisposition.Rejected)
         {
             _messageFlowDiagnostics.MarkDropped(
@@ -4113,6 +4278,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // Last hop to RDR2.
     // The delivery pump preserves critical message order but keeps only the newest high-rate snapshots to avoid pipe backlog/desync.
+    // Write one queued network message to the currently ready local game pipe and update delivery diagnostics.
+    // A true result means the pipe write succeeded, not that an NPC was visibly created or a gameplay action completed.
     private async ValueTask<bool> DeliverNetworkEnvelopeToBridgeAsync(
         ProtocolEnvelope envelope)
     {
@@ -4213,12 +4380,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return true;
     }
 
+    // Record a local game-pipe failure separately from LAN errors so diagnostics show which connection failed.
     private ValueTask OnBridgeFaultedAsync(Exception exception) =>
         _logger.WarningAsync(
             "bridge.connection-fault",
             exception.Message,
             cancellationToken: CancellationToken.None);
 
+    // Record that RDR2 connected, but leave gameplay readiness false until role and movement configuration are sent.
     private ValueTask OnBridgeOpenedAsync()
     {
         Volatile.Write(ref _bridgePipeConnected, 1);
@@ -4231,6 +4400,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken: CancellationToken.None);
     }
 
+    // Clear readiness and remembered guest-actor delivery when the local game connection closes.
     private ValueTask OnBridgeClosedAsync()
     {
         Volatile.Write(ref _bridgePipeConnected, 0);
@@ -4243,6 +4413,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken: CancellationToken.None);
     }
 
+    // Handle a peer connecting or disconnecting only if the callback belongs to the active network session.
+    // Disconnect releases remembered restraints and agreement state, while connect starts fresh movement-mode negotiation.
     private async ValueTask OnNetworkConnectionChangedAsync(
         ILanSession sourceNetwork,
         bool connected,
@@ -4266,6 +4438,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                             return false;
                         }
                         _remoteBridgeMapping.Clear();
+                        // Release remembered restraint effects locally so a departing peer does not leave the player stuck in a restraint.
                         var releasedRestraints = _interactions.Clear(
                             emitFreeStates: true);
                         foreach (var restraint in releasedRestraints)
@@ -4379,6 +4552,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    // Print a small status record for the surrounding UI to read, such as peer connection state or nickname.
+    // A reporting failure is ignored so it cannot stop multiplayer.
     private static void ReportLobbyStatus(
         string eventName,
         bool? connected = null,
@@ -4402,6 +4577,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Require the peer to use the same movement replication mode and reject invalid or incompatible announcements.
+    // Once agreement is recorded, publish our identity and let the guest finish any deferred reconnect reset.
     private async ValueTask HandlePeerMotionModeAnnouncementAsync(
         ProtocolEnvelope envelope,
         ILanSession sourceNetwork,
@@ -4506,6 +4683,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Forget cached player, world, mission, and animation-scene state plus pending game deliveries before a guest rebuild.
+    // This clears Sidecar's remembered state rather than directly deleting RDR2 NPCs.
     private void ClearGuestAuthoritativeStateForResync()
     {
         // On guest reconnect, forget old NPC/mission data before taking the fresh host copy.
@@ -4514,9 +4693,11 @@ public sealed class SidecarRuntime : IAsyncDisposable
         _missionStateCache.Clear();
         _missionCinematicStateCache.Clear();
         _animSceneDefinitionCache.Clear();
+        // Old queued updates must not be replayed after the guest has forgotten the world they belonged to.
         _networkBridgePump.ClearPending();
     }
 
+    // Pause ordinary queued delivery while sending a deferred reset to the captured guest game connection.
     private async ValueTask<bool> DeliverDeferredGuestResyncToBridgeAsync(
         ProtocolEnvelope envelope,
         CancellationToken cancellationToken)
@@ -4541,6 +4722,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    // Write the deferred reset while the caller already holds the delivery barrier and record whether the write succeeded.
     private async ValueTask<bool>
         DeliverDeferredGuestResyncToBridgeUnderBarrierAsync(
             BridgePipeConnectionToken bridgeConnection,
@@ -4573,6 +4755,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return delivered;
     }
 
+    // Retry the deferred guest reconnect sequence: clear cached state, deliver the local reset, then request the host's replay.
+    // The overload receiving a bridge token can use a delivery barrier that its caller already holds.
     private async ValueTask ReplayDeferredGuestReconnectResyncAsync(
         ILanSession network,
         ControlPeerToken peer,
@@ -4584,6 +4768,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 cancellationToken)
             .ConfigureAwait(false);
 
+    // Retry the deferred guest reconnect sequence: clear cached state, deliver the local reset, then request the host's replay.
+    // The overload receiving a bridge token can use a delivery barrier that its caller already holds.
     private async ValueTask ReplayDeferredGuestReconnectResyncAsync(
         ILanSession network,
         ControlPeerToken peer,
@@ -4598,6 +4784,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                         envelope)
                 : DeliverDeferredGuestResyncToBridgeAsync;
         // Reconnect repair order: clear saved data, tell RDR2 to reset, then ask the host to resend its data.
+        // The reset must reach the guest game before we ask the host to send replacements, otherwise new data could be cleared by a late reset.
         var replay = await _guestReconnectResyncGate.ReplayOnceAsync(
                 ClearGuestAuthoritativeStateForResync,
                 deliverToBridge,
@@ -4643,6 +4830,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Signal a fatal session failure once when movement-mode negotiation fails or times out.
+    // The main runtime loop observes that failure and shuts down instead of streaming with incompatible modes.
     private async ValueTask FailMotionModeNegotiationAsync(
         string reason,
         MotionReplicationWireMode? peerMode,
@@ -4673,6 +4862,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    // Signal movement-mode failure only if the peer that caused it is still the current connection.
+    // A late failure from an old connection must not shut down its replacement.
     private async ValueTask FailMotionModeNegotiationForPeerAsync(
         string reason,
         MotionReplicationWireMode? peerMode,
@@ -4715,6 +4906,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    // Record the mode mismatch and try to show both players' required next step in the local game menu.
     private async ValueTask ReportMotionModeNegotiationFailureAsync(
         string reason,
         MotionReplicationWireMode localMode,
@@ -4749,6 +4941,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Check whether outgoing gameplay must stop at the current negotiation or reconnect boundary and log the first drop.
+    // Despite the word defer, this method does not store the message for later delivery.
     private async ValueTask<bool>
         ShouldDeferOutboundUntilMotionModeNegotiatedAsync(
             MessageType messageType,
@@ -4795,6 +4989,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return true;
     }
 
+    // Return whether a connected session is still negotiating or a guest still has reconnect cleanup pending.
+    // The message type is currently ignored, so this rule does not grant special types an exception.
     internal static bool ShouldDeferOutboundForSessionBoundary(
         SessionRole role,
         MessageType messageType,
@@ -4808,6 +5004,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
              role == SessionRole.Guest && guestReconnectResetPending);
     }
 
+    // Periodically give the identity publisher a chance to resend our nickname and player ID after negotiation.
+    // The publisher decides whether a refresh is due, so this loop does not necessarily send every second.
     private async Task IdentityLoopAsync(
         CancellationToken cancellationToken)
     {
@@ -4827,6 +5025,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Ask the identity publisher to send when due or forced, and route the payload through reliable control delivery.
+    // Overloads optionally pin the send to a particular peer connection instead of whichever peer is current later.
     private ValueTask PublishLocalIdentityAsync(
         ILanSession network,
         ulong tick,
@@ -4839,6 +5039,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             force,
             cancellationToken);
 
+    // Ask the identity publisher to send when due or forced, and route the payload through reliable control delivery.
+    // Overloads optionally pin the send to a particular peer connection instead of whichever peer is current later.
     private ValueTask PublishLocalIdentityAsync(
         ILanSession network,
         ControlPeerToken expectedPeer,
@@ -4852,6 +5054,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             force,
             cancellationToken);
 
+    // Ask the identity publisher to send when due or forced, and route the payload through reliable control delivery.
+    // Overloads optionally pin the send to a particular peer connection instead of whichever peer is current later.
     private async ValueTask PublishLocalIdentityAsync(
         ILanSession network,
         ControlPeerToken? expectedPeer,
@@ -4909,6 +5113,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Record transport counters and the marker's ID, position, and timing when a user diagnostic marker passes this stage.
+    // Matching that ID in both players' logs helps compare the same observed incident.
     private ValueTask WriteDiagnosticMarkerSnapshotAsync(
         ProtocolEnvelope envelope,
         string stage,
@@ -4938,6 +5144,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken);
     }
 
+    // Regularly inspect message-flow gaps and log interval counts alongside lifetime totals.
+    // This observes transport behavior and does not move players or resync NPCs.
     private async Task DiagnosticsLoopAsync(
         CancellationToken cancellationToken)
     {
@@ -4972,6 +5180,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Check for movement negotiation timeouts and game-pipe writes that have remained stuck too long.
+    // Abort a stalled pipe write using different wait limits for replaceable snapshots and important control messages.
     private async Task BridgeDeliveryWatchdogAsync(
         CancellationToken cancellationToken)
     {
@@ -5004,6 +5214,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             // Snapshot state is latest-only/coalesced, so keeping that in-flight write alive avoids a reconnect storm and it will self-heal on resume.
             // A paused game may stop draining snapshots safely because they are coalesced/latest-only.
             // Lifecycle/control frames get a short cap.
+            // These are limits for a blocked pipe write, not the normal sending interval for player or NPC updates.
             var thresholdMs = replaceableSnapshot
                 ? BridgeSnapshotDeliveryStallAbortMs
                 : BridgeCriticalDeliveryStallAbortMs;
@@ -5032,6 +5243,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Write one final totals snapshot during shutdown so diagnostics include the end of the session.
     private ValueTask WriteFinalStreamingDiagnosticsAsync()
     {
         var totals = ReadStreamingCounters();
@@ -5045,6 +5257,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken: CancellationToken.None);
     }
 
+    // Build the diagnostic fields describing message counts, queue delays, cached world entities, and interaction decisions.
+    // Interval counts describe the latest reporting period, while totals cover the runtime's accumulated counts.
     private Dictionary<string, object?> CreateStreamingData(
         StreamingCounters interval,
         StreamingCounters totals,
@@ -5127,6 +5341,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 totals.NetworkToBridgeQueueDelivered,
             ["totalNetworkToBridgeQueueUnavailable"] =
                 totals.NetworkToBridgeQueueUnavailable,
+            // Backlog counts messages still waiting, while ActiveMs measures how long the current delivery has been active.
             ["networkToBridgeBacklog"] = pump.Backlog,
             ["networkToBridgeMaxBacklog"] = pump.MaxBacklog,
             ["networkToBridgeActiveType"] = pump.ActiveType?.ToString(),
@@ -5171,6 +5386,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         };
     }
 
+    // Choose which message streams should currently be active and warn when one has not been observed for too long.
+    // These thresholds only trigger diagnostic messages and are not NPC despawn timers or automatic resync commands.
     private async ValueTask EvaluateTransportGapsAsync(
         IReadOnlyList<MessageFlowStreamSnapshot> messageFlow,
         CancellationToken cancellationToken)
@@ -5184,6 +5401,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
         // These are diagnostic expectations, not recovery commands.
         // They make a missing realtime stream visible without triggering a resync loop.
+        // Build expectations for the streams needed in the current gameplay state instead of assuming every message type sends continuously.
         var expectations = new List<(
             MessageFlowDirection Direction,
             MessageType Type,
@@ -5300,6 +5518,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         _openTransportGaps.RemoveWhere(key => !currentKeys.Contains(key));
         var byStream = messageFlow.ToDictionary(
             static stream => (stream.Direction, stream.MessageType));
+        // Give a newly negotiated stream its allowed startup time before reporting that its first message never arrived.
         var streamingStartedAt = Interlocked.Read(
             ref _peerStreamingStartedAt);
         var nowMs = Environment.TickCount64;
@@ -5331,6 +5550,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             // Log only a transition into a gap and its later recovery, rather than producing a warning every diagnostics interval during loss.
             if (stream.LastObservedAgeMs > expectation.ThresholdMs)
             {
+                // Log a gap once when it begins and wait for recovery before reporting another gap for the same stream.
                 if (!_openTransportGaps.Add(key))
                 {
                     continue;
@@ -5371,6 +5591,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Attach stream timing and delivery-queue state to a gap or recovery report.
+    // Queue backlog and active-write age help distinguish incoming silence from slow delivery to the game.
     private Dictionary<string, object?> CreateTransportGapData(
         MessageFlowDirection direction,
         MessageType type,
@@ -5411,6 +5633,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         };
     }
 
+    // Take a thread-safe reading of player-message counters and include the delivery pump's current totals.
     private StreamingCounters ReadStreamingCounters()
     {
         var pump = _networkBridgePump.ReadSnapshot();
@@ -5448,6 +5671,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         public static StreamingCounters Empty =>
             new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
+        // Subtract an earlier total from the current total to get counts for just the latest diagnostic interval.
         public StreamingCounters Subtract(StreamingCounters previous) =>
             new(
                 BridgeToNetworkObserved - previous.BridgeToNetworkObserved,
@@ -5470,6 +5694,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 previous.NetworkToBridgeQueueUnavailable);
     }
 
+    // Create the guest profile if neither the primary file nor its backup exists, otherwise load the saved profile.
+    // The store can recover from a backup when the primary profile cannot be loaded.
     private async Task EnsureGuestProfileAsync(CancellationToken cancellationToken)
     {
         if (_config.Role != SessionRole.Guest)
@@ -5501,6 +5727,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    // Avoid repeating successful mission logs for the same epoch and revision, and filter routine action refreshes.
+    // This affects logging only and does not prevent the message from being sent.
     private bool ShouldLogOutboundControlSuccess(
         ProtocolEnvelope envelope,
         MissionStatePayload? missionState)
@@ -5522,6 +5750,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return IsSemanticControlTransition(envelope);
     }
 
+    // Log meaningful incoming control changes while skipping unchanged mission refreshes and routine action samples.
     private static bool ShouldLogInboundControlSuccess(
         ProtocolEnvelope envelope,
         MissionStateCacheUpdate? missionStateUpdate) =>
@@ -5530,11 +5759,14 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 MissionStateCacheDisposition.Refreshed
             : IsSemanticControlTransition(envelope);
 
+    // Decide which successful game-pipe control writes need an individual log entry rather than only counters.
     private static bool ShouldLogBridgeDeliverySuccess(
         ProtocolEnvelope envelope) =>
         envelope.Type != MessageType.MissionState &&
         IsSemanticControlTransition(envelope);
 
+    // For logging, distinguish action starts and endings from repeated Active, Sustain, or Snapshot reports.
+    // Non-action control messages are treated as worth describing by this helper.
     private static bool IsSemanticControlTransition(
         ProtocolEnvelope envelope)
     {
@@ -5557,6 +5789,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         }
     }
 
+    // Describe an animation-scene definition's identity, scene resource, and role count for diagnostics.
+    // Extra fields let the caller add whether it was cached, sent, or rejected.
     private Dictionary<string, object?> CreateAnimSceneDefinitionDiagnosticsData(
         ProtocolEnvelope envelope,
         AnimSceneDefinitionPayload definition,
@@ -5595,6 +5829,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return data;
     }
 
+    // Build readable log fields for the particular control payload, including IDs and revisions needed to match related events.
+    // A decode failure is marked in the diagnostic record instead of replacing the original event with a logging error.
     private Dictionary<string, object?> CreateControlDiagnosticsData(
         ProtocolEnvelope envelope,
         string control,
@@ -5617,6 +5853,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         };
         try
         {
+            // Each case adds the fields that identify this kind of event so related messages can be compared across logs.
             switch (envelope.Type)
             {
                 case MessageType.PlayerAction:
@@ -5869,6 +6106,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // Turns a control packet into safe diagnostic text.
     // It describes identities and revisions without dumping raw payload bytes into normal logs.
+    // Choose a short label describing the control message's kind and relevant IDs or phase for log messages.
+    // This describes a message rather than executing the command or changing its payload.
     internal static string DescribeControlEnvelope(ProtocolEnvelope envelope)
     {
         if (envelope.Type == MessageType.PauseVote)
@@ -6062,6 +6301,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     }
 
     // Confirms an incoming control payload has the exact known binary layout before any role/state code attempts to read fields from it.
+    // Decode the listed binary control types solely to run their payload-format and value checks.
+    // Discarding the decoded record does not undo those checks, and routing or role permission is checked separately.
     internal static void ValidateBinaryControlPayload(ProtocolEnvelope envelope)
     {
         switch (envelope.Type)
@@ -6196,6 +6437,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // True for high-rate snapshots where only the newest value matters.
     // These can replace older queued copies without losing a required game event.
+    // Identify state messages for which a newer sample can stand in for an older pending sample.
+    // The watchdog also uses this list when choosing how long a blocked game-pipe write may wait.
     internal static bool IsReplaceableBridgeDeliveryType(
         MessageType? messageType) =>
         messageType is
@@ -6210,6 +6453,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             MessageType.PlayerAppearanceState or
             MessageType.EntityUpdate;
 
+    // Expose mission epoch, revision, checkpoint generation, and flags as readable diagnostic fields.
+    // These identifiers help spot old mission state being compared with a newer mission or checkpoint.
     private Dictionary<string, object?>
         CreateMissionStateDiagnosticsData(
             ProtocolEnvelope envelope,
@@ -6245,6 +6490,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     }
 
     // Quick sender/type rule: says whether this session role may send this category of message at all before its contents are trusted.
+    // Apply the broad incoming-message rule for our local role before examining payload-specific ownership.
+    // For example, a host must not accept the guest as the source of the shared NPC list.
     internal static bool IsPeerMessageAuthorized(
         SessionRole localRole,
         MessageType messageType)
@@ -6301,6 +6548,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // This is the sidecar half of the native capability allowlist.
     // A new campaign record must be added here and in ScriptHookSdkFacade only after its game-native mapping has been independently proven.
+    // Allow only the campaign record hashes explicitly verified here for multiplayer grant replay.
+    // A recognized enum kind alone is not enough to make an arbitrary game record safe to grant.
     internal static bool IsSupportedCampaignCapability(
         CampaignCapabilityPayload capability) => capability.Kind switch
     {
@@ -6313,6 +6562,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // Detailed peer validation.
     // It checks message direction, payload facts, and host-only ownership before a remote message can mutate cached state.
+    // Check that an incoming message's claimed sender, action authority, or mission phase fits the peer's role.
+    // Passing this permission check does not itself apply damage, start a mission, or confirm a request succeeded.
     internal static bool IsPeerEnvelopeAuthorized(
         SessionRole localRole,
         ProtocolEnvelope envelope)
@@ -6388,6 +6639,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 action.SenderSlot == (byte)SessionRole.Guest;
         }
 
+        // The phase chooses which side is allowed to send this particular mission message.
+        // This permission check does not automatically advance through the MissionProgressionPhase enum values.
         if (envelope.Type == MessageType.MissionProgression)
         {
             var progression = BinaryPayloadCodec.DecodeMissionProgression(
@@ -6486,6 +6739,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 
     // Equivalent role/type rule for the local RDR2 Bridge.
     // The Bridge cannot bypass Sidecar authority merely because it shares the same computer.
+    // Apply the broad outgoing-message rule for the local game's role.
+    // These directions are the local-game counterpart of the incoming peer rules.
     internal static bool IsLocalBridgeMessageAuthorized(
         SessionRole localRole,
         MessageType messageType)
@@ -6542,6 +6797,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     }
 
     // Detailed validation for a local Bridge message before it is forwarded to a peer or used to change Sidecar's saved authoritative state.
+    // Check payload-specific ownership before accepting a message emitted by our own game bridge.
+    // A guest can propose actions, but host-approved outcomes must come from the host side.
     internal static bool IsLocalBridgeEnvelopeAuthorized(
         SessionRole localRole,
         ProtocolEnvelope envelope)
@@ -6610,6 +6867,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 action.SenderSlot == (byte)SessionRole.Guest;
         }
 
+        // Outgoing host phases and guest reply phases are checked separately even though they use the same payload type.
         if (envelope.Type == MessageType.MissionProgression)
         {
             var progression = BinaryPayloadCodec.DecodeMissionProgression(
@@ -6686,6 +6944,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return IsHostAuthoritativeCommand(command.Opcode);
     }
 
+    // Require both the claimed sender slot and the scene-control kind to match the expected role.
+    // The host commits playback or aborts it, while the guest reports ready or rejected.
     private static bool IsAnimSceneControlFromRole(
         AnimSceneControlPayload control,
         SessionRole senderRole) =>
@@ -6701,6 +6961,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             _ => false
         });
 
+    // Describe a campaign grant's kind, record hash, host event ID, and time without applying the grant.
     private static Dictionary<string, object?> CreateCapabilityDiagnosticsData(
         ProtocolEnvelope envelope,
         string direction)
@@ -6720,6 +6981,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
     }
 
     // Lists bridge commands only the host may issue because they change shared world/session state rather than the guest's own local presentation.
+    // List gameplay command opcodes that the host is allowed to originate for the guest.
+    // Diagnostic markers have their own validation path and are not added to this gameplay-command list.
     private static bool IsHostAuthoritativeCommand(
         CommandOpcode opcode) =>
         opcode is
@@ -6734,6 +6997,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             CommandOpcode.Resync or
             CommandOpcode.ResyncEquipment;
 
+    // Recognize a diagnostic-marker command and return its decoded fields for logging or origin checks.
     private static bool TryDecodeDiagnosticMarker(
         ProtocolEnvelope envelope,
         out CommandPayload command)
@@ -6747,6 +7011,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         return command.Opcode == CommandOpcode.DiagnosticMarker;
     }
 
+    // Check the marker's nonzero IDs and embedded origin role against the endpoint expected to have created it.
     private static bool IsValidDiagnosticMarker(
         CommandPayload command,
         SessionRole expectedOrigin) =>
@@ -6755,6 +7020,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
         DiagnosticMarkerLocalId(command) != 0 &&
         DiagnosticMarkerOrigin(command) == expectedOrigin;
 
+    // Read the four origin bits starting at bit 48 of the marker ID and translate them into host or guest.
     private static SessionRole? DiagnosticMarkerOrigin(
         CommandPayload command) =>
         ((command.TargetEntityId.Value >> 48) & 0x0FUL) switch
@@ -6764,12 +7030,15 @@ public sealed class SidecarRuntime : IAsyncDisposable
             _ => null
         };
 
+    // Keep the lowest 24 bits of the marker ID to recover the originating player's local marker number.
     private static uint DiagnosticMarkerLocalId(
         CommandPayload command) =>
         (uint)(command.TargetEntityId.Value & 0x00FF_FFFFUL);
 
     // Stops safely if RDR2 Online is detected.
     // This project supports Story Mode co-op only and must not send multiplayer control into Online mode.
+    // Ask the local bridge to unload when it reports Online mode, then record the safety refusal.
+    // The caller stops forwarding player state because this co-op bridge is intended for Story Mode.
     private async Task RefuseOnlineModeAsync(CancellationToken cancellationToken)
     {
         var command = new CommandPayload(
@@ -6798,6 +7067,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    // Turn an optional disconnect reason into readable text and limit how many payload bytes enter the log.
     private static string DecodeGoodbyeReason(ReadOnlySpan<byte> payload)
     {
         if (payload.IsEmpty)
@@ -6824,6 +7094,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
 /// The lease is intentionally short: normal PlayerState traffic refreshes it, while a stalled or resyncing mapping fails closed.
 /// </summary>
 // Remembers which remote peer identity is mapped to the currently open RDR2 Bridge generation, preventing queued pre-reconnect messages crossing over.
+// Remember recent evidence that a particular guest player was written to a particular host game connection.
+// This short-lived permission check blocks actions that would target an actor the current host bridge may not know yet.
 internal sealed class RemoteBridgeMappingGate
 {
     private sealed record PendingResync(
@@ -6841,6 +7113,8 @@ internal sealed class RemoteBridgeMappingGate
     private Lease? _lease;
     private PendingResync? _pendingResync;
 
+    // Remember which guest actor was delivered to which peer and bridge connection, along with the delivery time.
+    // Do not accept fresh mapping evidence for that peer while its resync reset is still pending.
     public void MarkDelivered(
         ILanSession network,
         ControlPeerToken peer,
@@ -6885,6 +7159,8 @@ internal sealed class RemoteBridgeMappingGate
         }
     }
 
+    // Require matching network, peer, bridge, and entity IDs plus a recent delivery time before trusting this mapping.
+    // Pending resync temporarily blocks the mapping even if all the IDs match.
     public bool IsCurrent(
         ILanSession network,
         ControlPeerToken peer,
@@ -6916,6 +7192,7 @@ internal sealed class RemoteBridgeMappingGate
         }
     }
 
+    // Forget a stored mapping only when it belongs to this exact network and peer pair.
     public bool ClearMatching(
         ILanSession network,
         ControlPeerToken peer)
@@ -6934,6 +7211,7 @@ internal sealed class RemoteBridgeMappingGate
         }
     }
 
+    // Mark this peer as resetting and remove its existing mapping evidence so physical actions wait for a rebuild.
     public void BeginResync(
         ILanSession network,
         ControlPeerToken peer)
@@ -6951,6 +7229,7 @@ internal sealed class RemoteBridgeMappingGate
         }
     }
 
+    // End only the matching pending reset and leave the mapping empty until a new player delivery proves it again.
     public bool CompleteResync(
         ILanSession network,
         ControlPeerToken peer)
@@ -6975,6 +7254,7 @@ internal sealed class RemoteBridgeMappingGate
         }
     }
 
+    // Forget both mapping evidence and any pending reset when the surrounding connection state is cleared.
     public void Clear()
     {
         lock (_sync)
@@ -6985,21 +7265,25 @@ internal sealed class RemoteBridgeMappingGate
     }
 }
 
+// Pair an approved control-message type with its payload bytes while a host decision is being delivered.
 internal readonly record struct PeerAuthorityControlFrame(
     MessageType Type,
     ReadOnlyMemory<byte> Payload);
 
+// Keep the approved player action and any associated restraint change together as one resolution result.
 internal readonly record struct PeerGuestPlayerActionAuthorityResolution(
     PlayerActionPayload? Resolved,
     RestraintStatePayload? Restraint);
 
 /// <summary>
-/// Commits a peer-originated host authority mutation across one exact local game-pipe generation and one exact negotiated peer generation.
-/// Logical bridge rotation is excluded by the outer boundary.
-/// A failed local delivery rolls the mutation back before any peer one-shot can be emitted.
+/// Apply a host decision triggered by a guest request using the same captured game and peer connections throughout.
+/// Prevent the local bridge session token from being rotated while this operation is running.
+/// Restore the previous registry state if delivery fails before any control message reaches the local pipe.
 /// </summary>
 internal static class PeerBridgeAuthorityTransaction
 {
+    // Treat a guest-triggered host decision and its resulting messages as one connection-bound operation.
+    // If nothing reached the local bridge, a failure can restore the old registry state before the peer sees a decision.
     public static async ValueTask<bool>
         RunAsync<TMutation, TControl, TRollback>(
             BridgeSessionGenerationGate bridgeBoundary,
@@ -7071,8 +7355,8 @@ internal static class PeerBridgeAuthorityTransaction
                         return false;
                     }
 
-                    // Pin the successful mapping proof at transaction entry.
-                    // Both outer gates exclude Resync, bridge rotation and peer replacement, so only the lease clock could change here; letting that clock expire between two frames would split an otherwise valid physical action batch.
+                    // Check mapping freshness once at entry rather than letting its timer expire halfway through a related batch.
+                    // Continue checking the captured peer and bridge connections between deliveries.
                     bool AuthorityIsCurrent() =>
                         ReferenceEquals(captureNetwork(), sourceNetwork) &&
                         sourceNetwork.IsControlPeerCurrent(sourcePeer) &&
@@ -7086,6 +7370,7 @@ internal static class PeerBridgeAuthorityTransaction
                     var mutation = default(TMutation)!;
                     IReadOnlyList<TControl> controls = [];
 
+                    // Restore the saved registry snapshot only while rollback is still allowed by the transaction's delivery progress.
                     void RollBackMutation()
                     {
                         if (rollbackCaptured)
@@ -7106,6 +7391,7 @@ internal static class PeerBridgeAuthorityTransaction
                                         return;
                                     }
 
+                                    // Save the state before changing it so a failure before the first local delivery can leave no committed decision behind.
                                     rollbackState = captureRollbackState();
                                     rollbackCaptured = true;
                                     mutation = mutate();
@@ -7118,9 +7404,9 @@ internal static class PeerBridgeAuthorityTransaction
                             return false;
                         }
 
-                        // No peer frame is sent until every local frame has reached the exact game-pipe generation.
-                        // Local control transitions are identity/revision based.
-                        // Once even one frame reaches the local bridge, preserve the registry so disconnect cleanup and Free tombstones can repair a later partial failure instead of losing that state.
+                        // Send all controls to the captured local game pipe before sending any of them to the guest.
+                        // Each control has IDs and revisions that let receiving code identify the intended action state.
+                        // Once a local write succeeds, keep the changed registry so later cleanup still knows which restraint may need releasing.
                         foreach (var control in controls)
                         {
                             if (!AuthorityIsCurrent() ||
@@ -7144,8 +7430,8 @@ internal static class PeerBridgeAuthorityTransaction
                             }
                         }
 
-                        // The local game now owns the full authoritative batch.
-                        // From this point a peer failure is reconciled by the generation-change cleanup/replay path; restoring the registry would strand the already-applied local restraint without a Free tombstone.
+                        // Every control was written to the local pipe, although this does not confirm RDR2 has applied every effect yet.
+                        // From here, a peer failure needs connection cleanup or replay rather than forgetting the state already sent locally.
                         foreach (var control in controls)
                         {
                             if (!AuthorityIsCurrent())
@@ -7162,7 +7448,8 @@ internal static class PeerBridgeAuthorityTransaction
                             {
                                 return false;
                             }
-                            // A successful generation-bound send belongs to the old peer even if replacement wins immediately afterwards; never roll that committed delivery back into a contradictory registry state.
+                            // A successful send still belongs to the captured peer even if a replacement connects immediately afterward.
+                            // Do not roll back the registry as if that already-sent decision never existed.
                             if (!AuthorityIsCurrent())
                             {
                                 return false;
@@ -7186,8 +7473,12 @@ internal static class PeerBridgeAuthorityTransaction
     }
 }
 
+// Change state and hand the result to a delivery callback using the peer captured under the control gate.
+// Unlike PeerBridgeAuthorityTransaction, this helper does not provide rollback or require a local game-pipe delivery.
 internal static class NegotiatedPeerMutationTransaction
 {
+    // Capture a negotiated peer, perform the supplied state change, and call delivery for that same peer.
+    // True means the change ran and the delivery callback returned normally, not that every endpoint applied it.
     public static ValueTask<bool> RunAsync<TMutation>(
         PeerControlSendGate gate,
         Func<ILanSession?> captureNetwork,
@@ -7247,6 +7538,7 @@ internal static class NegotiatedPeerMutationTransaction
 
 public sealed class SafetyViolationException : Exception
 {
+    // Carry the reason a safety rule stopped the multiplayer runtime, such as detecting Online mode.
     public SafetyViolationException(string message)
         : base(message)
     {
@@ -7255,6 +7547,7 @@ public sealed class SafetyViolationException : Exception
 
 public sealed class BridgeShutdownException : Exception
 {
+    // Preserve the bridge's shutdown reason while also making it available as a normal exception message.
     public BridgeShutdownException(string reason)
         : base($"Game bridge stopped: {reason}")
     {
@@ -7266,6 +7559,7 @@ public sealed class BridgeShutdownException : Exception
 
 public sealed class MotionReplicationModeMismatchException : Exception
 {
+    // Carry the local and optional peer movement modes along with the reason negotiation failed.
     public MotionReplicationModeMismatchException(
         string reason,
         MotionReplicationWireMode localMode,

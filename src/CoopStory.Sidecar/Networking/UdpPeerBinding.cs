@@ -3,17 +3,24 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Networking;
 
-// Admits UDP only after TCP authentication.
-// It pins the observed UDP endpoint, restricts frame types, and rejects duplicate/out-of-order replayed packets.
+// Checks incoming UDP messages against the peer already identified by the TCP connection.
+// Peer means the other player's Sidecar, and endpoint means its IP address plus port number.
+// UDP can lose, repeat, or reorder packets, so this class checks their source, type, and sequence history.
+// The surrounding networking code performs authentication and calls these checks before accepting the message.
+// This class does not send packets or decide how to move the remote player.
 internal sealed class UdpPeerBinding
 {
     private readonly IPAddress _expectedAddress;
     private readonly int? _expectedPort;
     private readonly uint? _controlSequenceFloor;
-    // UDP has no built-in ordering or replay defense, so retain a small window of the packet sequence numbers already delivered to gameplay code.
+    // Remember recently accepted sequence numbers so the same UDP packet cannot pass this check repeatedly.
     private readonly SequenceReplayWindow _sequences = new();
+    // Remember the first accepted source so later packets must come from that same address and port.
     private IPEndPoint? _pinnedEndpoint;
 
+    // Set the expected sender using facts learned while establishing the session.
+    // An optional sequence floor rejects packets from before the current connection was established.
+    // An optional instance ID identifies the particular running Sidecar expected by the caller.
     public UdpPeerBinding(
         IPAddress expectedAddress,
         int? expectedPort = null,
@@ -40,12 +47,16 @@ internal sealed class UdpPeerBinding
         ExpectedInstanceId = expectedInstanceId;
     }
 
+    // Expose the expected running program's ID for the surrounding networking code to check.
     public Guid? ExpectedInstanceId { get; }
 
+    // Return a copy so a caller cannot accidentally change the source address we remembered.
     public IPEndPoint? PinnedEndpoint => _pinnedEndpoint is null
         ? null
         : new IPEndPoint(_pinnedEndpoint.Address, _pinnedEndpoint.Port);
 
+    // Check only the sender's address and port, without changing the remembered packet history.
+    // Before a port is pinned, the optional expected port can still restrict the first sender.
     public bool IsSourceAllowed(IPEndPoint source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -60,6 +71,9 @@ internal sealed class UdpPeerBinding
             EndpointsEqual(_pinnedEndpoint, source);
     }
 
+    // Try to accept one already-decoded envelope from this UDP sender.
+    // Return false with a short reason when a check fails so the caller can log what happened.
+    // A true result means these UDP admission checks passed, not that RDR2 has applied the payload.
     public bool TryAccept(
         IPEndPoint source,
         ProtocolEnvelope envelope,
@@ -92,6 +106,8 @@ internal sealed class UdpPeerBinding
 
         if (!_sequences.TryAccept(envelope.Sequence))
         {
+            // Let SequenceReplayWindow decide whether this sequence can still be accepted.
+            // Its window handles repeats and packet age; this method does not reorder packets for the game.
             rejectionReason = "sequence-replay";
             return false;
         }
@@ -102,6 +118,9 @@ internal sealed class UdpPeerBinding
         return true;
     }
 
+    // List the message types allowed to arrive through UDP.
+    // Frequent position updates can be replaced by newer updates if one is lost.
+    // Creating or removing an NPC needs reliable delivery, so those message types are excluded here.
     private static bool IsUdpMessageType(MessageType type) =>
         type switch
         {
@@ -119,6 +138,7 @@ internal sealed class UdpPeerBinding
             _ => false
         };
 
+    // Two senders match only when both their computer address and their UDP port match.
     private static bool EndpointsEqual(IPEndPoint left, IPEndPoint right) =>
         left.Port == right.Port && left.Address.Equals(right.Address);
 }
