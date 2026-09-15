@@ -136,13 +136,15 @@ inline constexpr std::uint64_t kRemoteSnapshotResetGapMs = 1'000U;
 // stream. They must never outlive the transform interval they describe or be
 // applied to a render point far away on the sender's monotonic timeline.
 inline constexpr std::uint64_t kRemoteAnimationStateCacheTtlMs = 500U;
-// Direct-root replication still needs a live RDR2 locomotion controller.
-// FORCE_PED_MOTION_STATE on a taskless CREATE_PED proxy reports success but
-// leaves its skeleton in a T-pose. A long, non-navmesh visual task keeps the
-// native gait graph alive while network coordinates remain authoritative.
+// The native task owns ordinary root movement as well as the gait graph.
+// Its destination must stay on the received route, including when the sender
+// stops; a visual-only look-ahead would make this task run past the player.
 inline constexpr std::uint64_t kDirectReplicaVisualTaskRefreshMs = 8'000U;
 inline constexpr std::uint64_t kDirectReplicaVisualTaskMinimumRefreshMs =
     250U;
+inline constexpr float kAnimGraphTaskDestinationRefreshMeters = 0.50F;
+inline constexpr float kAnimGraphIdleRecoveryEnterMeters = 0.50F;
+inline constexpr float kAnimGraphIdleRecoveryExitMeters = 0.20F;
 inline constexpr float kDirectReplicaVisualTaskHeadingRefreshDegrees = 18.0F;
 inline constexpr float kDirectReplicaTurnInPlaceHeadingDegrees = 6.0F;
 inline constexpr std::uint64_t kDirectReplicaTraversalMaximumAgeMs = 3'500U;
@@ -192,6 +194,14 @@ struct DirectReplicaVisualTaskRefreshInput final {
         RemoteMovementDirection::None};
     RemoteMovementDirection desiredDirection{
         RemoteMovementDirection::None};
+};
+
+struct RemoteAnimGraphMotionPlan final {
+    Vec3 destination{};
+    RemoteLocomotion locomotion{RemoteLocomotion::Idle};
+    float moveBlendRatio{};
+    float moveRateOverride{1.0F};
+    float movementHeading{};
 };
 
 struct DirectReplicaTraversalStartInput final {
@@ -315,14 +325,14 @@ struct RemoteSnapshotSample final {
     std::optional<RemoteLocomotion> reportedLocomotion,
     float desiredMoveBlend) noexcept;
 
-// The visual task is deliberately long and straight: it exists only to keep
-// the native gait graph evaluating. It never owns the replicated root and it
-// never invokes navmesh/pathfinding.
-[[nodiscard]] Vec3 ComputeDirectReplicaVisualTaskDestination(
-    const Vec3& authoritativePosition,
-    const Vec3& authoritativeVelocity,
-    float authoritativeHeading,
-    RemoteLocomotion locomotion) noexcept;
+// Plan for a native task that owns root movement. Follow the buffered point
+// without extending its tangent, walk off residual idle error, and wait for
+// the sender if the replica has already overtaken it along the route.
+[[nodiscard]] RemoteAnimGraphMotionPlan PlanRemoteAnimGraphMotion(
+    const Vec3& currentPosition,
+    const PlayerStatePayload& state,
+    std::optional<RemoteLocomotion> reportedLocomotion,
+    RemoteLocomotion previousLocomotion) noexcept;
 
 [[nodiscard]] float DirectReplicaVisualTaskSpeed(
     RemoteLocomotion locomotion) noexcept;

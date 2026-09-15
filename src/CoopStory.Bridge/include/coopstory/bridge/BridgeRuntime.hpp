@@ -3,6 +3,7 @@
 #include "coopstory/bridge/IScriptHookFacade.hpp"
 #include "coopstory/bridge/MissionBubble.hpp"
 #include "coopstory/bridge/PlayerRuntime.hpp"
+#include "coopstory/bridge/RemoteAnimation.hpp"
 #include "coopstory/bridge/RemoteMotion.hpp"
 #include "coopstory/bridge/SessionMenuController.hpp"
 #include "coopstory/bridge/Telemetry.hpp"
@@ -102,7 +103,12 @@ private:
         std::uint64_t nowMs,
         const std::optional<LocalPlayerSample>& localSample,
         bool remoteStreaming);
+    [[nodiscard]] bool TickWorldMirrorGuarded(
+        std::uint64_t nowMs,
+        const std::optional<LocalPlayerSample>& localSample,
+        bool remoteStreaming) noexcept;
     bool SendWorldMirrorSignal(const WorldMirrorSignal& signal);
+    void TickNpcAnimations(std::uint64_t nowMs);
     bool FlushPendingHostWorldDespawns();
     void ResetHostWorldMirror(bool notifyPeer);
     void ResetGuestWorldMirror(
@@ -293,7 +299,9 @@ private:
     SequenceWindow remoteAnimationSequences_{};
     SequenceWindow remoteAnimationPayloadSequences_{};
     RemoteSnapshotBuffer remoteSnapshots_{};
+    RemoteAnimationBuffer remoteAnimations_{};
     std::optional<WorldMirrorHost> worldMirrorHost_{};
+    std::unordered_map<NetEntityId, NpcAnimationCapture, NetEntityIdHash> npcAnimationCaptures_{};
     std::unordered_map<NetEntityId, bool, NetEntityIdHash>
         pendingHostWorldDespawns_{};
     WorldMirrorGuestGraph guestWorldGraph_{};
@@ -585,6 +593,9 @@ private:
     std::uint64_t pendingTeleportRequestedAtMs_{};
     bool hostWorldMirrorActive_{};
     bool guestWorldMirrorActive_{};
+    bool worldMirrorNativeFaulted_{};
+    bool worldMirrorNativeFaultLogged_{};
+    std::string_view worldMirrorPhase_{"idle"};
     // SOLO TEST only: accepts the looped-back, offset host graph through the
     // normal guest proxy renderer so one PC can switch between host and guest
     // population layers. It is gated by the SyntheticTest player flag.

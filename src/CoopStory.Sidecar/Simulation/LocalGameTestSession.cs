@@ -338,6 +338,26 @@ public static class LocalGameTestSession
                 return;
             }
 
+            if (envelope.Type == MessageType.NpcAnimation)
+            {
+                Vector3 worldOffset;
+                lock (modeGate)
+                {
+                    if (!guestWorldViewEnabled || !liveMirrorWorldOffset.HasValue) return;
+                    worldOffset = liveMirrorWorldOffset.Value;
+                }
+                var source = NpcAnimationCodec.Decode(envelope.Payload.Span);
+                var guestView = source with
+                {
+                    EntityId = RemapGuestWorldEntityId(source.EntityId),
+                    Target = source.Target + worldOffset
+                };
+                await guest.SendControlAsync(MessageType.NpcAnimation,
+                    NpcAnimationCodec.Encode(guestView), envelope.Tick,
+                    eventCancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (envelope.Type == MessageType.EntityDespawn)
             {
                 bool worldViewEnabled;

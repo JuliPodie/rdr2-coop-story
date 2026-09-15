@@ -48,6 +48,7 @@ internal static class Program
             HostPeerResyncBatchAtomicAsync),
         ("world and equipment payload codecs and authority", WorldAndEquipmentAsync),
         ("world mirror and damage-intent payload codecs", WorldMirrorPayloadsAsync),
+        ("NPC animation wire, authority and reliable FIFO", NpcAnimationProtocolAsync),
         ("host-authoritative world graph orders dependencies and tombstones",
             AuthoritativeWorldGraphAsync),
         ("player identity validation and reliable refresh", PlayerIdentityAsync),
@@ -89,6 +90,8 @@ internal static class Program
         ("local game test forwards a synthetic guest to the bridge", LocalGameTestAsync),
         ("TCP authentication and reconnect loopback", TcpReconnectLoopbackAsync),
         ("UDP binding rejects spoofing and replay", UdpBindingAndReplayAsync),
+        ("UDP world bursts preserve delayed authenticated player snapshots",
+            UdpWorldBurstReorderingAsync),
         ("normal host listens on LAN and test host stays loopback-only",
             ListenerIsolationAsync),
         ("paired session configs and host-address safety", SessionConfigPairAsync),
@@ -124,6 +127,55 @@ internal static class Program
             $"SELFTEST total={Tests.Length} passed={Tests.Length - failures.Count} " +
             $"failed={failures.Count} elapsedMs={elapsed.TotalMilliseconds:F0}");
         return failures.Count == 0 ? 0 : 1;
+    }
+
+    private static async Task NpcAnimationProtocolAsync()
+    {
+        var p = new NpcAnimationPayload(new NetEntityId(0x0000000100000002UL), 3,
+            NpcAnimationFlags.Reloading, NpcAnimationEvents.HitReaction, 1000, 4, 5,
+            new Vector3(1, 2, 3), new Vector3(4, 5, 6), 0.5f);
+        byte[] golden = [2,0,0,0,1,0,0,0,3,0,0,0,1,0,1,0,2,0,232,3,4,0,0,0,5,0,0,0,
+            0,0,128,63,0,0,0,64,0,0,64,64,0,0,128,64,0,0,160,64,0,0,192,64,0,0,0,63];
+        Check.True(golden.SequenceEqual(NpcAnimationCodec.Encode(p)));
+        Check.Equal(p, NpcAnimationCodec.Decode(golden));
+        Check.Equal((ushort)100, NpcAnimationCodec.Age(p, 900)!.Value.LeaseMs);
+        Check.True(NpcAnimationCodec.Age(p, 901) is null);
+        Check.True(NpcAnimationCodec.Age(p, -1) is null);
+        var aged = NpcAnimationCodec.Age(p, 400)!.Value;
+        Check.Equal((ushort)400, NpcAnimationCodec.Age(aged, 200)!.Value.LeaseMs);
+        var bad = golden.ToArray(); bad[13] = 1;
+        Check.Throws<ProtocolException>(() => NpcAnimationCodec.Decode(bad));
+        Check.Throws<ProtocolException>(() => NpcAnimationCodec.Encode(p with { Revision = 0 }));
+        Check.Throws<ProtocolException>(() => NpcAnimationCodec.Encode(p with { Flags = (NpcAnimationFlags)256 }));
+        Check.Throws<ProtocolException>(() => NpcAnimationCodec.Encode(p with { Target = new(float.NaN, 0, 0) }));
+        Check.Throws<ProtocolException>(() => NpcAnimationCodec.Encode(p with { LeaseMs = 2001 }));
+        Check.True(SidecarRuntime.IsLocalBridgeMessageAuthorized(SessionRole.Host, MessageType.NpcAnimation));
+        Check.False(SidecarRuntime.IsLocalBridgeMessageAuthorized(SessionRole.Guest, MessageType.NpcAnimation));
+        Check.True(SidecarRuntime.IsPeerMessageAuthorized(SessionRole.Guest, MessageType.NpcAnimation));
+        Check.False(SidecarRuntime.IsPeerMessageAuthorized(SessionRole.Host, MessageType.NpcAnimation));
+        Check.False(SidecarRuntime.IsReplaceableBridgeDeliveryType(MessageType.NpcAnimation));
+        var envelope = new ProtocolEnvelope(MessageType.NpcAnimation, 1, 1000, golden);
+        SidecarRuntime.ValidateBinaryControlPayload(envelope);
+        Check.Throws<ProtocolException>(() => SidecarRuntime.ValidateBinaryControlPayload(envelope with { Payload = bad }));
+        var delivered = new List<uint>();
+        var gate = new object();
+        var pump = new NetworkBridgeDeliveryPump(e => {
+            var received = NpcAnimationCodec.Decode(e.Payload.Span);
+            Check.True(received.LeaseMs <= p.LeaseMs);
+            Check.Equal(p.Events, received.Events);
+            lock (gate) delivered.Add(e.Sequence);
+            return ValueTask.FromResult(true);
+        }, criticalCapacity: 8);
+        for (uint i = 1; i <= 4; ++i)
+            Check.Equal(NetworkBridgeEnqueueDisposition.Queued, pump.TryEnqueue(envelope with { Sequence = i }).Disposition);
+        Check.Equal(0L, pump.ReadSnapshot().Coalesced);
+        using var stop = new CancellationTokenSource();
+        var run = pump.RunAsync(stop.Token);
+        await WaitUntilAsync(() => { lock (gate) return delivered.Count == 4; },
+            TimeSpan.FromSeconds(2), "NPC action FIFO did not drain.");
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(2));
+        Check.True(delivered.SequenceEqual(new uint[] {1, 2, 3, 4}));
     }
 
     private static async Task CodecRoundtripAsync()
@@ -414,7 +466,7 @@ internal static class Program
 
     private static Task MissionCinematicProtocolAsync()
     {
-        Check.Equal((ushort)33, ProtocolConstants.Version);
+        Check.Equal((ushort)34, ProtocolConstants.Version);
         Check.Equal((ushort)35, (ushort)MessageType.MissionCinematicState);
         Check.Equal((ushort)36, (ushort)MessageType.MissionCinematicAction);
 
@@ -573,7 +625,7 @@ internal static class Program
 
     private static Task AppearanceAndAnimSceneProtocolAsync()
     {
-        Check.Equal((ushort)33, ProtocolConstants.Version);
+        Check.Equal((ushort)34, ProtocolConstants.Version);
         Check.Equal((ushort)37, (ushort)MessageType.PlayerAppearanceState);
         Check.Equal((ushort)38, (ushort)MessageType.AnimSceneReplicaState);
         Check.Equal((ushort)39, (ushort)MessageType.AnimSceneDefinition);
@@ -1692,6 +1744,34 @@ internal static class Program
         Check.True(replay.TryAccept(1));
         Check.False(replay.TryAccept(uint.MaxValue - 64));
         Check.Equal(1u, replay.Latest);
+
+        // Exercise bit carries, full-word shifts, window expiry and uint wrap
+        // against a set-based oracle rather than duplicating the bitmap logic.
+        var wideReplay = new SequenceReplayWindow(2048);
+        var seenSequences = new HashSet<uint>();
+        var latest = uint.MaxValue - 200;
+        var random = new Random(7183);
+        Check.True(wideReplay.TryAccept(latest));
+        seenSequences.Add(latest);
+        for (var sample = 0; sample < 4000; sample++)
+        {
+            var sequence = sample % 4 == 0
+                ? unchecked(latest + (uint)random.Next(1, 2200))
+                : unchecked(latest - (uint)random.Next(0, 2300));
+            if (SequenceNumber.IsNewer(sequence, latest))
+            {
+                latest = sequence;
+                seenSequences.RemoveWhere(item =>
+                    unchecked(latest - item) >= 2048);
+            }
+            var expected = unchecked(latest - sequence) < 2048 &&
+                seenSequences.Add(sequence);
+            Check.Equal(expected, wideReplay.TryAccept(sequence));
+        }
+        wideReplay.Reset();
+        Check.False(wideReplay.HasValue);
+        Check.True(wideReplay.TryAccept(latest));
+        Check.False(wideReplay.TryAccept(latest));
         return Task.CompletedTask;
     }
 
@@ -1865,7 +1945,7 @@ internal static class Program
 
     private static Task PlayerActionProtocolAsync()
     {
-        Check.Equal((ushort)33, ProtocolConstants.Version);
+        Check.Equal((ushort)34, ProtocolConstants.Version);
         Check.Equal((ushort)30, (ushort)MessageType.PlayerAction);
 
         var guestId = NetEntityId.Create(0x11223344, 2);
@@ -2131,7 +2211,7 @@ internal static class Program
 
     private static Task InteractionAuthorityProtocolAsync()
     {
-        Check.Equal((ushort)33, ProtocolConstants.Version);
+        Check.Equal((ushort)34, ProtocolConstants.Version);
         Check.Equal((ushort)32, (ushort)MessageType.InteractionIntent);
         Check.Equal((ushort)33, (ushort)MessageType.InteractionResult);
         Check.Equal((ushort)34, (ushort)MessageType.RestraintState);
@@ -2361,6 +2441,44 @@ internal static class Program
             Lookup);
         Check.Equal(InteractionResultStatus.Rejected, tooFar.Result.Status);
         Check.Equal(InteractionRejectReason.TooFar, tooFar.Result.RejectReason);
+
+        // A second down/revive cycle can straddle a respawn correction in the
+        // replicated positions. The bridge has already checked native
+        // proximity, so the authority's bounded revive tolerance must still
+        // accept and complete the fresh interaction.
+        var secondReceivedAt = Environment.TickCount64;
+        snapshots[hostId] = snapshots[hostId] with
+        {
+            ReceivedAtMilliseconds = secondReceivedAt
+        };
+        snapshots[guestId] = snapshots[guestId] with
+        {
+            ReceivedAtMilliseconds = secondReceivedAt,
+            State = snapshots[guestId].State with
+            {
+                Lifecycle = PlayerLifecycle.Downed,
+                Position = new Vector3(4.5f, 0, 0),
+                HealthFraction = 0.01f
+            }
+        };
+        var secondRevive = revive with { InteractionId = 5 };
+        var secondBegin = authority.Resolve(secondRevive, 6_000, Lookup);
+        Check.Equal(InteractionResultStatus.Accepted, secondBegin.Result.Status);
+        var secondProgress = secondBegin;
+        for (var revision = 2; revision <= 11; revision++)
+        {
+            secondProgress = authority.Resolve(
+                secondRevive with
+                {
+                    Revision = (ushort)revision,
+                    Phase = InteractionIntentPhase.Sustain
+                },
+                6_000 + ((revision - 1) * 400),
+                Lookup);
+        }
+        Check.Equal(
+            InteractionResultStatus.Completed,
+            secondProgress.Result.Status);
 
         var snapshotState = authority.ReadSnapshot();
         Check.True(snapshotState.Completed >= 3);
@@ -3154,7 +3272,7 @@ internal static class Program
 
     private static Task AnimationReplicationPayloadsAsync()
     {
-        Check.Equal((ushort)33, ProtocolConstants.Version);
+        Check.Equal((ushort)34, ProtocolConstants.Version);
         Check.Equal((ushort)28, (ushort)MessageType.PlayerAnimationState);
         Check.Equal((ushort)29, (ushort)MessageType.MotionReplicationConfig);
 
@@ -3374,7 +3492,7 @@ internal static class Program
 
     private static Task WorldAndEquipmentAsync()
     {
-        Check.Equal((ushort)33, ProtocolConstants.Version);
+        Check.Equal((ushort)34, ProtocolConstants.Version);
         Check.Equal((ushort)23, (ushort)MessageType.WorldState);
         Check.Equal((ushort)24, (ushort)MessageType.EquipmentState);
         Check.Equal((ushort)25, (ushort)MessageType.PauseVote);
@@ -5167,6 +5285,82 @@ internal static class Program
                 Directory.Delete(resolvedRoot, recursive: true);
             }
         }
+    }
+
+    private static Task UdpWorldBurstReorderingAsync()
+    {
+        var credentials = SessionCredentials.Generate();
+        var senderInstance = Guid.NewGuid();
+        var endpoint = new IPEndPoint(IPAddress.Loopback, 43121);
+        var binding = new UdpPeerBinding(
+            endpoint.Address,
+            endpoint.Port,
+            controlSequenceFloor: 90,
+            expectedInstanceId: senderInstance);
+        ProtocolEnvelope Authenticate(ProtocolEnvelope envelope) =>
+            AuthenticatedDatagramCodec.Decode(
+                AuthenticatedDatagramCodec.Encode(
+                    envelope, credentials, senderInstance),
+                credentials,
+                expectedSenderInstanceId: senderInstance);
+
+        var player = new ProtocolEnvelope(
+            MessageType.PlayerState,
+            99,
+            1000,
+            BinaryPayloadCodec.EncodePlayerState(new PlayerStatePayload(
+                NetEntityId.Create(87, 1),
+                1,
+                PlayerLifecycle.Alive,
+                Vector3.Zero,
+                Vector3.UnitX,
+                0f,
+                1f,
+                PlayerStateFlags.None)));
+        Check.True(binding.TryAccept(endpoint, Authenticate(player), out _));
+
+        // Two host world ticks can overtake one player datagram. All 48
+        // entities share the sender sequence with player and control state.
+        for (uint sequence = 101; sequence <= 196; sequence++)
+        {
+            Check.True(binding.TryAccept(
+                endpoint,
+                Authenticate(PumpEntityUpdate(
+                    NetEntityId.Create(87, 100 + sequence % 48), sequence)),
+                out _));
+        }
+
+        var delayedPlayer = Authenticate(player with
+        {
+            Sequence = 100,
+            Tick = 1050
+        });
+        Check.True(binding.TryAccept(endpoint, delayedPlayer, out var rejection),
+            $"World traffic discarded an unseen player snapshot: {rejection}");
+        Check.False(binding.TryAccept(endpoint, delayedPlayer, out rejection));
+        Check.Equal("sequence-replay", rejection);
+        Check.False(binding.TryAccept(
+            endpoint,
+            Authenticate(PumpEntityUpdate(NetEntityId.Create(87, 101), 150)),
+            out rejection));
+        Check.Equal("sequence-replay", rejection);
+        Check.False(binding.TryAccept(
+            endpoint,
+            Authenticate(player with { Sequence = 90 }),
+            out rejection));
+        Check.Equal("sequence-floor", rejection);
+
+        // The wider window is still bounded, and remains shared by all
+        // message families so a used sequence cannot be replayed as a type.
+        Check.True(binding.TryAccept(
+            endpoint, Authenticate(player with { Sequence = 2200 }), out _));
+        Check.False(binding.TryAccept(
+            endpoint, Authenticate(player with { Sequence = 151 }), out rejection));
+        Check.Equal("sequence-replay", rejection);
+        Check.False(binding.TryAccept(
+            endpoint, Authenticate(player with { Sequence = 196 }), out rejection));
+        Check.Equal("sequence-replay", rejection);
+        return Task.CompletedTask;
     }
 
     private static async Task UdpBindingAndReplayAsync()
@@ -8364,10 +8558,32 @@ internal static class Program
                     guestWorldState.Value.Position),
                 tolerance: 0.01f);
             Check.Equal(hostWorldState.ModelHash, guestWorldState.Value.ModelHash);
+            var hostNpcAction = new NpcAnimationPayload(hostWorldId, 1,
+                NpcAnimationFlags.Reloading, NpcAnimationEvents.None, 1000,
+                0x4321, hostWorldState.ModelHash, hostWorldState.Position, Vector3.Zero, 1f);
+            await ProtocolCodec.WriteAsync(pipe, new ProtocolEnvelope(
+                MessageType.NpcAnimation, 852, unchecked((ulong)Environment.TickCount64),
+                NpcAnimationCodec.Encode(hostNpcAction)), sessionStop.Token).ConfigureAwait(false);
+            using (var actionStop = CancellationTokenSource.CreateLinkedTokenSource(sessionStop.Token))
+            {
+                actionStop.CancelAfter(TimeSpan.FromSeconds(3));
+                while (true)
+                {
+                    var actionEnvelope = await ProtocolCodec.ReadAsync(pipe, actionStop.Token).ConfigureAwait(false);
+                    Check.NotNull(actionEnvelope);
+                    if (actionEnvelope!.Type != MessageType.NpcAnimation) continue;
+                    var action = NpcAnimationCodec.Decode(actionEnvelope.Payload.Span);
+                    Check.Equal(guestWorldState.Value.EntityId, action.EntityId);
+                    Check.Equal(hostNpcAction.Revision, action.Revision);
+                    Check.Equal(hostNpcAction.Flags, action.Flags);
+                    Check.Near(0f, Vector3.Distance(guestWorldState.Value.Position, action.Target));
+                    break;
+                }
+            }
             await WriteSessionMenuRequestAsync(
                 pipe,
                 SessionMenuAction.ToggleGuestWorldView,
-                sequence: 852,
+                sequence: 853,
                 sessionStop.Token).ConfigureAwait(false);
             await WaitUntilAsync(
                 () => LogContains(

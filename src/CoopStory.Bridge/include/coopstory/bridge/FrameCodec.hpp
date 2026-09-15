@@ -13,7 +13,7 @@
 namespace coopstory::bridge {
 
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
-inline constexpr std::uint16_t kProtocolVersion = 33U;
+inline constexpr std::uint16_t kProtocolVersion = 34U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
@@ -73,6 +73,7 @@ enum class MessageType : std::uint16_t {
     MissionDialogueReady = 47,
     AmbientEncounterProposal = 48,
     AmbientEncounterState = 49,
+    NpcAnimation = 50,
 };
 
 [[nodiscard]] bool IsKnownMessageType(std::uint16_t value) noexcept;

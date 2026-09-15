@@ -149,8 +149,6 @@ constexpr float kWorldDamageIntentFixedDamage = 25.0F;
 // disappearing just when the guest falls behind.
 constexpr float kMissionScriptOwnedActorRadiusMeters = 300.0F;
 constexpr std::uint64_t kWorldModelLoadTimeoutMilliseconds = 5'000U;
-constexpr std::uint64_t kWorldAimTaskRefreshMilliseconds = 250U;
-constexpr float kWorldProxySnapDistanceMeters = 12.0F;
 constexpr std::uint64_t kRemotePlayerAimTaskRefreshMilliseconds = 200U;
 constexpr int kRemotePlayerAimTaskDurationMilliseconds = 350;
 constexpr float kRemotePlayerAimTargetRefreshMeters = 0.35F;
@@ -238,7 +236,6 @@ constexpr float kLocalOwnMountInteractionExclusionMeters = 4.5F;
 constexpr std::uint64_t kRemoteMountTaskMinimumRefreshMilliseconds = 500U;
 constexpr std::uint64_t kRemoteMountRelationRetryMilliseconds = 250U;
 constexpr float kRemoteMountTaskDestinationRefreshMeters = 2.0F;
-constexpr float kWorldSemanticTaskDestinationRefreshMeters = 2.0F;
 constexpr float kFallbackAimDistanceMeters = 250.0F;
 constexpr int kInputGroupGameplay = 0;
 constexpr int kInputFrontendPause =
@@ -8835,6 +8832,11 @@ void ScriptHookSdkFacade::ConfigureMotionReplication(
     }
 }
 
+void ScriptHookSdkFacade::ClearRemoteAnimationState() noexcept {
+    latestRemoteAnimationState_.reset();
+    latestRemoteAnimationStateReceivedAtMs_.reset();
+}
+
 bool ScriptHookSdkFacade::ApplyRemoteAnimationState(
     const PlayerAnimationStatePayload& state) noexcept {
     try {
@@ -9270,6 +9272,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         static_cast<std::uint32_t>(PlayerStateFlag::SwimmingUnderwater);
     const bool nativeIdleTurnRequested =
         visualControllerAllowed &&
+        HorizontalDistance(current, state.position) <=
+            kAnimGraphIdleRecoveryExitMeters &&
         state.locomotionMode == PlayerLocomotionMode::Grounded &&
         state.desiredMoveBlend < 0.10F &&
         std::hypot(state.velocity.x, state.velocity.y) < 0.20F &&
@@ -9280,6 +9284,8 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         state.desiredMoveBlend >= 0.10F ||
         std::hypot(state.velocity.x, state.velocity.y) >= 0.20F;
     if (visualControllerAllowed && !senderMoving &&
+        HorizontalDistance(current, state.position) <=
+            kAnimGraphIdleRecoveryExitMeters &&
         !nativeIdleTurnRequested &&
         visualHeadingError >=
             kAnimGraphReplicaHeadingDeadZoneDegrees) {
@@ -9675,10 +9681,12 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         } else if (motionState == kMotionStateSprint) {
             reportedLocomotion = RemoteLocomotion::Sprint;
         }
-        const auto visualLocomotion =
-            SelectDirectReplicaVisualLocomotion(
-                reportedLocomotion,
-                state.desiredMoveBlend);
+        const auto motionPlan = PlanRemoteAnimGraphMotion(
+            boundedRootRecovery ? state.position : current,
+            state,
+            reportedLocomotion,
+            animGraphVisualLocomotion_);
+        const auto visualLocomotion = motionPlan.locomotion;
         const auto visualDirection =
             ClassifyRemoteMovementDirection(
                 state.localForwardSpeed,
@@ -9688,23 +9696,15 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                     now >= animGraphVisualTaskStartedMs_
                 ? now - animGraphVisualTaskStartedMs_
                 : std::numeric_limits<std::uint64_t>::max();
-        const auto desiredVisualDestination =
-            ComputeDirectReplicaVisualTaskDestination(
-                state.position,
-                state.velocity,
-                state.movementHeading,
-                visualLocomotion);
+        const auto desiredVisualDestination = motionPlan.destination;
         const bool visualDestinationChanged =
             visualLocomotion != RemoteLocomotion::Idle &&
             taskAgeMs >= kDirectReplicaVisualTaskMinimumRefreshMs &&
             Distance(
                 animGraphVisualTaskDestination_,
-                desiredVisualDestination) >= 4.0F;
-        const auto directMoveRate = std::clamp(
-            1.0F +
-                std::max(positionError - 0.30F, 0.0F) * 0.05F,
-            1.0F,
-            kRemoteMotionCatchUpMaximumMoveRate);
+                desiredVisualDestination) >=
+                kAnimGraphTaskDestinationRefreshMeters;
+        const auto directMoveRate = motionPlan.moveRateOverride;
         const bool aimTargetChanged =
             requestedAiming &&
             Distance(previousRemoteAimTarget_, state.aimTarget) >=
@@ -9726,7 +9726,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                         animGraphVisualTaskHeading_,
                         visualLocomotion == RemoteLocomotion::Idle
                             ? state.heading
-                            : state.movementHeading),
+                            : motionPlan.movementHeading),
                     animGraphVisualDirection_,
                     visualDirection}) ||
             aimTargetChanged || aimRefreshExpired ||
@@ -9764,8 +9764,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                     state.aimTarget.x,
                     state.aimTarget.y,
                     state.aimTarget.z,
-                    DirectReplicaVisualTaskSpeed(visualLocomotion) *
-                        directMoveRate,
+                    DirectReplicaVisualTaskSpeed(visualLocomotion),
                     FALSE,
                     0.05F,
                     0.05F,
@@ -9802,8 +9801,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                     animGraphVisualTaskDestination_.x,
                     animGraphVisualTaskDestination_.y,
                     animGraphVisualTaskDestination_.z,
-                    DirectReplicaVisualTaskSpeed(visualLocomotion) *
-                        directMoveRate,
+                    DirectReplicaVisualTaskSpeed(visualLocomotion),
                     kAnimGraphVisualTaskTimeoutMilliseconds,
                     kAnimGraphVisualTaskStoppingRangeMeters,
                     TRUE,
@@ -9815,7 +9813,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
             animGraphVisualTaskHeading_ =
                 visualLocomotion == RemoteLocomotion::Idle
                     ? state.heading
-                    : state.movementHeading;
+                    : motionPlan.movementHeading;
             animGraphVisualTaskStartedMs_ = now;
             animGraphVisualTaskActive_ = true;
             if (requestedAiming) {
@@ -9832,21 +9830,23 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
         }
         AI::SET_PED_DESIRED_MOVE_BLEND_RATIO(
             handle,
-            std::clamp(state.desiredMoveBlend, 0.0F, 3.0F));
+            motionPlan.moveBlendRatio);
         PED::SET_PED_MAX_MOVE_BLEND_RATIO(
             handle,
             std::clamp(
-                std::max(state.desiredMoveBlend, 1.0F),
+                std::max(motionPlan.moveBlendRatio, 1.0F),
                 1.0F,
                 3.0F));
-        // A bounded supported move-rate closes ordinary network drift without
-        // separating the model root from the native foot-placement graph.
+        // Apply catch-up once through the move rate; multiplying the native
+        // gait selector as well can push a walk across the run threshold.
         PED::SET_PED_MOVE_RATE_OVERRIDE(handle, directMoveRate);
         ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(handle, FALSE);
         ++animGraphReplicaStateApplies_;
 
         const bool expectedMoving =
-            visualLocomotion != RemoteLocomotion::Idle;
+            visualLocomotion != RemoteLocomotion::Idle &&
+            HorizontalDistance(current, desiredVisualDestination) >
+                kAnimGraphIdleRecoveryEnterMeters;
         if (requestedAiming) {
             ++animGraphAimExpectedTicks_;
         }
@@ -9876,12 +9876,12 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
                      now - animGraphPreviousLocomotionRecoveryMs_ >=
                          kAnimGraphLocomotionRecoveryCooldownMilliseconds);
                 if (recoveryDue) {
-                    // A valid long-lived straight-to task can become inert
+                    // A valid long-lived navigation task can become inert
                     // after camp speed zones or a Story script briefly owns
                     // the proxy. Merely refreshing its destination preserves
                     // that dead task. Reacquire the visual graph once after a
-                    // measured 350ms stall; direct-root position authority is
-                    // unaffected and the two-second cooldown prevents flicker.
+                    // measured 350ms stall; the two-second cooldown prevents
+                    // repeated task clears while native navigation recovers.
                     AI::CLEAR_PED_TASKS(handle, TRUE, TRUE);
                     PED::SET_PED_KEEP_TASK(handle, FALSE);
                     animGraphVisualTaskActive_ = false;
@@ -10164,7 +10164,7 @@ bool ScriptHookSdkFacade::ApplyRemoteAnimGraphTransform(
             std::to_string(animGraphReplicaMoveNetworkSamples_) +
             ", unavailable-samples=" +
             std::to_string(animGraphReplicaUnavailableSamples_) +
-            ", visual-task-owner=1, task-navmesh-owner=0");
+            ", visual-task-owner=1, task-navmesh-owner=1");
         animGraphReplicaDiagnosticsStartedMs_ = now;
         animGraphReplicaTicks_ = 0U;
         animGraphReplicaCorrections_ = 0U;
@@ -13921,6 +13921,239 @@ void ScriptHookSdkFacade::ClearRemoteMount() noexcept {
     remotePlayerMountBorrowed_ = false;
 }
 
+std::optional<NpcAnimationSample> ScriptHookSdkFacade::SampleNpcAnimation(
+    const LocalEntityHandle handle, const std::uint32_t modelHash) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        const auto ped = static_cast<Ped>(handle);
+        if (ped == 0 || ENTITY::DOES_ENTITY_EXIST(ped) == FALSE ||
+            PED::IS_PED_A_PLAYER(ped) != FALSE ||
+            static_cast<std::uint32_t>(ENTITY::GET_ENTITY_MODEL(ped)) != modelHash) return std::nullopt;
+        NpcAnimationSample sample;
+        sample.modelHash = modelHash;
+        const auto health = ENTITY::GET_ENTITY_HEALTH(ped);
+        const auto maximum = std::max(ENTITY::GET_ENTITY_MAX_HEALTH(ped, FALSE), 1);
+        sample.healthFraction = std::clamp(static_cast<float>(health) / maximum, 0.0F, 1.0F);
+        if (health <= 0 || PED::IS_PED_DEAD_OR_DYING(ped, TRUE) != FALSE) {
+            sample.flags = static_cast<std::uint16_t>(NpcAnimationFlag::Dead);
+        } else {
+            const auto flag = [&](const bool active, const NpcAnimationFlag value) {
+                if (active) sample.flags |= static_cast<std::uint16_t>(value);
+            };
+            flag(PED::IS_PED_RAGDOLL(ped) != FALSE, NpcAnimationFlag::Ragdoll);
+            flag(AI::IS_PED_GETTING_UP(ped) != FALSE, NpcAnimationFlag::GettingUp);
+            flag(PED::IS_PED_IN_MELEE_COMBAT(ped) != FALSE, NpcAnimationFlag::Melee);
+            flag(PED::IS_PED_ON_MOUNT(ped) != FALSE, NpcAnimationFlag::Mounted);
+            flag(PED::IS_PED_JUMPING(ped) != FALSE, NpcAnimationFlag::Jumping);
+            flag(PED::IS_PED_CLIMBING(ped) != FALSE, NpcAnimationFlag::Climbing);
+            Hash weapon{};
+            if (PED::IS_PED_HUMAN(ped) != FALSE &&
+                WEAPON::GET_CURRENT_PED_WEAPON(ped, &weapon, TRUE, 0, FALSE) != FALSE &&
+                weapon != kWeaponUnarmed && weapon != kWeaponLasso) {
+                sample.weaponHash = static_cast<std::uint32_t>(weapon);
+                sample.firing = PED::IS_PED_SHOOTING(ped) != FALSE;
+                flag(PED::IS_PED_RELOADING(ped) != FALSE, NpcAnimationFlag::Reloading);
+                int clip{};
+                if (WEAPON::GET_AMMO_IN_CLIP(ped, weapon, &clip) != FALSE) sample.clipAmmo = std::max(clip, 0);
+            }
+        }
+        sample.velocity = ToBridgeVector(ENTITY::GET_ENTITY_VELOCITY(ped, 0));
+        const auto position = ToBridgeVector(ENTITY::GET_ENTITY_COORDS(ped, TRUE, FALSE));
+        const auto forward = ToBridgeVector(ENTITY::GET_ENTITY_FORWARD_VECTOR(ped));
+        sample.target = {position.x + forward.x * 30.0F,
+                         position.y + forward.y * 30.0F, position.z + 1.0F};
+        const auto local = PLAYER::PLAYER_PED_ID();
+        const auto remote = replicas_.FindLocal(remotePlayerId_).value_or(0);
+        const auto target = remote != 0 && PED::IS_PED_IN_COMBAT(ped, remote) != FALSE
+            ? remote : (local != 0 && PED::IS_PED_IN_COMBAT(ped, local) != FALSE ? local : 0);
+        if (target != 0 && ENTITY::DOES_ENTITY_EXIST(target) != FALSE) {
+            sample.target = ToBridgeVector(ENTITY::GET_ENTITY_COORDS(target, TRUE, FALSE));
+            sample.target.z += 0.8F;
+        }
+        return sample;
+#else
+        (void)handle; (void)modelHash;
+#endif
+    } catch (...) {}
+    return std::nullopt;
+}
+
+bool ScriptHookSdkFacade::QueueNpcAnimation(const NpcAnimationPayload& payload) noexcept {
+    try {
+        if (!IsValidNpcAnimation(payload)) return false;
+        const auto proxy = worldProxyEntries_.find(payload.entityId);
+        if (proxy == worldProxyEntries_.end() || proxy->second.state.kind != WorldEntityKind::Ped ||
+            proxy->second.state.modelHash != payload.modelHash || proxy->second.borrowedLocalEntity ||
+            proxy->second.state.taskKind == WorldTaskKind::Scenario ||
+            proxy->second.state.taskKind == WorldTaskKind::Cinematic) return false;
+        if (!npcAnimationInboxes_.contains(payload.entityId) && npcAnimationInboxes_.size() >= 48U) return false;
+        return npcAnimationInboxes_[payload.entityId].Push(payload, TickMilliseconds());
+    } catch (...) { return false; }
+}
+
+void ScriptHookSdkFacade::MaintainNpcAnimation(
+    const LocalEntityHandle ped, WorldProxyEntry& entry, const std::uint64_t now) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        const auto restoreFireAmmo = [&]() {
+            if (entry.fireAmmoWeapon == 0U) return;
+            // End the cosmetic shoot task BEFORE restoring ammo, even after
+            // a hitch. Never leave a live AI firing task with real ammunition.
+            AI::CLEAR_PED_TASKS(ped, TRUE, FALSE);
+            WEAPON::SET_PED_AMMO(ped, static_cast<Hash>(entry.fireAmmoWeapon), entry.fireRestoreAmmo);
+            if (entry.fireRestoreClip >= 0)
+                (void)WEAPON::SET_AMMO_IN_CLIP(ped, static_cast<Hash>(entry.fireAmmoWeapon), entry.fireRestoreClip);
+            entry.fireAmmoWeapon = 0U;
+            entry.fireRestoreAtMs = 0U;
+            entry.previousTaskMs = 0U;
+        };
+        const bool nativeSceneOwnsPed = entry.borrowedLocalEntity ||
+            entry.state.taskKind == WorldTaskKind::Scenario || entry.state.taskKind == WorldTaskKind::Cinematic;
+        const bool worldDead = (entry.state.flags & static_cast<std::uint8_t>(WorldEntityStateFlag::Dead)) != 0U;
+        if (nativeSceneOwnsPed || worldDead || entry.animationDead) {
+            restoreFireAmmo();
+            if (!entry.borrowedLocalEntity && SelectNpcAnimationOwner(entry.animationFlagsApplied) == NpcAnimationOwner::Reload)
+                AI::CLEAR_PED_TASKS(ped, TRUE, FALSE);
+            entry.animation.flags = 0U;
+            entry.animationFlagsApplied = 0U;
+            entry.animationLeaseUntilMs = 0U;
+            entry.animationTaskUntilMs = 0U;
+            entry.animationPhysicalUntilMs = 0U;
+            if (const auto pending = npcAnimationInboxes_.find(entry.state.entityId); pending != npcAnimationInboxes_.end())
+                pending->second.ClearPending();
+            if (worldDead) entry.animationDead = true;
+            return;
+        }
+        if (entry.fireAmmoWeapon != 0U && (now >= entry.fireRestoreAtMs || entry.animationDead ||
+            entry.state.weaponHash != entry.fireAmmoWeapon)) restoreFireAmmo();
+        if (entry.animationLeaseUntilMs != 0U && now >= entry.animationLeaseUntilMs) {
+            if (entry.animationFlagsApplied & static_cast<std::uint16_t>(NpcAnimationFlag::Reloading))
+                AI::CLEAR_PED_TASKS(ped, TRUE, FALSE);
+            entry.animation.flags = 0U;
+            entry.animationFlagsApplied = 0U;
+            entry.animationLeaseUntilMs = 0U;
+            entry.previousTaskMs = 0U;
+        }
+        const auto inbox = npcAnimationInboxes_.find(entry.state.entityId);
+        if (inbox != npcAnimationInboxes_.end()) {
+            // Drain a bounded journal. Every shot/hit event is consumed once;
+            // the last state is a lease, not a replay of every network sample.
+            while (const auto action = inbox->second.Pop(now)) {
+                if (action->modelHash != entry.state.modelHash || entry.animationDead) continue;
+                const auto oldOwner = SelectNpcAnimationOwner(entry.animationFlagsApplied);
+                const auto owner = SelectNpcAnimationOwner(action->flags);
+                const auto newFlags = action->flags & ~entry.animationFlagsApplied;
+                entry.animation = *action;
+                entry.animationLeaseUntilMs = now + action->leaseMs;
+                if (owner == NpcAnimationOwner::Physical)
+                    entry.animationPhysicalUntilMs = now + action->leaseMs + 2'000U;
+                if (oldOwner != owner) {
+                    restoreFireAmmo();
+                    if (oldOwner == NpcAnimationOwner::Reload) AI::CLEAR_PED_TASKS(ped, TRUE, FALSE);
+                    entry.previousTaskMs = 0U;
+                    entry.animationTaskUntilMs = 0U;
+                }
+                entry.animationFlagsApplied = action->flags;
+                if (owner == NpcAnimationOwner::Dead) {
+                    restoreFireAmmo();
+                    entry.animationDead = true;
+                    continue;
+                }
+                const bool mounted = PED::IS_PED_ON_MOUNT(ped) != FALSE;
+                const bool physical = PED::IS_PED_RAGDOLL(ped) != FALSE || AI::IS_PED_GETTING_UP(ped) != FALSE;
+                if (owner == NpcAnimationOwner::Reload &&
+                    !mounted && !physical &&
+                    ((newFlags & static_cast<std::uint16_t>(NpcAnimationFlag::Reloading)) ||
+                     (PED::IS_PED_RELOADING(ped) == FALSE && now - entry.animationReloadAttemptMs >= 500U))) {
+                    const auto weapon = static_cast<Hash>(action->weaponHash);
+                    if (WEAPON::IS_WEAPON_VALID(weapon) != FALSE) {
+                        if (WEAPON::HAS_PED_GOT_WEAPON(ped, weapon, FALSE, FALSE) == FALSE)
+                            WEAPON::GIVE_DELAYED_WEAPON_TO_PED(ped, weapon, 24, TRUE, 0);
+                        WEAPON::SET_CURRENT_PED_WEAPON(ped, weapon, TRUE, 0, FALSE, FALSE);
+                        WEAPON::SET_PED_AMMO(ped, weapon, 24);
+                        (void)WEAPON::SET_AMMO_IN_CLIP(ped, weapon, 0);
+                        AI::TASK_RELOAD_WEAPON(ped, FALSE);
+                        entry.animationReloadAttemptMs = now;
+                        entry.weaponHash = action->weaponHash;
+                        entry.previousTaskMs = 0U;
+                    }
+                }
+                if (owner == NpcAnimationOwner::Traversal && newFlags != 0U && !mounted && !physical) {
+                    if (action->flags & static_cast<std::uint16_t>(NpcAnimationFlag::Climbing)) AI::TASK_CLIMB(ped, TRUE);
+                    else AI::TASK_JUMP(ped, TRUE);
+                    entry.animationTaskUntilMs = now + std::min<std::uint16_t>(action->leaseMs, 1'000U);
+                    entry.previousTaskMs = 0U;
+                }
+                if (action->events & static_cast<std::uint16_t>(NpcAnimationEvent::HitReaction)) {
+                    // The public SDK exposes pain audio, not the host's exact
+                    // hit clip. Physical knockdowns are replayed separately.
+                    AUDIO::PLAY_PAIN(ped, 0, 0.0F, FALSE, FALSE);
+                    if ((entry.animationUnsupportedLogged & 1U) == 0U) {
+                        Log("[NPC_ANIMATION] hit reaction uses pain audio; exact host hit clip unavailable, entity=" +
+                            std::to_string(entry.state.entityId.Value()));
+                        entry.animationUnsupportedLogged |= 1U;
+                    }
+                }
+                if ((action->flags & static_cast<std::uint16_t>(NpcAnimationFlag::Melee)) &&
+                    (entry.animationUnsupportedLogged & 2U) == 0U) {
+                    Log("[NPC_ANIMATION] melee state observed; exact host melee clip unavailable, entity=" +
+                        std::to_string(entry.state.entityId.Value()));
+                    entry.animationUnsupportedLogged |= 2U;
+                }
+                if (action->events & static_cast<std::uint16_t>(NpcAnimationEvent::Shot)) {
+                    if (EnsureRemoteGunshotAudio()) {
+                        AUDIO::_0x6FB1DA3CA9DA7D90(
+                            reinterpret_cast<Any*>(kRemoteGunshotSoundName), static_cast<Any>(ped),
+                            reinterpret_cast<Any*>(kRemoteGunshotSoundSet), FALSE, 0, 0);
+                    }
+                    // A stationary firing-graph request can own the task briefly. A
+                    // moving or mounted shot keeps its existing locomotion.
+                    if (owner == NpcAnimationOwner::None && !mounted && !physical &&
+                        std::hypot(action->velocity.x, action->velocity.y) < 0.20F) {
+                        const auto weapon = static_cast<Hash>(action->weaponHash);
+                        Hash equipped{};
+                        if (WEAPON::IS_WEAPON_VALID(weapon) != FALSE &&
+                            WEAPON::GET_CURRENT_PED_WEAPON(ped, &equipped, TRUE, 0, FALSE) != FALSE && equipped == weapon) {
+                            restoreFireAmmo();
+                            entry.fireAmmoWeapon = action->weaponHash;
+                            entry.fireRestoreAmmo = std::max(WEAPON::GET_AMMO_IN_PED_WEAPON(ped, weapon), 0);
+                            int clip{};
+                            entry.fireRestoreClip = WEAPON::GET_AMMO_IN_CLIP(ped, weapon, &clip) != FALSE ? clip : -1;
+                            WEAPON::SET_PED_AMMO(ped, weapon, 0);
+                            (void)WEAPON::SET_AMMO_IN_CLIP(ped, weapon, 0);
+                            AI::TASK_SHOOT_AT_COORD(ped, action->target.x, action->target.y, action->target.z,
+                                100, static_cast<Hash>(kFiringPatternSingleShot), FALSE);
+                            entry.fireRestoreAtMs = now + 150U;
+                            entry.animationTaskUntilMs = now + 150U;
+                            entry.previousTaskMs = 0U;
+                        }
+                    }
+                }
+                // Present discrete pulses on separate game ticks after a burst
+                // of reliable deliveries instead of overwriting every task in one tick.
+                if (action->events != 0U) break;
+            }
+        }
+        if (!entry.animationDead && now < entry.animationLeaseUntilMs &&
+            (entry.animation.flags & static_cast<std::uint16_t>(NpcAnimationFlag::Ragdoll)) &&
+            PED::IS_PED_ON_MOUNT(ped) == FALSE &&
+            (entry.animationPhysicalRefreshMs == 0U || now - entry.animationPhysicalRefreshMs >= 500U)) {
+            PED::SET_PED_CAN_RAGDOLL(ped, TRUE);
+            (void)PED::SET_PED_TO_RAGDOLL(ped, 700, 700, 0, TRUE, TRUE, FALSE);
+            ENTITY::SET_ENTITY_VELOCITY(ped, entry.animation.velocity.x, entry.animation.velocity.y, entry.animation.velocity.z);
+            entry.animationPhysicalRefreshMs = now;
+            entry.previousTaskMs = 0U;
+        }
+        // GettingUp releases the ragdoll lease: the native physical graph
+        // completes recovery while ordinary movement remains suspended.
+#else
+        (void)ped; (void)entry; (void)now;
+#endif
+    } catch (...) {
+        Log("[NPC_ANIMATION] native playback failed; bounded lease retained");
+    }
+}
+
 bool ScriptHookSdkFacade::SpawnWorldEntityProxy(
     const WorldEntityStatePayload& state) noexcept {
     try {
@@ -13959,6 +14192,8 @@ bool ScriptHookSdkFacade::SpawnWorldEntityProxy(
                     now,
                     now});
         if (!inserted) {
+            iterator->second.hardCorrectionPending |= WorldProxyTargetDiscontinuous(
+                iterator->second.state, state, iterator->second.receivedAtMs, now);
             iterator->second.state = state;
             iterator->second.receivedAtMs = now;
         }
@@ -14003,8 +14238,11 @@ bool ScriptHookSdkFacade::UpdateWorldEntityProxy(
             state.healthFraction > 1.0F) {
             return false;
         }
+        const auto now = TickMilliseconds();
+        iterator->second.hardCorrectionPending |= WorldProxyTargetDiscontinuous(
+            iterator->second.state, state, iterator->second.receivedAtMs, now);
         iterator->second.state = state;
-        iterator->second.receivedAtMs = TickMilliseconds();
+        iterator->second.receivedAtMs = now;
         return true;
 #else
         (void)state;
@@ -14016,6 +14254,7 @@ bool ScriptHookSdkFacade::UpdateWorldEntityProxy(
 
 void ScriptHookSdkFacade::DespawnWorldEntityProxy(
     const NetEntityId entityId) noexcept {
+    npcAnimationInboxes_.erase(entityId);
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         WorldEntityKind kind{WorldEntityKind::Ped};
@@ -14219,6 +14458,7 @@ void ScriptHookSdkFacade::MaintainHiddenPedAttachments() noexcept {
 }
 
 void ScriptHookSdkFacade::CleanupWorldEntityProxies() noexcept {
+    npcAnimationInboxes_.clear();
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         std::unordered_map<LocalEntityHandle, WorldEntityKind>
@@ -14357,7 +14597,24 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 entry.collisionReady = false;
                 entry.requestedAtMs = now;
                 entry.weaponHash = 0U;
-                entry.aiming = false;
+                entry.previousTaskMs = 0U;
+                entry.previousTask = {};
+                entry.previousMountAttemptMs = 0U;
+                entry.requestedMountParent = {};
+                entry.requestedMounted = false;
+                entry.mounted = false;
+                entry.hardCorrectionPending = false;
+                entry.animation = {};
+                entry.animationLeaseUntilMs = 0U;
+                entry.animationTaskUntilMs = 0U;
+                entry.animationPhysicalRefreshMs = 0U;
+                entry.animationPhysicalUntilMs = 0U;
+                entry.animationReloadAttemptMs = 0U;
+                entry.animationFlagsApplied = 0U;
+                entry.fireAmmoWeapon = 0U;
+                entry.fireRestoreAtMs = 0U;
+                if (const auto inbox = npcAnimationInboxes_.find(entityId); inbox != npcAnimationInboxes_.end())
+                    inbox->second.ClearPending();
                 entry.spawnDisposition =
                     WorldProxySpawnDisposition::RetryableFailure;
                 entry.nextSpawnRetryMs = now + 250U;
@@ -14650,6 +14907,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 continue;
             }
             const auto ped = static_cast<Ped>(entity);
+            if (entry.collisionReady) MaintainNpcAnimation(ped, entry, now);
             if (entry.borrowedLocalEntity &&
                 entry.state.taskKind == WorldTaskKind::Scenario) {
                 // The local Story VM/scenario manager is the exact animation
@@ -14661,8 +14919,17 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 ENTITY::SET_ENTITY_HAS_GRAVITY(ped, TRUE);
                 ENTITY::FREEZE_ENTITY_POSITION(ped, FALSE);
                 ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(ped, FALSE);
+                entry.previousTaskMs = 0U;
                 continue;
             }
+            const auto animationOwner = now < entry.animationLeaseUntilMs
+                ? SelectNpcAnimationOwner(entry.animation.flags) : NpcAnimationOwner::None;
+            const bool animationOwnsMotor = now < entry.animationTaskUntilMs ||
+                animationOwner == NpcAnimationOwner::Reload ||
+                animationOwner == NpcAnimationOwner::Physical ||
+                animationOwner == NpcAnimationOwner::Traversal ||
+                (now < entry.animationPhysicalUntilMs &&
+                 (PED::IS_PED_RAGDOLL(ped) != FALSE || AI::IS_PED_GETTING_UP(ped) != FALSE));
             const auto currentPosition = ToBridgeVector(
                 ENTITY::GET_ENTITY_COORDS(
                     ped,
@@ -14677,7 +14944,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                     ? worldEntityReplicas_.FindLocal(
                           entry.state.parentEntityId)
                     : std::nullopt;
-            const bool mountedRelationReady =
+            const auto dead =
+                (entry.state.flags & static_cast<std::uint8_t>(WorldEntityStateFlag::Dead)) != 0U || entry.animationDead;
+            const bool parentReady =
                 mounted &&
                 parentMount.has_value() &&
                     ENTITY::DOES_ENTITY_EXIST(
@@ -14694,25 +14963,12 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                     0,
                     FALSE) != FALSE;
             const bool stableIdleRoot =
-                !mountedRelationReady &&
+                !mounted &&
                 (entry.state.taskKind == WorldTaskKind::Idle ||
                  (entry.state.taskKind == WorldTaskKind::Scenario &&
                   !scenarioPointAvailable));
-            const auto ageSeconds =
-                now >= entry.receivedAtMs
-                    ? std::min(
-                          static_cast<float>(
-                              now - entry.receivedAtMs) /
-                              1'000.0F,
-                          0.25F)
-                    : 0.0F;
-            const Vec3 predicted{
-                entry.state.position.x +
-                    entry.state.velocity.x * ageSeconds,
-                entry.state.position.y +
-                    entry.state.velocity.y * ageSeconds,
-                    entry.state.position.z +
-                        entry.state.velocity.z * ageSeconds};
+            const auto motion = PlanWorldProxyMotion(entry.state, entry.receivedAtMs, now);
+            const auto predicted = motion.position;
             STREAMING::REQUEST_COLLISION_AT_COORD(
                 predicted.x,
                 predicted.y,
@@ -14734,56 +14990,58 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             }
             ENTITY::FREEZE_ENTITY_POSITION(ped, FALSE);
             ENTITY::SET_ENTITY_HAS_GRAVITY(ped, TRUE);
-            const auto error =
-                Distance(currentPosition, predicted);
             const bool cinematicEntity =
                 entry.state.taskKind == WorldTaskKind::Cinematic;
-            if (mountedRelationReady) {
-                if (PED::IS_PED_ON_MOUNT(ped) == FALSE ||
-                    PED::GET_MOUNT(ped) !=
-                        static_cast<Ped>(*parentMount)) {
-                    SetPedOntoMount(
-                        ped,
-                        static_cast<Ped>(*parentMount));
-                }
-                entry.mounted = true;
-            } else {
-                if (entry.mounted &&
-                    PED::IS_PED_ON_MOUNT(ped) != FALSE) {
+            const bool desiredMounted = mounted && !dead;
+            const bool relationChanged = entry.requestedMounted != desiredMounted ||
+                entry.requestedMountParent != entry.state.parentEntityId;
+            if (relationChanged) {
+                entry.previousMountAttemptMs = 0U;
+                entry.previousTaskMs = 0U;
+                entry.requestedMounted = desiredMounted;
+                entry.requestedMountParent = entry.state.parentEntityId;
+            }
+            const bool wasMounted = entry.mounted;
+            entry.mounted = PED::IS_PED_ON_MOUNT(ped) != FALSE;
+            if (relationChanged && desiredMounted && !entry.mounted && !animationOwnsMotor) {
+                // Cancel the previous on-foot route while the parent loads.
+                AI::TASK_STAND_STILL(ped, -1);
+            }
+            const bool onDesiredParent = entry.mounted && parentReady &&
+                PED::GET_MOUNT(ped) == static_cast<Ped>(*parentMount);
+            const auto mountDecision = PlanWorldProxyMount(
+                desiredMounted, parentReady, entry.mounted, onDesiredParent,
+                entry.previousMountAttemptMs, now);
+            // A host knockdown may detach its rider. Let the required dismount
+            // finish before physical replay; otherwise the physical lease and
+            // the mount guard would indefinitely wait for each other.
+            const bool allowMountTransition = !animationOwnsMotor ||
+                (!desiredMounted && animationOwner == NpcAnimationOwner::Physical);
+            if (!dead && allowMountTransition && mountDecision.action != WorldProxyMountAction::None) {
+                if (mountDecision.action == WorldProxyMountAction::Mount) {
+                    SetPedOntoMount(ped, static_cast<Ped>(*parentMount));
+                } else {
                     TaskDismountAnimal(ped);
                 }
-                entry.mounted = false;
-                if (std::isfinite(error) &&
-                    ((cinematicEntity && error >= 0.03F) ||
-                     error >=
-                         kWorldProxySnapDistanceMeters ||
-                     (stableIdleRoot && error >= 1.0F))) {
-                    Vec3 corrected =
-                        GroundSafePedPosition(predicted, model);
-                    const auto hardCorrectionDistance =
-                        cinematicEntity
-                            ? 3.0F
-                            : kWorldProxySnapDistanceMeters;
-                    if (error < hardCorrectionDistance) {
-                        const auto alpha =
-                            1.0F -
-                            std::exp(
-                                -(cinematicEntity ? 8.0F : 10.0F) *
-                                elapsedSeconds);
-                        corrected = GroundSafePedPosition({
-                            currentPosition.x +
-                                (predicted.x -
-                                 currentPosition.x) *
-                                    alpha,
-                            currentPosition.y +
-                                (predicted.y -
-                                 currentPosition.y) *
-                                    alpha,
-                            currentPosition.z +
-                                (predicted.z -
-                                 currentPosition.z) *
-                                    alpha}, model);
-                    }
+                entry.previousMountAttemptMs = now;
+                entry.mounted = PED::IS_PED_ON_MOUNT(ped) != FALSE;
+            }
+            // Keep root transforms, navigation and aiming out of both pending
+            // attachment and dismount transitions. Parent absence is pending,
+            // not a request to dismount. Health still applies below.
+            const bool blocksIndependentTasks =
+                mountDecision.blocksIndependentTasks || entry.mounted || animationOwnsMotor;
+            if (blocksIndependentTasks || wasMounted != entry.mounted) {
+                entry.previousTaskMs = 0U;
+            }
+            if (!blocksIndependentTasks && !dead) {
+                const auto correction = CorrectWorldProxyPosition(
+                    currentPosition, predicted, elapsedSeconds,
+                    entry.hardCorrectionPending ||
+                        (cinematicEntity && Distance(currentPosition, predicted) >= 3.0F),
+                    cinematicEntity);
+                if (Distance(currentPosition, correction) > 0.0001F) {
+                    const auto corrected = GroundSafePedPosition(correction, model);
                     ENTITY::SET_ENTITY_COORDS_NO_OFFSET(
                         ped,
                         corrected.x,
@@ -14803,6 +15061,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                             FALSE);
                     }
                 }
+                entry.hardCorrectionPending = false;
             }
 
             auto currentHeading =
@@ -14835,17 +15094,14 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
             const bool navigationOwnsHeading =
                 entry.state.taskKind == WorldTaskKind::Locomotion ||
                 entry.state.taskKind == WorldTaskKind::Fleeing ||
+                (entry.state.taskKind == WorldTaskKind::Combat && motion.moving) ||
                 entry.state.taskKind == WorldTaskKind::Scenario;
-            if (!mountedRelationReady &&
+            if (!blocksIndependentTasks && !dead &&
                 !navigationOwnsHeading &&
                 std::abs(headingDelta) >= 1.0F) {
                 ENTITY::SET_ENTITY_HEADING(ped, heading);
             }
 
-            const auto dead =
-                (entry.state.flags &
-                 static_cast<std::uint8_t>(
-                     WorldEntityStateFlag::Dead)) != 0U;
             // Live world replicas are deliberately invulnerable: a local
             // projectile becomes an authenticated DamageIntent and the host
             // alone applies the actual damage. Once the host has declared a
@@ -14881,7 +15137,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
 
             char unarmedName[] = "WEAPON_UNARMED";
             auto requestedWeapon =
-                entry.state.weaponHash != 0U
+                animationOwner == NpcAnimationOwner::Reload && entry.animation.weaponHash != 0U
+                    ? static_cast<Hash>(entry.animation.weaponHash)
+                    : entry.state.weaponHash != 0U
                     ? static_cast<Hash>(
                           entry.state.weaponHash)
                     : GAMEPLAY::GET_HASH_KEY(
@@ -14916,150 +15174,77 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                         requestedWeapon);
             }
 
-            const bool taskChanged =
-                entry.previousTaskKind !=
-                    entry.state.taskKind;
-            const bool scenarioTaskActive =
-                entry.state.taskKind == WorldTaskKind::Scenario &&
+            if (dead || blocksIndependentTasks) {
+                // Re-evaluate the task when the engine confirms dismount.
+                continue;
+            }
+            const bool aiming = !motion.stale &&
+                (entry.state.flags & static_cast<std::uint8_t>(WorldEntityStateFlag::Aiming)) != 0U;
+            Entity aimTarget{};
+            if (entry.state.combatTargetSlot == WorldCombatTargetSlot::Guest) {
+                aimTarget = PLAYER::PLAYER_PED_ID();
+            } else if (entry.state.combatTargetSlot == WorldCombatTargetSlot::Host) {
+                aimTarget = replicas_.FindLocal(remotePlayerId_).value_or(0);
+            }
+            const bool canAim = aiming && aimTarget != 0 &&
+                ENTITY::DOES_ENTITY_EXIST(aimTarget) != FALSE;
+            const auto aimPosition = canAim
+                ? ToBridgeVector(ENTITY::GET_ENTITY_COORDS(aimTarget, TRUE, FALSE))
+                : Vec3{};
+            const auto taskKind = motion.stale ? WorldTaskKind::Idle : entry.state.taskKind;
+            const bool movementTask = taskKind == WorldTaskKind::Locomotion ||
+                taskKind == WorldTaskKind::Fleeing || taskKind == WorldTaskKind::Combat ||
+                taskKind == WorldTaskKind::Cinematic;
+            const bool moving = movementTask && motion.moving;
+            const bool horse = (entry.state.flags &
+                static_cast<std::uint8_t>(WorldEntityStateFlag::Horse)) != 0U;
+            const auto taskSpeed = moving ? std::clamp(motion.speed, 0.35F, horse ? 14.0F : 6.0F) : 0.0F;
+            const WorldProxyTaskSignature desiredTask{
+                taskKind, motion.destination, aimPosition, taskSpeed, moving,
+                canAim, motion.stale, static_cast<LocalEntityHandle>(canAim ? aimTarget : 0)};
+            const bool scenarioTaskActive = taskKind == WorldTaskKind::Scenario &&
                 AI::PED_HAS_USE_SCENARIO_TASK(ped) != FALSE;
-            const bool taskRefreshExpired =
-                entry.previousTaskMs == 0U ||
-                now < entry.previousTaskMs ||
-                (entry.state.taskKind == WorldTaskKind::Scenario
-                     ? (!scenarioTaskActive &&
-                        now - entry.previousTaskMs >= 2'000U)
-                     : (cinematicEntity &&
-                        now - entry.previousTaskMs >= 250U));
-            const bool taskTargetChanged =
-                Distance(
-                    entry.previousTaskTarget,
-                    entry.state.taskTarget) >=
-                kWorldSemanticTaskDestinationRefreshMeters;
-            if (!mountedRelationReady &&
-                entry.state.taskKind !=
-                    WorldTaskKind::Combat &&
-                entry.state.taskKind !=
-                    WorldTaskKind::Dead &&
-                (taskChanged ||
-                 taskRefreshExpired ||
-                 taskTargetChanged)) {
-                const auto speed = std::sqrt(
-                    entry.state.velocity.x *
-                        entry.state.velocity.x +
-                    entry.state.velocity.y *
-                        entry.state.velocity.y +
-                    entry.state.velocity.z *
-                        entry.state.velocity.z);
-                switch (entry.state.taskKind) {
-                    case WorldTaskKind::Locomotion:
-                    case WorldTaskKind::Fleeing:
-                        AI::TASK_FOLLOW_NAV_MESH_TO_COORD(
-                            ped,
-                            entry.state.taskTarget.x,
-                            entry.state.taskTarget.y,
-                            entry.state.taskTarget.z,
-                            std::clamp(
-                                speed,
-                                0.35F,
-                                6.0F),
-                            -1,
-                            0.35F,
-                            TRUE,
-                            0.0F);
-                        break;
-                    case WorldTaskKind::Scenario:
-                        if (scenarioPointAvailable) {
-                            AI::TASK_USE_NEAREST_SCENARIO_TO_COORD_WARP(
-                                ped,
-                                entry.state.position.x,
-                                entry.state.position.y,
-                                entry.state.position.z,
-                                kScenarioReplayRadiusMeters,
-                                static_cast<Any>(-1),
-                                FALSE,
-                                FALSE,
-                                FALSE,
-                                FALSE);
-                        } else {
-                            AI::TASK_STAND_STILL(ped, -1);
-                        }
-                        break;
-                    case WorldTaskKind::Idle:
-                        AI::TASK_STAND_STILL(
-                            ped,
-                            -1);
-                        break;
-                    case WorldTaskKind::Cinematic:
-                        if (speed > 0.20F) {
-                            AI::TASK_GO_STRAIGHT_TO_COORD(
-                                ped,
-                                predicted.x + entry.state.velocity.x * 0.35F,
-                                predicted.y + entry.state.velocity.y * 0.35F,
-                                predicted.z + entry.state.velocity.z * 0.35F,
-                                std::clamp(speed, 0.5F, 6.0F),
-                                700,
-                                entry.state.heading,
-                                0.05F,
-                                0);
-                        } else {
-                            AI::TASK_STAND_STILL(ped, 650);
-                        }
-                        break;
-                    case WorldTaskKind::Mounted:
-                    case WorldTaskKind::Combat:
-                    case WorldTaskKind::Dead:
-                        break;
+            if (ShouldRefreshWorldProxyTask(
+                    entry.previousTask, desiredTask, entry.previousTaskMs, now, scenarioTaskActive)) {
+                if (motion.stale) {
+                    // Prediction ending must also cancel the native nav task;
+                    // clamping the target alone leaves the old task running.
+                    AI::TASK_STAND_STILL(ped, -1);
+                    ENTITY::SET_ENTITY_VELOCITY(ped, 0.0F, 0.0F, 0.0F);
+                } else if (moving && canAim) {
+                    // A standalone aim task replaces locomotion. Combine the
+                    // authoritative NPC trajectory with the target's position,
+                    // explicitly disabling firing and local damage simulation.
+                    AI::TASK_GO_TO_COORD_WHILE_AIMING_AT_COORD(
+                        ped,
+                        motion.destination.x, motion.destination.y, motion.destination.z,
+                        aimPosition.x, aimPosition.y, aimPosition.z,
+                        taskSpeed, FALSE, 0.35F, 0.35F, TRUE, 0, FALSE, 0, 0);
+                } else if (moving && cinematicEntity) {
+                    AI::TASK_GO_STRAIGHT_TO_COORD(
+                        ped, motion.destination.x, motion.destination.y, motion.destination.z,
+                        taskSpeed, 700, entry.state.heading, 0.05F, 0);
+                } else if (moving) {
+                    AI::TASK_FOLLOW_NAV_MESH_TO_COORD(
+                        ped, motion.destination.x, motion.destination.y, motion.destination.z,
+                        taskSpeed, -1, 0.35F, TRUE, 0.0F);
+                } else if (canAim) {
+                    AI::TASK_AIM_GUN_AT_ENTITY(ped, aimTarget, 400, FALSE, 0);
+                } else if (taskKind == WorldTaskKind::Scenario && scenarioPointAvailable) {
+                    AI::TASK_USE_NEAREST_SCENARIO_TO_COORD_WARP(
+                        ped, entry.state.position.x, entry.state.position.y, entry.state.position.z,
+                        kScenarioReplayRadiusMeters, static_cast<Any>(-1),
+                        FALSE, FALSE, FALSE, FALSE);
+                } else {
+                    AI::TASK_STAND_STILL(ped, -1);
                 }
                 PED::SET_PED_KEEP_TASK(ped, TRUE);
-                entry.previousTaskKind =
-                    entry.state.taskKind;
-                entry.previousTaskTarget =
-                    entry.state.taskTarget;
+                entry.previousTask = desiredTask;
                 entry.previousTaskMs = now;
             }
             if (stableIdleRoot) {
-                ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(
-                    ped,
-                    FALSE);
+                ENTITY::FORCE_ENTITY_AI_AND_ANIMATION_UPDATE(ped, FALSE);
             }
-
-            const auto aiming =
-                (entry.state.flags &
-                 static_cast<std::uint8_t>(
-                     WorldEntityStateFlag::Aiming)) != 0U;
-            Entity aimTarget{};
-            if (entry.state.combatTargetSlot ==
-                WorldCombatTargetSlot::Guest) {
-                aimTarget = PLAYER::PLAYER_PED_ID();
-            } else if (
-                entry.state.combatTargetSlot ==
-                WorldCombatTargetSlot::Host) {
-                aimTarget =
-                    replicas_
-                        .FindLocal(remotePlayerId_)
-                        .value_or(0);
-            }
-            if (aiming &&
-                aimTarget != 0 &&
-                ENTITY::DOES_ENTITY_EXIST(
-                    aimTarget) != FALSE &&
-                (entry.previousAimTaskMs == 0U ||
-                 now < entry.previousAimTaskMs ||
-                 now - entry.previousAimTaskMs >=
-                     kWorldAimTaskRefreshMilliseconds)) {
-                // Deliberately use an aim-only task. Firing flags never create
-                // local bullets, so a mirrored NPC cannot damage the guest.
-                AI::TASK_AIM_GUN_AT_ENTITY(
-                    ped,
-                    aimTarget,
-                    400,
-                    FALSE,
-                    0);
-                entry.previousAimTaskMs = now;
-            } else if (!aiming && entry.aiming) {
-                AI::CLEAR_PED_SECONDARY_TASK(ped);
-            }
-            entry.aiming = aiming;
         }
         const auto localPed = PLAYER::PLAYER_PED_ID();
         if (localPed == 0 ||

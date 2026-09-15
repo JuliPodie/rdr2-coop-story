@@ -14,6 +14,7 @@
 #include "coopstory/bridge/SessionMenuController.hpp"
 #include "coopstory/bridge/Telemetry.hpp"
 #include "coopstory/bridge/VersionGate.hpp"
+#include "coopstory/bridge/WorldProxyPolicy.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -49,6 +50,202 @@ void Check(
 
 #define CHECK(expression) \
     Check(static_cast<bool>(expression), #expression, __FILE__, __LINE__)
+
+void NpcAnimationWireAndJournal() {
+    const auto id = NetEntityId::Compose(1U, 2U);
+    NpcAnimationPayload p{id, 3U, 1U, 2U, 1'000U, 4U, 5U,
+        {1.0F, 2.0F, 3.0F}, {4.0F, 5.0F, 6.0F}, 0.5F};
+    const auto encoded = EncodeNpcAnimation(p);
+    const std::vector<std::uint8_t> golden{
+        2,0,0,0,1,0,0,0,3,0,0,0,1,0,1,0,2,0,232,3,4,0,0,0,5,0,0,0,
+        0,0,128,63,0,0,0,64,0,0,64,64,0,0,128,64,0,0,160,64,0,0,192,64,0,0,0,63};
+    CHECK(encoded == golden); // Same fixture asserted by the C# codec.
+    CHECK(DecodeNpcAnimation(golden)->entityId == id);
+    CHECK(DecodeNpcAnimation(golden)->velocity.z == 6.0F);
+    auto invalid = golden; invalid[13] = 1U;
+    CHECK(!DecodeNpcAnimation(invalid));
+    invalid = golden; invalid[15] = 128U;
+    CHECK(!DecodeNpcAnimation(invalid));
+    invalid.pop_back(); CHECK(!DecodeNpcAnimation(invalid));
+    p.flags = 32U; p.events = 1U; CHECK(!IsValidNpcAnimation(p));
+
+    NpcAnimationCapture capture;
+    NpcAnimationSample s;
+    s.modelHash = 5U; s.weaponHash = 4U; s.clipAmmo = 6;
+    capture.Observe(id, s, 1'000U);
+    CHECK(capture.Pending(1'000U)->payload.events == 0U);
+    capture.Acknowledge();
+    // Shot shorter than the world snapshot period is still captured; continuous
+    // firing with a lower clip count yields a second distinct event.
+    s.firing = true; s.clipAmmo = 5;
+    capture.Observe(id, s, 1'016U);
+    const auto shot1 = capture.Pending(1'016U)->payload;
+    CHECK(shot1.events == 1U);
+    CHECK(capture.Pending(1'032U)->payload.revision == shot1.revision); // failed send retry
+    capture.Acknowledge();
+    s.clipAmmo = 4;
+    capture.Observe(id, s, 1'032U);
+    const auto shot2 = capture.Pending(1'032U)->payload;
+    CHECK(shot2.events == 1U && shot2.revision != shot1.revision);
+    capture.Acknowledge();
+    capture.Observe(id, s, 1'048U);
+    CHECK(capture.Pending(1'048U) == nullptr);
+    s.flags = 1U; s.firing = false; s.clipAmmo = 0;
+    capture.Observe(id, s, 1'064U);
+    CHECK(capture.Pending(1'064U)->payload.events == 0U); // Reload is not four shots.
+    capture.Acknowledge();
+    capture.Rebaseline();
+    s.firing = true; s.flags = 0U; s.clipAmmo = 3;
+    capture.Observe(id, s, 1'080U);
+    CHECK(capture.Pending(1'080U)->payload.events == 0U); // Reconnect never replays old fire.
+    CHECK(capture.Pending(4'000U) == nullptr);
+    CHECK(capture.dropped != 0U);
+    capture.Observe(id, s, 5'000U);
+    CHECK(capture.Pending(5'900U) != nullptr);
+    CHECK(capture.Pending(5'901U) == nullptr); // Retry cannot renew the lease.
+
+    NpcAnimationCapture bounded;
+    s.clipAmmo = 100;
+    bounded.Observe(id, s, 6'000U);
+    for (std::uint64_t tick = 1; tick <= 40; ++tick) {
+        --s.clipAmmo;
+        bounded.Observe(id, s, 6'000U + tick);
+    }
+    std::size_t remaining{};
+    while (bounded.Pending(6'050U)) { ++remaining; bounded.Acknowledge(); }
+    CHECK(remaining == kNpcAnimationQueueCapacity);
+    CHECK(bounded.dropped == 25U);
+
+    NpcAnimationInbox inbox;
+    CHECK(inbox.Push(shot1, 2'000U));
+    CHECK(!inbox.Push(shot1, 2'001U));
+    CHECK(inbox.Push(shot2, 2'002U));
+    CHECK(!inbox.Push(shot1, 2'003U));
+    CHECK(inbox.Pop(2'010U)->revision == shot1.revision);
+    CHECK(inbox.Pop(2'011U)->revision == shot2.revision);
+    CHECK(!inbox.Pop(2'012U));
+    auto next = shot2; ++next.revision;
+    CHECK(inbox.Push(next, 2'020U));
+    CHECK(!inbox.Pop(4'020U)); // Model loading cannot replay an expired event.
+    NpcAnimationInbox wrapped;
+    auto wrap = shot1; wrap.revision = 0xFFFFFFFFU;
+    CHECK(wrapped.Push(wrap, 5'000U));
+    wrap.revision = 1U;
+    CHECK(wrapped.Push(wrap, 5'001U));
+    wrapped.ClearPending();
+    CHECK(!wrapped.Push(wrap, 5'002U)); // Handle recreation preserves the revision fence.
+    wrap.revision = 2U;
+    CHECK(wrapped.Push(wrap, 5'003U));
+    CHECK(wrapped.Pop(5'103U)->leaseMs == 900U);
+    CHECK(SelectNpcAnimationOwner(3U) == NpcAnimationOwner::Physical);
+    CHECK(SelectNpcAnimationOwner(18U) == NpcAnimationOwner::Physical);
+    CHECK(SelectNpcAnimationOwner(32U) == NpcAnimationOwner::Dead);
+    CHECK(SelectNpcAnimationOwner(1U) == NpcAnimationOwner::Reload);
+    CHECK(SelectNpcAnimationOwner(128U) == NpcAnimationOwner::Traversal);
+}
+
+void WorldProxyCombatMotionAndRecovery() {
+    WorldEntityStatePayload state;
+    state.taskKind = WorldTaskKind::Combat;
+    state.position = {10.0F, 5.0F, 0.0F};
+    state.velocity = {2.0F, 0.0F, 0.0F};
+    state.taskTarget = {-100.0F, -100.0F, 0.0F};
+    const auto live = PlanWorldProxyMotion(state, 1'000U, 1'100U);
+    CHECK(live.moving);
+    CHECK(!live.stale);
+    CHECK(std::abs(live.position.x - 10.2F) < 0.001F);
+    CHECK(std::abs(live.destination.x - 10.9F) < 0.001F);
+    CHECK(live.destination.y == 5.0F); // Does not chase the enemy coordinate.
+    const auto stale = PlanWorldProxyMotion(state, 1'000U, 1'251U);
+    CHECK(stale.stale);
+    CHECK(!stale.moving);
+    CHECK(stale.speed == 0.0F);
+    CHECK(std::abs(stale.position.x - 10.5F) < 0.001F);
+    CHECK(stale.destination.x == stale.position.x);
+    CHECK(PlanWorldProxyMotion(state, 1'000U, 99'000U).position.x == stale.position.x);
+    CHECK(PlanWorldProxyMotion(state, 1'000U, 999U).stale);
+
+    // Lost native motion must converge at errors below AND above the former
+    // 12 m threshold, without turning tracking error into a coordinate warp.
+    for (const float initialError : {0.5F, 3.0F, 11.9F, 12.1F, 20.0F}) {
+        Vec3 current{};
+        const Vec3 target{initialError, 0.0F, 0.0F};
+        const auto first = CorrectWorldProxyPosition(current, target, 1.0F / 60.0F, false, false);
+        CHECK(first.x > 0.0F);
+        CHECK(first.x < initialError);
+        CHECK(first.x <= 4.0F / 60.0F + 0.0001F);
+        for (int frame = 0; frame < 600; ++frame) {
+            current = CorrectWorldProxyPosition(current, target, 1.0F / 60.0F, false, false);
+        }
+        CHECK(WorldProxyDistance(current, target) <= 0.251F);
+    }
+    auto next = state;
+    next.position.x += 30.0F;
+    CHECK(WorldProxyTargetDiscontinuous(state, next, 1'000U, 1'100U));
+    CHECK(!WorldProxyTargetDiscontinuous(state, next, 1'000U, 16'000U));
+    CHECK(CorrectWorldProxyPosition({}, next.position, 0.016F, true, false).x == next.position.x);
+}
+
+void WorldProxyMountRetriesUntilConfirmed() {
+    auto decision = PlanWorldProxyMount(true, false, false, false, 0U, 1'000U);
+    CHECK(decision.action == WorldProxyMountAction::None);
+    CHECK(decision.blocksIndependentTasks); // Wait for parent, never dismount.
+    decision = PlanWorldProxyMount(true, true, false, false, 0U, 1'000U);
+    CHECK(decision.action == WorldProxyMountAction::Mount);
+    CHECK(decision.blocksIndependentTasks);
+    CHECK(PlanWorldProxyMount(true, true, false, false, 1'000U, 1'016U).action ==
+          WorldProxyMountAction::None);
+    CHECK(PlanWorldProxyMount(true, true, false, false, 1'000U, 1'500U).action ==
+          WorldProxyMountAction::Mount);
+    CHECK(PlanWorldProxyMount(true, true, true, true, 1'000U, 2'000U).action ==
+          WorldProxyMountAction::None);
+    CHECK(PlanWorldProxyMount(true, true, true, false, 1'000U, 2'000U).action ==
+          WorldProxyMountAction::Mount); // Wrong horse.
+    decision = PlanWorldProxyMount(false, false, true, false, 0U, 2'000U);
+    CHECK(decision.action == WorldProxyMountAction::Dismount);
+    CHECK(decision.blocksIndependentTasks);
+    CHECK(PlanWorldProxyMount(false, false, true, false, 2'000U, 2'016U).action ==
+          WorldProxyMountAction::None);
+    // A rejected/interrupted native dismount must remain retryable.
+    CHECK(PlanWorldProxyMount(false, false, true, false, 2'000U, 2'500U).action ==
+          WorldProxyMountAction::Dismount);
+    decision = PlanWorldProxyMount(false, false, false, false, 2'500U, 2'516U);
+    CHECK(decision.action == WorldProxyMountAction::None);
+    CHECK(!decision.blocksIndependentTasks);
+}
+
+void WorldProxyTaskRefreshAndDeduplication() {
+    WorldProxyTaskSignature previous;
+    previous.kind = WorldTaskKind::Locomotion;
+    previous.moving = true;
+    previous.speed = 1.0F;
+    auto desired = previous;
+    CHECK(!ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 1'016U, false));
+    desired.speed = 3.0F; // Same destination, new speed.
+    CHECK(!ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 1'100U, false));
+    CHECK(ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 1'150U, false));
+    desired = previous;
+    // Lost/interrupted tasks recover even when the wire state does not change.
+    CHECK(ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 1'750U, false));
+    CHECK(ShouldRefreshWorldProxyTask(previous, desired, 0U, 1'016U, false));
+    desired.stale = true;
+    CHECK(ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 1'016U, false));
+    desired = previous;
+    desired.moving = false;
+    CHECK(ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 1'016U, false));
+    previous.kind = WorldTaskKind::Combat;
+    previous.aiming = true;
+    previous.aimEntity = 42;
+    desired = previous;
+    CHECK(!ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 1'016U, false));
+    desired.aimEntity = 43;
+    CHECK(ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 1'016U, false));
+    previous = {};
+    previous.kind = WorldTaskKind::Scenario;
+    desired = previous;
+    CHECK(!ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 5'000U, true));
+    CHECK(ShouldRefreshWorldProxyTask(previous, desired, 1'000U, 5'000U, false));
+}
 
 void AmbientEncounterCoordinatorPolicy() {
     CHECK(kBridgeOwnedEncounterCatalog.size() == 94U);
@@ -1694,7 +1891,7 @@ void PayloadContracts() {
 }
 
 void AnimationReplicationPayloadContracts() {
-    CHECK(kProtocolVersion == 33U);
+    CHECK(kProtocolVersion == 34U);
     CHECK(
         static_cast<std::uint16_t>(MessageType::PlayerAnimationState) ==
         28U);
@@ -3257,23 +3454,26 @@ void RemoteSnapshotInterpolation() {
             std::nullopt,
             3.0F) == RemoteLocomotion::Sprint);
 
-    const auto visualDestination =
-        ComputeDirectReplicaVisualTaskDestination(
-            {10.0F, 20.0F, 30.0F},
-            {3.0F, 4.0F, 0.0F},
-            180.0F,
-            RemoteLocomotion::Run);
-    CHECK(std::abs(visualDestination.x - 18.4F) < 0.001F);
-    CHECK(std::abs(visualDestination.y - 31.2F) < 0.001F);
-    CHECK(visualDestination.z == 30.0F);
-    const auto headingDestination =
-        ComputeDirectReplicaVisualTaskDestination(
-            {1.0F, 2.0F, 3.0F},
-            {},
-            0.0F,
-            RemoteLocomotion::Sprint);
-    CHECK(std::abs(headingDestination.x - 1.0F) < 0.001F);
-    CHECK(std::abs(headingDestination.y - 22.0F) < 0.001F);
+    PlayerStatePayload visualState;
+    visualState.position = {10.0F, 20.0F, 30.0F};
+    visualState.velocity = {3.0F, 4.0F, 0.0F};
+    visualState.heading = 180.0F;
+    const auto visualPlan = PlanRemoteAnimGraphMotion(
+        {}, visualState, RemoteLocomotion::Run, RemoteLocomotion::Run);
+    // Native tasks now own movement: the destination must not extend past
+    // the authoritative route as the old visual-only helper did.
+    CHECK(visualPlan.destination.x == 10.0F);
+    CHECK(visualPlan.destination.y == 20.0F);
+    CHECK(visualPlan.destination.z == 30.0F);
+    CHECK(visualPlan.locomotion == RemoteLocomotion::Run);
+    visualState.position = {1.0F, 2.0F, 3.0F};
+    visualState.velocity = {};
+    visualState.movementHeading = 0.0F;
+    const auto headingPlan = PlanRemoteAnimGraphMotion(
+        {}, visualState, RemoteLocomotion::Sprint, RemoteLocomotion::Sprint);
+    CHECK(headingPlan.destination.x == 1.0F);
+    CHECK(headingPlan.destination.y == 2.0F);
+    CHECK(headingPlan.locomotion == RemoteLocomotion::Sprint);
     CHECK(
         DirectReplicaVisualTaskSpeed(RemoteLocomotion::Walk) ==
         1.0F);
@@ -3432,6 +3632,14 @@ void GateAndTelemetry() {
 
 class TestFacade final : public IScriptHookFacade {
 public:
+    std::optional<NpcAnimationSample> npcAnimationSample;
+    std::vector<NpcAnimationPayload> npcAnimations;
+    std::optional<NpcAnimationSample> SampleNpcAnimation(LocalEntityHandle, std::uint32_t) noexcept override {
+        return npcAnimationSample;
+    }
+    bool QueueNpcAnimation(const NpcAnimationPayload& p) noexcept override {
+        npcAnimations.push_back(p); return true;
+    }
     std::uint64_t TickMilliseconds() noexcept override {
         const auto current = tick;
         tick += tickReadAdvance;
@@ -10114,6 +10322,10 @@ void RuntimeGuestAcceptsMissionStateAndGatesWorldGraph() {
 
 void RuntimeHostStreamsAndCleansWorldMirror() {
     TestFacade facade;
+    facade.npcAnimationSample = NpcAnimationSample{};
+    facade.npcAnimationSample->modelHash = 0x10203040U;
+    facade.npcAnimationSample->weaponHash = 0x55667788U;
+    facade.npcAnimationSample->clipAmmo = 6;
     facade.sampledWorldEntities.push_back(
         HostWorldEntitySample{
             333,
@@ -10155,6 +10367,16 @@ void RuntimeHostStreamsAndCleansWorldMirror() {
         DecodeWorldEntityState(spawn->payload);
     CHECK(spawned.has_value());
     CHECK(spawned->modelHash == 0x10203040U);
+
+    // Observe a shot before the next 100 ms world snapshot is due.
+    facade.npcAnimationSample->clipAmmo = 5;
+    facade.npcAnimationSample->firing = true;
+    facade.tick += 16U;
+    runtime.Tick();
+    CHECK(std::any_of(transport.sent.begin(), transport.sent.end(), [](const Frame& f) {
+        const auto p = f.header.type == MessageType::NpcAnimation ? DecodeNpcAnimation(f.payload) : std::nullopt;
+        return p && p->events == 1U;
+    }));
 
     facade.tick += 100U;
     runtime.Tick();
@@ -10337,6 +10559,16 @@ void RuntimeGuestUpsertsAndCleansWorldMirror() {
         state.entityId);
     CHECK(facade.worldMirrorGuestActive);
 
+    Frame npcAction;
+    npcAction.header.type = MessageType::NpcAnimation;
+    npcAction.header.sequence = ++transport.inboundSequence;
+    npcAction.header.tick = facade.tick;
+    npcAction.payload = EncodeNpcAnimation(NpcAnimationPayload{
+        state.entityId, 1U, 1U, 0U, 1'000U, state.weaponHash, state.modelHash, {}, {}, 1.0F});
+    transport.inbound.push_back(npcAction);
+    runtime.Tick();
+    CHECK(facade.npcAnimations.size() == 1U);
+
     Frame despawn;
     despawn.header.type = MessageType::EntityDespawn;
     despawn.header.sequence = ++transport.inboundSequence;
@@ -10346,6 +10578,11 @@ void RuntimeGuestUpsertsAndCleansWorldMirror() {
     transport.inbound.push_back(std::move(despawn));
     runtime.Tick();
     CHECK(facade.worldEntityDespawns.size() == 1U);
+
+    npcAction.header.sequence = ++transport.inboundSequence;
+    transport.inbound.push_back(npcAction);
+    runtime.Tick();
+    CHECK(facade.npcAnimations.size() == 1U); // Retired IDs cannot receive late actions.
 
     Frame delayedUpdate;
     delayedUpdate.header.type = MessageType::EntityUpdate;
@@ -11663,6 +11900,10 @@ int main() {
          AnimationReplicationPayloadContracts},
         {"SequenceAndEntityIds", SequenceAndEntityIds},
         {"WorldMirrorLifecycle", WorldMirrorLifecycle},
+        {"NpcAnimationWireAndJournal", NpcAnimationWireAndJournal},
+        {"WorldProxyCombatMotionAndRecovery", WorldProxyCombatMotionAndRecovery},
+        {"WorldProxyMountRetriesUntilConfirmed", WorldProxyMountRetriesUntilConfirmed},
+        {"WorldProxyTaskRefreshAndDeduplication", WorldProxyTaskRefreshAndDeduplication},
         {"WorldMirrorEntityGraphOrdering",
          WorldMirrorEntityGraphOrdering},
         {"WorldMirrorPriorityBudgetAndHysteresis",

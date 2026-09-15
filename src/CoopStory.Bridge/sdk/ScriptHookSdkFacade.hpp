@@ -4,6 +4,7 @@
 #include "coopstory/bridge/IScriptHookFacade.hpp"
 #include "coopstory/bridge/PlayerActionPolicy.hpp"
 #include "coopstory/bridge/RemoteMotion.hpp"
+#include "coopstory/bridge/WorldProxyPolicy.hpp"
 
 #include <chrono>
 #include <array>
@@ -78,6 +79,9 @@ public:
         std::size_t maximumEntities) noexcept override;
     [[nodiscard]] std::optional<DamageIntentPayload> SampleWorldDamageIntent(
         NetEntityId attackerId) noexcept override;
+    [[nodiscard]] std::optional<NpcAnimationSample> SampleNpcAnimation(
+        LocalEntityHandle handle, std::uint32_t modelHash) noexcept override;
+    bool QueueNpcAnimation(const NpcAnimationPayload& payload) noexcept override;
     [[nodiscard]] std::vector<VanillaPickupCollection>
     DrainVanillaPickupCollections() noexcept override;
     [[nodiscard]] std::vector<CampaignCapabilityObservation>
@@ -121,6 +125,7 @@ public:
         const PlayerStatePayload& state) noexcept override;
     [[nodiscard]] bool ApplyRemoteAnimationState(
         const PlayerAnimationStatePayload& state) noexcept override;
+    void ClearRemoteAnimationState() noexcept override;
     void ConfigureMotionReplication(
         const MotionReplicationConfigPayload& config) noexcept override;
     void SetAnimSceneCaptureAuthority(
@@ -297,16 +302,30 @@ private:
         WorldEntityStatePayload state{};
         std::uint64_t requestedAtMs{};
         std::uint64_t receivedAtMs{};
-        std::uint64_t previousAimTaskMs{};
         std::uint64_t previousTaskMs{};
-        Vec3 previousTaskTarget{};
-        WorldTaskKind previousTaskKind{WorldTaskKind::Idle};
+        WorldProxyTaskSignature previousTask{};
+        std::uint64_t previousMountAttemptMs{};
+        NetEntityId requestedMountParent{};
+        bool requestedMounted{};
+        bool hardCorrectionPending{};
+        NpcAnimationPayload animation{};
+        std::uint64_t animationLeaseUntilMs{};
+        std::uint64_t animationTaskUntilMs{};
+        std::uint64_t animationPhysicalRefreshMs{};
+        std::uint64_t animationPhysicalUntilMs{};
+        std::uint64_t animationReloadAttemptMs{};
+        std::uint16_t animationFlagsApplied{};
+        std::uint16_t animationUnsupportedLogged{};
+        std::uint32_t fireAmmoWeapon{};
+        int fireRestoreAmmo{};
+        int fireRestoreClip{-1};
+        std::uint64_t fireRestoreAtMs{};
+        bool animationDead{};
         std::uint32_t weaponHash{};
         std::uint32_t spawnAttempts{};
         std::uint64_t nextSpawnRetryMs{};
         WorldProxySpawnDisposition spawnDisposition{
             WorldProxySpawnDisposition::PendingModel};
-        bool aiming{};
         bool mounted{};
         bool borrowedLocalEntity{};
         bool collisionReady{};
@@ -787,6 +806,8 @@ private:
     EntityRegistry worldEntityReplicas_{};
     std::unordered_map<NetEntityId, WorldProxyEntry, NetEntityIdHash>
         worldProxyEntries_{};
+    std::unordered_map<NetEntityId, NpcAnimationInbox, NetEntityIdHash> npcAnimationInboxes_{};
+    void MaintainNpcAnimation(LocalEntityHandle ped, WorldProxyEntry& entry, std::uint64_t now) noexcept;
     std::unordered_map<LocalEntityHandle, HiddenAmbientEntry>
         hiddenAmbientPeds_{};
     std::unordered_map<LocalEntityHandle, HiddenAmbientEntry>

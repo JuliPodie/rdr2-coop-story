@@ -264,7 +264,11 @@ if (($releaseRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
 }
 
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
-$packageName = 'RDR2-CoopStory-Tester-Protocol32-' + $stamp
+$protocolSource = [IO.File]::ReadAllText((Join-Path $workspace 'src\CoopStory.Protocol\ProtocolConstants.cs'))
+$protocolMatch = [regex]::Match($protocolSource, 'public const ushort Version = (\d+);')
+if (-not $protocolMatch.Success) { throw 'Could not determine the package protocol version.' }
+$protocolVersion = [int]$protocolMatch.Groups[1].Value
+$packageName = 'RDR2-CoopStory-Tester-Protocol' + $protocolVersion + '-' + $stamp
 $packageRoot = Join-Path $releaseRoot $packageName
 $zipPath = Join-Path $releaseRoot ($packageName + '.zip')
 if ((Test-Path -LiteralPath $packageRoot) -or
@@ -445,8 +449,9 @@ if ($forbidden.Count -gt 0) {
 $buildInfo = [ordered]@{
     package = $packageName
     createdUtc = [DateTime]::UtcNow.ToString('o')
-    protocol = 32
-    engineVersion = 'tester-protocol32'
+    protocol = $protocolVersion
+    engineVersion = 'tester-protocol' + $protocolVersion
+    npcActionReplication = '34.0-reliable-journal-native-action-leases-and-guest-world-view; exact-melee-hit-and-mounted-clips-incomplete'
     ambientEncounterCatalog = '32.1-94-reviewed-action-script-ids-five-host-owned-profiles-collision-gated-local-vanilla-loot-only'
     entityGraph = '31.9-priority-hysteresis-plus-retained-cinematic-cast-and-optional-released-animscene-object-lane'
     missionSync = '31.10-host-owned-mission-plus-live-resume-anchor-unowned-weather-guard-and-handle-pinned-private-scene-quarantine'
@@ -515,6 +520,24 @@ Write-Utf8CreateNew `
     -Path (Join-Path $packageRoot 'BUILD_INFO.json') `
     -Content (($buildInfo | ConvertTo-Json -Depth 4) + "`r`n")
 
+# Keep only the starter at the archive root. The launcher and its package
+# assets stay together, so AppContext.BaseDirectory discovery still works.
+$contentRoot = Join-Path $packageRoot 'CoopStory'
+$null = [IO.Directory]::CreateDirectory($contentRoot)
+foreach ($packageItem in @(Get-ChildItem -LiteralPath $packageRoot -Force)) {
+    if ($packageItem.Name -eq 'START_COOP.bat' -or $packageItem.FullName -eq $contentRoot) { continue }
+    $nestedTarget = Join-Path $contentRoot $packageItem.Name
+    if (-not (Test-PathWithin -Parent $packageRoot -Child $packageItem.FullName) -or
+        -not (Test-PathWithin -Parent $contentRoot -Child $nestedTarget) -or
+        ($packageItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Refusing to nest an unsafe package path.'
+    }
+    Move-Item -LiteralPath $packageItem.FullName -Destination $nestedTarget
+}
+$allowedPackagePaths = @($allowedPackagePaths | ForEach-Object {
+    if ($_ -eq 'START_COOP.bat') { $_ } else { 'CoopStory\' + $_ }
+})
+
 Assert-NoPrivateBuildPaths `
     -Root $packageRoot `
     -PrivatePaths @(
@@ -530,7 +553,7 @@ foreach ($file in ($allFiles | Sort-Object FullName)) {
     $hashLines.Add((Get-Sha256 -Path $file.FullName) + '  ' + $relative)
 }
 Write-Utf8CreateNew `
-    -Path (Join-Path $packageRoot 'SHA256SUMS.txt') `
+    -Path (Join-Path $contentRoot 'SHA256SUMS.txt') `
     -Content (($hashLines -join "`r`n") + "`r`n")
 
 Compress-Archive -Path (
@@ -542,7 +565,7 @@ if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
 # Re-open the actual archive rather than trusting only the staging directory.
 # This catches duplicate, traversing or unexpected entries after compression.
 $expectedZipPaths = @(
-    $allowedPackagePaths + @('BUILD_INFO.json', 'SHA256SUMS.txt') |
+    $allowedPackagePaths + @('CoopStory\BUILD_INFO.json', 'CoopStory\SHA256SUMS.txt') |
         ForEach-Object { $_.Replace('\', '/') }
 )
 Add-Type -AssemblyName System.IO.Compression.FileSystem

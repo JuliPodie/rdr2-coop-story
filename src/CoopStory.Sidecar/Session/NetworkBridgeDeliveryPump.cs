@@ -40,6 +40,22 @@ internal sealed class NetworkBridgeDeliveryPump
         Action<ProtocolEnvelope>? AfterDelivered,
         long EnqueueOrder)
     {
+        private readonly long _queuedAtMs = Environment.TickCount64;
+
+        public ProtocolEnvelope? PrepareEnvelope()
+        {
+            if (Envelope.Type != MessageType.NpcAnimation) return Envelope;
+            try
+            {
+                var payload = NpcAnimationCodec.Age(
+                    NpcAnimationCodec.Decode(Envelope.Payload.Span),
+                    Environment.TickCount64 - _queuedAtMs);
+                return payload is { } live
+                    ? Envelope with { Payload = NpcAnimationCodec.Encode(live) } : null;
+            }
+            catch (ProtocolException) { return null; }
+        }
+
         public bool IsStillValid()
         {
             try
@@ -299,7 +315,8 @@ internal sealed class NetworkBridgeDeliveryPump
                 while (!cancellationToken.IsCancellationRequested &&
                        TryTakeNext(out var queued))
                 {
-                    if (!queued.IsStillValid())
+                    var preparedEnvelope = queued.PrepareEnvelope();
+                    if (!queued.IsStillValid() || preparedEnvelope is null)
                     {
                         CompleteDelivery(
                             delivered: false,
@@ -313,7 +330,7 @@ internal sealed class NetworkBridgeDeliveryPump
                         // A protocol frame is never cancelled half-way through
                         // a pipe write. Runtime shutdown closes the connection
                         // to release a blocked write and discards that stream.
-                        delivered = await _deliverAsync(queued.Envelope)
+                        delivered = await _deliverAsync(preparedEnvelope)
                             .ConfigureAwait(false);
                         if (delivered)
                         {

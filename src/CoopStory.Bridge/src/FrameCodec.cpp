@@ -1340,7 +1340,7 @@ bool IsKnownMessageType(const std::uint16_t value) noexcept {
     return value >= static_cast<std::uint16_t>(MessageType::Hello) &&
            value <=
                static_cast<std::uint16_t>(
-               MessageType::AmbientEncounterState);
+               MessageType::NpcAnimation);
 }
 
 namespace {

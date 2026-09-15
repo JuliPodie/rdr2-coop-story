@@ -18,6 +18,13 @@
 #include <string_view>
 #include <utility>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
+
 namespace coopstory::bridge {
 namespace {
 
@@ -44,6 +51,36 @@ constexpr std::uint64_t kMissionStartBarrierRetryMilliseconds = 1'000U;
 // host's exact-ID barrier arrives. This lets us reject a local mission that
 // was already being entered, instead of treating it as newly authorized.
 constexpr std::uint64_t kMissionStartBarrierPromptArmMilliseconds = 250U;
+
+// NPC animation sampling touches native ped handles that can disappear
+// between the world-entity sample and the capture pass. A stale handle may
+// raise a Windows SEH access violation instead of returning a normal native
+// failure. Keep that fault local to the optional animation channel so it
+// cannot disable the host's whole world-mirror stream (and its EntitySpawn
+// messages) for the session.
+[[nodiscard]] bool SampleNpcAnimationGuarded(
+    IScriptHookFacade& facade,
+    const LocalEntityHandle handle,
+    const std::uint32_t modelHash,
+    std::optional<NpcAnimationSample>& sample) noexcept {
+#if defined(_WIN32)
+    __try {
+        sample = facade.SampleNpcAnimation(handle, modelHash);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        sample.reset();
+        return false;
+    }
+#else
+    try {
+        sample = facade.SampleNpcAnimation(handle, modelHash);
+        return true;
+    } catch (...) {
+        sample.reset();
+        return false;
+    }
+#endif
+}
 
 [[nodiscard]] std::uint64_t MissionObjectiveFingerprint(
     const std::string_view text) noexcept {
@@ -769,6 +806,7 @@ bool BridgeRuntime::Start(
     remoteAnimationSequences_.Reset();
     remoteAnimationPayloadSequences_.Reset();
     latestRemoteAnimationState_.reset();
+    remoteAnimations_.Reset();
     latestRemoteAnimationReceivedAtMs_.reset();
     latestRemoteAnimationSenderTickMs_ = 0U;
     motionReplicationMode_ = MotionReplicationWireMode::TaskNavmesh;
@@ -823,6 +861,8 @@ bool BridgeRuntime::Start(
     cutsceneSpectator_ = false;
     hostWorldMirrorActive_ = false;
     guestWorldMirrorActive_ = false;
+    worldMirrorNativeFaulted_ = false;
+    worldMirrorNativeFaultLogged_ = false;
     soloGuestWorldViewEnabled_ = false;
     guestMissionIsolationLeaseActive_ = false;
     (void)guestWorldGraph_.Reset();
@@ -1147,6 +1187,7 @@ void BridgeRuntime::SendHello(const bool reconnect) {
     remoteAnimationSequences_.Reset();
     remoteAnimationPayloadSequences_.Reset();
     latestRemoteAnimationState_.reset();
+    remoteAnimations_.Reset();
     latestRemoteAnimationReceivedAtMs_.reset();
     latestRemoteAnimationSenderTickMs_ = 0U;
     animationSamplesSent_ = 0U;
@@ -1610,6 +1651,7 @@ void BridgeRuntime::DespawnRemoteReplica() noexcept {
     remoteSnapshots_.Reset();
     latestRemoteState_.reset();
     latestRemoteAnimationState_.reset();
+    remoteAnimations_.Reset();
     latestRemoteAnimationReceivedAtMs_.reset();
     latestRemoteAnimationSenderTickMs_ = 0U;
     lastRemotePlayerActionReceivedAtMs_.reset();
@@ -1820,30 +1862,27 @@ void BridgeRuntime::Tick() {
                  now - *latestRemoteAnimationReceivedAtMs_ >
                      kRemoteAnimationStateCacheTtlMs)) {
                 latestRemoteAnimationState_.reset();
+                remoteAnimations_.Reset();
                 latestRemoteAnimationReceivedAtMs_.reset();
                 latestRemoteAnimationSenderTickMs_ = 0U;
                 ++animationSamplesExpired_;
             }
-            const bool animationFresh =
+            const auto animation =
                 motionReplicationMode_ ==
-                    MotionReplicationWireMode::AnimGraphReplica &&
-                latestRemoteAnimationState_.has_value() &&
-                latestRemoteAnimationReceivedAtMs_.has_value() &&
-                latestRemoteAnimationState_->entityId ==
-                    rendered->state.entityId &&
-                latestRemoteAnimationState_->locomotionEpoch ==
-                    rendered->state.locomotionEpoch &&
-                IsRemoteAnimationStateFresh(
-                    *latestRemoteAnimationReceivedAtMs_,
-                    latestRemoteAnimationSenderTickMs_,
-                    rendered->senderTickMs,
-                    now);
-            if (animationFresh) {
+                        MotionReplicationWireMode::AnimGraphReplica
+                    ? remoteAnimations_.Sample(*rendered, now)
+                    : std::nullopt;
+            if (animation.has_value()) {
                 lastTickStage_ = "remote-animation-presentation";
                 if (!facade_.ApplyRemoteAnimationState(
-                        *latestRemoteAnimationState_)) {
+                        *animation)) {
                     ++animationSamplesRejected_;
                 }
+            } else {
+                // The facade also caches animation state. Clear it when the
+                // render timeline has no eligible sample, including freezes,
+                // so transform intent can supply the current visual gait.
+                facade_.ClearRemoteAnimationState();
             }
             lastTickStage_ = "remote-transform-presentation";
             if (!facade_.ApplyRemoteTransform(rendered->state)) {
@@ -3047,9 +3086,18 @@ void BridgeRuntime::Tick() {
     lastTickStage_ = "mission-presentation";
     MaintainMissionPresentation(sample, remoteStreaming, now);
     lastTickStage_ = "world-mirror";
-    TickWorldMirror(now, sample, remoteStreaming);
+    if (!worldMirrorNativeFaulted_ &&
+        !TickWorldMirrorGuarded(now, sample, remoteStreaming) &&
+        !worldMirrorNativeFaultLogged_) {
+        worldMirrorNativeFaultLogged_ = true;
+        facade_.Log(
+            "[WORLD_MIRROR][CIRCUIT_BREAKER] native exception isolated; "
+            "world NPC replication is disabled for this session, while the "
+            "menu, player stream, and sidecar remain active; phase=" +
+            std::string{worldMirrorPhase_});
+    }
     lastTickStage_ = "animscene-hybrid";
-    if (localSlot_.has_value()) {
+    if (!worldMirrorNativeFaulted_ && localSlot_.has_value()) {
         TickAnimSceneHybridDefinition(*localSlot_, sample, now);
     }
     lastTickStage_ = "runtime-diagnostics";
@@ -3069,6 +3117,37 @@ void BridgeRuntime::Tick() {
     auto signals = players_.Tick(elapsed, pendingRevive_);
     HandlePlayerSignals(signals);
     lastTickStage_ = "idle";
+}
+
+bool BridgeRuntime::TickWorldMirrorGuarded(
+    const std::uint64_t nowMs,
+    const std::optional<LocalPlayerSample>& localSample,
+    const bool remoteStreaming) noexcept {
+#if defined(_WIN32)
+    __try {
+        TickWorldMirror(nowMs, localSample, remoteStreaming);
+        worldMirrorPhase_ = "idle";
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        worldMirrorNativeFaulted_ = true;
+        // Do not call native cleanup from this handler. The next normal
+        // session reset will retire desired state once the game is stable.
+        hostWorldMirrorActive_ = false;
+        guestWorldMirrorActive_ = false;
+        return false;
+    }
+#else
+    try {
+        TickWorldMirror(nowMs, localSample, remoteStreaming);
+        worldMirrorPhase_ = "idle";
+        return true;
+    } catch (...) {
+        worldMirrorNativeFaulted_ = true;
+        hostWorldMirrorActive_ = false;
+        guestWorldMirrorActive_ = false;
+        return false;
+    }
+#endif
 }
 
 void BridgeRuntime::AbortAfterNativeException() noexcept {
@@ -3195,6 +3274,9 @@ void BridgeRuntime::TickWorldMirror(
             return;
         }
         if (forceHostWorldMirrorReplay_) {
+            for (auto& [id, capture] : npcAnimationCaptures_) {
+                (void)id; capture.Rebaseline();
+            }
             const auto replaySignals =
                 worldMirrorHost_->ReplayStableSpawns();
             bool replaySent = true;
@@ -3216,18 +3298,24 @@ void BridgeRuntime::TickWorldMirror(
                 " stable world spawns before the cached definition");
         }
         if (nowMs < nextWorldMirrorSampleMs_) {
+            TickNpcAnimations(nowMs);
             return;
         }
 
+        worldMirrorPhase_ = "host-sample-world-entities";
         const auto samples =
             facade_.SampleWorldEntities(
                 kWorldMirrorRadiusMeters,
                 kWorldMirrorMaximumCandidates);
+        worldMirrorPhase_ = "host-update-world-graph";
         const auto signals =
             worldMirrorHost_->Update(samples, nowMs);
+        worldMirrorPhase_ = "host-send-world-signals";
         for (const auto& signal : signals) {
             SendWorldMirrorSignal(signal);
         }
+        worldMirrorPhase_ = "host-capture-npc-actions";
+        TickNpcAnimations(nowMs);
         if (nowMs >= nextWorldGraphDiagnosticsMs_) {
             const auto stats = worldMirrorHost_->Stats();
             facade_.Log(
@@ -3261,6 +3349,7 @@ void BridgeRuntime::TickWorldMirror(
             "entity graph v10.1 enabled: guest desired-state registry, deferred mount dependencies and reversible ambient suppression");
     }
     guestWorldMirrorActive_ = true;
+    worldMirrorPhase_ = "guest-maintain-world-proxies";
     facade_.MaintainWorldMirrorGuest(
         true,
         guestWorldAuthorityConfirmed_ ||
@@ -3308,10 +3397,16 @@ void BridgeRuntime::TickWorldMirror(
             }
         }
     }
+    worldMirrorPhase_ = "idle";
 }
 
 bool BridgeRuntime::SendWorldMirrorSignal(
     const WorldMirrorSignal& signal) {
+    if (signal.kind == WorldMirrorSignalKind::Despawn) {
+        npcAnimationCaptures_.erase(signal.state.entityId);
+    } else if (signal.state.kind == WorldEntityKind::Ped) {
+        npcAnimationCaptures_.try_emplace(signal.state.entityId);
+    }
     Frame frame;
     frame.header.sequence = sequencer_.Next();
     frame.header.tick = facade_.TickMilliseconds();
@@ -3378,6 +3473,7 @@ bool BridgeRuntime::FlushPendingHostWorldDespawns() {
 
 void BridgeRuntime::ResetHostWorldMirror(
     const bool notifyPeer) {
+    npcAnimationCaptures_.clear();
     forceHostWorldMirrorReplay_ = false;
     hostAnimSceneReconnectPending_ = false;
     hostWorldReplayAwaitingGuest_ = false;
@@ -3445,6 +3541,46 @@ void BridgeRuntime::ResetGuestWorldMirror(
         }
     } catch (...) {
         // Cleanup and unload remain noexcept even if diagnostics allocate.
+    }
+}
+
+void BridgeRuntime::TickNpcAnimations(const std::uint64_t nowMs) {
+    if (!worldMirrorHost_ || !hostWorldMirrorActive_ || forceHostWorldMirrorReplay_) return;
+    for (auto& [id, capture] : npcAnimationCaptures_) {
+        const auto state = worldMirrorHost_->FindState(id);
+        const auto handle = worldMirrorHost_->FindLocal(id);
+        if (!state || !handle || state->taskKind == WorldTaskKind::Cinematic ||
+            state->taskKind == WorldTaskKind::Scenario) {
+            capture.Rebaseline();
+            continue;
+        }
+        std::optional<NpcAnimationSample> sample;
+        if (!SampleNpcAnimationGuarded(
+                facade_, *handle, state->modelHash, sample)) {
+            // The entity graph remains valid even when this optional native
+            // read hit a stale handle. Rebaseline the action channel and
+            // continue sending world spawn/update signals.
+            capture.Rebaseline();
+            continue;
+        }
+        if (sample.has_value()) {
+            capture.Observe(id, *sample, nowMs);
+        } else {
+            capture.Rebaseline();
+            continue;
+        }
+        // Bounded retries retain transient events across temporary pipe pressure.
+        while (const auto* pending = capture.Pending(nowMs)) {
+            Frame frame;
+            frame.header.type = MessageType::NpcAnimation;
+            frame.header.sequence = sequencer_.Next();
+            frame.header.tick = pending->atMs;
+            auto payload = pending->payload;
+            payload.leaseMs = static_cast<std::uint16_t>(payload.leaseMs - (nowMs - pending->atMs));
+            frame.payload = EncodeNpcAnimation(payload);
+            if (!SendBestEffort(std::move(frame))) break;
+            capture.Acknowledge();
+        }
     }
 }
 
@@ -5063,6 +5199,7 @@ void BridgeRuntime::HandleRemoteMissionState(
         guestWorldMirrorActive_ = false;
         remoteSnapshots_.Reset();
         latestRemoteAnimationState_.reset();
+        remoteAnimations_.Reset();
         latestRemoteAnimationReceivedAtMs_.reset();
         facade_.Log(
             "[MISSION_CHECKPOINT][MISSION_RX] new checkpoint generation; guest proxies and interpolation history reset while the local population mask stays quarantined");
@@ -8727,6 +8864,7 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
             motionReplicationMode_ = config->mode;
             motionReplicationFlags_ = config->flags;
             latestRemoteAnimationState_.reset();
+            remoteAnimations_.Reset();
             latestRemoteAnimationReceivedAtMs_.reset();
             latestRemoteAnimationSenderTickMs_ = 0U;
             remoteAnimationSequences_.Reset();
@@ -8780,6 +8918,10 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
             latestRemoteAnimationState_ = *animation;
             latestRemoteAnimationReceivedAtMs_ = previousTickMs_;
             latestRemoteAnimationSenderTickMs_ = frame.header.tick;
+            remoteAnimations_.Push(
+                *animation,
+                previousTickMs_,
+                frame.header.tick);
             ++animationSamplesReceived_;
             break;
         }
@@ -9145,6 +9287,15 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
             }
             break;
         }
+        case MessageType::NpcAnimation: {
+            const auto action = DecodeNpcAnimation(frame.payload);
+            if (action && (localSlot_ == PlayerSlot::Guest || soloGuestWorldViewEnabled_) &&
+                guestWorldMirrorActive_ && !soloOverride_ && !cutsceneSpectator_ &&
+                guestWorldGraph_.Contains(action->entityId)) {
+                (void)facade_.QueueNpcAnimation(*action);
+            }
+            break;
+        }
         case MessageType::EntitySpawn: {
             const auto state =
                 DecodeWorldEntityState(frame.payload);
@@ -9325,6 +9476,7 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
                     remoteReplicaId_ = NetEntityId{};
                     latestRemoteState_.reset();
                     latestRemoteAnimationState_.reset();
+                    remoteAnimations_.Reset();
                     latestRemoteAnimationReceivedAtMs_.reset();
                     latestRemoteAnimationSenderTickMs_ = 0U;
                     remoteIdentity_.reset();
@@ -9357,14 +9509,47 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
                 (*localSlot_ != PlayerSlot::Host ||
                  *slot == PlayerSlot::Guest);
             if (authorizedSubject) {
+                const auto previousLifecycle =
+                    players_.State(*slot).lifecycle;
                 if (event->lifecycle == PlayerLifecycle::Downed ||
                     event->lifecycle == PlayerLifecycle::Reviving) {
                     players_.SetDowned(*slot);
+                    // DownedState is the low-latency lifecycle lane. Keep the
+                    // interaction selector and native replica in sync
+                    // immediately instead of waiting for the next sampled
+                    // PlayerState (which may be delayed across a respawn).
+                    if (slot != localSlot_) {
+                        remoteLifecycle_ = event->lifecycle;
+                        if (previousLifecycle == PlayerLifecycle::Alive) {
+                            (void)facade_.ApplyNetworkCommand(
+                                CommandPayload{
+                                    CommandOpcode::EnterDowned,
+                                    0U,
+                                    event->entityId,
+                                    {},
+                                    0.0F,
+                                    event->healthFraction});
+                        }
+                    }
                 } else if (
                     event->lifecycle == PlayerLifecycle::Alive) {
                     players_.SetAlive(
                         *slot,
                         event->healthFraction);
+                    if (slot != localSlot_) {
+                        remoteLifecycle_ = PlayerLifecycle::Alive;
+                        if (previousLifecycle == PlayerLifecycle::Downed ||
+                            previousLifecycle == PlayerLifecycle::Reviving) {
+                            (void)facade_.ApplyNetworkCommand(
+                                CommandPayload{
+                                    CommandOpcode::CompleteRevive,
+                                    0U,
+                                    event->entityId,
+                                    {},
+                                    0.0F,
+                                    event->healthFraction});
+                        }
+                    }
                 }
             }
             break;
@@ -9444,6 +9629,9 @@ void BridgeRuntime::HandleInboundFrame(const Frame& frame) {
                     event->healthFraction > 0.0F
                         ? event->healthFraction
                         : kRevivedHealthFraction);
+                if (*target != *localSlot_) {
+                    remoteLifecycle_ = PlayerLifecycle::Alive;
+                }
                 pendingRevive_.reset();
             }
             break;

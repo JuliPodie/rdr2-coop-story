@@ -29,7 +29,7 @@ Historical development inputs:
 - Script Hook RDR2 runtime: 1.0.1491.17
 - Script Hook RDR2 SDK: 1.0.1207.73
 - .NET SDK: 10.0.203
-- Protocol: 32
+- Protocol: 34
 
 Obtain every third-party prerequisite independently from its original author.
 Do not redistribute those files with this project.
@@ -39,6 +39,8 @@ STARTING A BUILT TEST PACKAGE
 1. Extract the complete test ZIP to a new folder. Do not run it from inside
    the ZIP.
 2. Run START_COOP.bat.
+   Everything else is in the CoopStory subfolder; keep that folder beside
+   START_COOP.bat. No separate .NET runtime installation is needed.
 3. Select the correct RDR2.exe. If Script Hook is missing, use **GET SCRIPT
    HOOK** to open the author's official page, download/extract it yourself,
    then select its extracted folder with **BROWSE**.

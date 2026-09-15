@@ -3529,7 +3529,8 @@ public sealed class SidecarRuntime : IAsyncDisposable
             _config.Role == SessionRole.Host &&
             envelope.Type is MessageType.EntitySpawn or
                 MessageType.EntityUpdate or
-                MessageType.EntityDespawn;
+                MessageType.EntityDespawn or
+                MessageType.NpcAnimation;
         if (!loopbackGuestWorldEnvelope &&
             !IsPeerEnvelopeAuthorized(_config.Role, envelope))
         {
@@ -5498,6 +5499,10 @@ public sealed class SidecarRuntime : IAsyncDisposable
     private static bool IsSemanticControlTransition(
         ProtocolEnvelope envelope)
     {
+        // NPC state leases refresh twice a second for every admitted actor.
+        // Flow counters retain these; avoid three disk log entries per heartbeat.
+        if (envelope.Type == MessageType.NpcAnimation)
+            return NpcAnimationCodec.Decode(envelope.Payload.Span).Events != NpcAnimationEvents.None;
         if (envelope.Type != MessageType.PlayerAction)
         {
             return true;
@@ -5748,6 +5753,15 @@ public sealed class SidecarRuntime : IAsyncDisposable
                         animSceneControl.Flags.ToString();
                     data["playAtHostTick"] =
                         animSceneControl.PlayAtHostTick;
+                    break;
+                }
+                case MessageType.NpcAnimation:
+                {
+                    var animation = NpcAnimationCodec.Decode(envelope.Payload.Span);
+                    data["entityId"] = animation.EntityId.Value;
+                    data["revision"] = animation.Revision;
+                    data["animationFlags"] = animation.Flags.ToString();
+                    data["animationEvents"] = animation.Events.ToString();
                     break;
                 }
                 case MessageType.EntitySpawn:
@@ -6026,6 +6040,9 @@ public sealed class SidecarRuntime : IAsyncDisposable
             case MessageType.Command:
                 _ = BinaryPayloadCodec.DecodeCommand(envelope.Payload.Span);
                 break;
+            case MessageType.NpcAnimation:
+                _ = NpcAnimationCodec.Decode(envelope.Payload.Span);
+                break;
             case MessageType.EntitySpawn:
             case MessageType.EntityUpdate:
                 _ = BinaryPayloadCodec.DecodeWorldEntityState(
@@ -6233,6 +6250,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             SessionRole.Host =>
                 messageType is not (
                     MessageType.WorldState or
+                    MessageType.NpcAnimation or
                     MessageType.EntitySpawn or
                     MessageType.EntityUpdate or
                     MessageType.EntityDespawn or
@@ -6478,6 +6496,7 @@ public sealed class SidecarRuntime : IAsyncDisposable
             SessionRole.Guest =>
                 messageType is not (
                     MessageType.WorldState or
+                    MessageType.NpcAnimation or
                     MessageType.EntitySpawn or
                     MessageType.EntityUpdate or
                     MessageType.EntityDespawn or

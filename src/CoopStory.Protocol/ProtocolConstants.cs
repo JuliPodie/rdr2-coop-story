@@ -3,7 +3,7 @@ namespace CoopStory.Protocol;
 public static class ProtocolConstants
 {
     public const uint Magic = 0x50433252;
-    public const ushort Version = 33;
+    public const ushort Version = 34;
     public const int HeaderSize = 24;
     public const int MaxPayloadSize = 1024 * 1024;
     public const int MaxUdpDatagramSize = 1200;
@@ -60,7 +60,8 @@ public enum MessageType : ushort
     MissionDialogueCue = 46,
     MissionDialogueReady = 47,
     AmbientEncounterProposal = 48,
-    AmbientEncounterState = 49
+    AmbientEncounterState = 49,
+    NpcAnimation = 50
 }
 
 public enum SessionRole

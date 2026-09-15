@@ -8,7 +8,11 @@ internal sealed class UdpPeerBinding
     private readonly IPAddress _expectedAddress;
     private readonly int? _expectedPort;
     private readonly uint? _controlSequenceFloor;
-    private readonly SequenceReplayWindow _sequences = new();
+    // The sender shares one sequence across player, world and TCP messages.
+    // A host tick can publish 48 world entities, so the default 64-packet
+    // window discarded unseen player/entity snapshots after a short reorder.
+    // Keep one bounded global replay window, sized for mixed-stream bursts.
+    private readonly SequenceReplayWindow _sequences = new(2048);
     private IPEndPoint? _pinnedEndpoint;
 
     public UdpPeerBinding(

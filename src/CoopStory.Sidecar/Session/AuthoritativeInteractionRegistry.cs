@@ -27,6 +27,13 @@ internal sealed class AuthoritativeInteractionRegistry
 {
     private const long MaximumPlayerStateAgeMs = 2_000;
     private const float PlayerInteractionDistanceMeters = 2.0f;
+    // The bridge only emits a revive intent after its native distance check
+    // succeeds at two metres.  The sidecar validates against independently
+    // replicated PlayerState samples, which can straddle a respawn or an
+    // interpolation tick and briefly report a larger separation.  Keep the
+    // authority check bounded, but allow that short-lived sample error so a
+    // second down/revive cycle is not permanently rejected as TooFar.
+    private const float ReviveAuthorityDistanceMeters = 6.0f;
     private const float MountInteractionDistanceMeters = 3.5f;
     private const long SustainFreshnessMs = 500;
 
@@ -604,6 +611,9 @@ internal sealed class AuthoritativeInteractionRegistry
                 actor.Value.State.Position,
                 target.Value.State.Position);
             var limit = intent.Kind is
+                InteractionKind.Revive
+                    ? ReviveAuthorityDistanceMeters
+                    : intent.Kind is
                 InteractionKind.DismountPeer or
                 InteractionKind.MountDriver or
                 InteractionKind.MountPassenger

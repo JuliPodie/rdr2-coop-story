@@ -474,42 +474,65 @@ RemoteLocomotion SelectDirectReplicaVisualLocomotion(
     return RemoteLocomotion::Sprint;
 }
 
-Vec3 ComputeDirectReplicaVisualTaskDestination(
-    const Vec3& authoritativePosition,
-    const Vec3& authoritativeVelocity,
-    const float authoritativeHeading,
-    const RemoteLocomotion locomotion) noexcept {
-    if (!IsFinite(authoritativePosition) ||
-        locomotion == RemoteLocomotion::Idle) {
-        return authoritativePosition;
+RemoteAnimGraphMotionPlan PlanRemoteAnimGraphMotion(
+    const Vec3& currentPosition,
+    const PlayerStatePayload& state,
+    const std::optional<RemoteLocomotion> reportedLocomotion,
+    const RemoteLocomotion previousLocomotion) noexcept {
+    RemoteAnimGraphMotionPlan plan;
+    plan.destination = state.position;
+    plan.movementHeading = NormalizeHeading(state.movementHeading);
+    if (!IsFinite(currentPosition) || !IsFinite(state.position) ||
+        !IsFinite(state.velocity) || !IsFinite(state.desiredMoveBlend)) {
+        return plan;
     }
 
-    auto directionX = authoritativeVelocity.x;
-    auto directionY = authoritativeVelocity.y;
-    const auto horizontalSpeed =
-        IsFinite(authoritativeVelocity)
-            ? std::hypot(directionX, directionY)
-            : 0.0F;
-    if (horizontalSpeed >= 0.20F) {
-        directionX /= horizontalSpeed;
-        directionY /= horizontalSpeed;
-    } else {
-        const auto heading = NormalizeHeading(authoritativeHeading) *
-            (std::numbers::pi_v<float> / 180.0F);
-        directionX = -std::sin(heading);
-        directionY = std::cos(heading);
+    const auto errorX = state.position.x - currentPosition.x;
+    const auto errorY = state.position.y - currentPosition.y;
+    const auto horizontalError = std::hypot(errorX, errorY);
+    const auto horizontalSpeed = std::hypot(state.velocity.x, state.velocity.y);
+    plan.locomotion = SelectDirectReplicaVisualLocomotion(
+        reportedLocomotion, state.desiredMoveBlend);
+
+    // A stopped sender does not imply that the local task reached its root.
+    // Hysteresis lets a recovery finish without toggling around one threshold.
+    if (plan.locomotion == RemoteLocomotion::Idle && horizontalSpeed < 0.20F) {
+        const auto tolerance = previousLocomotion == RemoteLocomotion::Idle
+            ? kAnimGraphIdleRecoveryEnterMeters
+            : kAnimGraphIdleRecoveryExitMeters;
+        if (horizontalError > tolerance) {
+            plan.locomotion = RemoteLocomotion::Walk;
+            plan.moveBlendRatio = 1.0F;
+            plan.movementHeading = HeadingFromDirection(
+                errorX, errorY, state.heading);
+        }
+        return plan;
     }
 
-    const auto lookAhead =
-        locomotion == RemoteLocomotion::Walk
-            ? 8.0F
-            : locomotion == RemoteLocomotion::Run
-                  ? 14.0F
-                  : 20.0F;
-    return {
-        authoritativePosition.x + (directionX * lookAhead),
-        authoritativePosition.y + (directionY * lookAhead),
-        authoritativePosition.z};
+    if (plan.locomotion == RemoteLocomotion::Idle) {
+        plan.locomotion = InitialLocomotion(horizontalSpeed);
+    }
+    const auto directionHeading = plan.movementHeading *
+        (std::numbers::pi_v<float> / 180.0F);
+    const auto directionX = horizontalSpeed >= 0.20F
+        ? state.velocity.x / horizontalSpeed : -std::sin(directionHeading);
+    const auto directionY = horizontalSpeed >= 0.20F
+        ? state.velocity.y / horizontalSpeed : std::cos(directionHeading);
+    const auto alongError = errorX * directionX + errorY * directionY;
+    const auto crossError = std::abs(errorX * directionY - errorY * directionX);
+    const auto aheadThreshold = previousLocomotion == RemoteLocomotion::Idle
+        ? 0.15F : -0.30F;
+    if (alongError < aheadThreshold && crossError < 0.50F) {
+        // Do not turn around or accelerate away from a sender behind us.
+        plan.locomotion = RemoteLocomotion::Idle;
+        return plan;
+    }
+
+    plan.moveBlendRatio = DirectReplicaVisualTaskSpeed(plan.locomotion);
+    plan.moveRateOverride = std::clamp(
+        1.0F + alongError * kRemoteMotionCatchUpMoveRateGainPerMeter,
+        0.85F, kRemoteMotionCatchUpMaximumMoveRate);
+    return plan;
 }
 
 float DirectReplicaVisualTaskSpeed(
@@ -1272,6 +1295,9 @@ std::optional<RemoteSnapshotSample> RemoteSnapshotBuffer::Sample(
     if (extrapolationAge >
         maximumExtrapolation) {
         sample.state.velocity = {};
+        sample.state.localForwardSpeed = 0.0F;
+        sample.state.localRightSpeed = 0.0F;
+        sample.state.desiredMoveBlend = 0.0F;
         sample.mode = RemoteSnapshotSampleMode::Frozen;
     } else {
         sample.state.velocity = velocity;

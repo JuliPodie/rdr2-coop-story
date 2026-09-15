@@ -1,6 +1,7 @@
 #pragma once
 
 #include "coopstory/bridge/AnimationReplicationCodec.hpp"
+#include "coopstory/bridge/NpcAnimation.hpp"
 #include "coopstory/bridge/Domain.hpp"
 #include "coopstory/bridge/FrameCodec.hpp"
 #include "coopstory/bridge/MenuController.hpp"
@@ -447,6 +448,13 @@ public:
     SampleWorldEntities(
         float radiusMeters,
         std::size_t maximumEntities) noexcept = 0;
+    [[nodiscard]] virtual std::optional<NpcAnimationSample> SampleNpcAnimation(
+        LocalEntityHandle handle, std::uint32_t modelHash) noexcept {
+        (void)handle; (void)modelHash; return std::nullopt;
+    }
+    virtual bool QueueNpcAnimation(const NpcAnimationPayload& payload) noexcept {
+        (void)payload; return false;
+    }
     [[nodiscard]] virtual std::optional<DamageIntentPayload>
     SampleWorldDamageIntent(NetEntityId attackerId) noexcept = 0;
     [[nodiscard]] virtual std::vector<VanillaPickupCollection>
@@ -514,6 +522,7 @@ public:
         const PlayerStatePayload& state) noexcept = 0;
     [[nodiscard]] virtual bool ApplyRemoteAnimationState(
         const PlayerAnimationStatePayload& state) noexcept = 0;
+    virtual void ClearRemoteAnimationState() noexcept {}
     virtual void ConfigureMotionReplication(
         const MotionReplicationConfigPayload& config) noexcept = 0;
     virtual void SetAnimSceneCaptureAuthority(

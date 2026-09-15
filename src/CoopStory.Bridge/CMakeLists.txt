@@ -8,7 +8,7 @@ project(CoopStoryBridge VERSION 0.1.0 LANGUAGES CXX)
 string(TIMESTAMP COOPSTORY_BRIDGE_BUILD_TIMESTAMP "%Y%m%dT%H%M%SZ" UTC)
 set(
     COOPSTORY_BRIDGE_BUILD_ID
-    "${PROJECT_VERSION}-p32-${COOPSTORY_BRIDGE_BUILD_TIMESTAMP}"
+    "${PROJECT_VERSION}-p34-${COOPSTORY_BRIDGE_BUILD_TIMESTAMP}"
 )
 
 if(NOT WIN32)
@@ -36,6 +36,7 @@ set(
 
 add_library(CoopStory.Bridge.Core STATIC
     src/AnimationReplicationCodec.cpp
+    src/NpcAnimation.cpp
     src/BridgeRuntime.cpp
     src/EntityRegistry.cpp
     src/FrameCodec.cpp
@@ -44,6 +45,7 @@ add_library(CoopStory.Bridge.Core STATIC
     src/MissionBubble.cpp
     src/NamedPipeClient.cpp
     src/PlayerRuntime.cpp
+    src/RemoteAnimation.cpp
     src/RemoteMotion.cpp
     src/Telemetry.cpp
     src/VersionGate.cpp
