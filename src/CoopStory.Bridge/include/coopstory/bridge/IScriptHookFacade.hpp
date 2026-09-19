@@ -39,6 +39,7 @@ struct LocalMountSample final {
     bool vehicle{};
     bool vehicleDriver{};
     bool vehiclePassenger{};
+    HorseComponents horseComponents{};
 };
 
 struct LocalPlayerSample final {

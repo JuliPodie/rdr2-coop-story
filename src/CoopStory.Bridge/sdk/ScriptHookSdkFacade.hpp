@@ -812,6 +812,17 @@ private:
         hiddenAmbientPeds_{};
     std::unordered_map<LocalEntityHandle, HiddenAmbientEntry>
         hiddenAmbientAttachments_{};
+    std::unordered_map<LocalEntityHandle, HiddenAmbientEntry> hiddenLocalTrainCars_{};
+    void MaintainLocalTrainMask(bool active, const Vec3& center, float radius) noexcept;
+    struct HorseAppearanceCache final {
+        std::uint32_t modelHash{};
+        std::uint64_t nextSampleMs{};
+        std::uint64_t nextApplyMs{};
+        HorseComponents sampled{};
+    };
+    std::unordered_map<LocalEntityHandle, HorseAppearanceCache> horseAppearanceCache_{};
+    HorseComponents SampleHorseComponents(LocalEntityHandle horse) noexcept;
+    void MaintainHorseComponents(LocalEntityHandle horse, const HorseComponents& components) noexcept;
     std::uint64_t previousWorldMirrorMaintainMs_{};
     std::uint64_t previousWorldMirrorDiagnosticsMs_{};
     std::uint64_t previousWorldSampleDiagnosticsMs_{};

@@ -48,6 +48,7 @@ internal static class Program
             HostPeerResyncBatchAtomicAsync),
         ("world and equipment payload codecs and authority", WorldAndEquipmentAsync),
         ("world mirror and damage-intent payload codecs", WorldMirrorPayloadsAsync),
+        ("horse gear roundtrip, removal and malformed component lists", HorseGearPayloadsAsync),
         ("NPC animation wire, authority and reliable FIFO", NpcAnimationProtocolAsync),
         ("host-authoritative world graph orders dependencies and tombstones",
             AuthoritativeWorldGraphAsync),
@@ -466,7 +467,7 @@ internal static class Program
 
     private static Task MissionCinematicProtocolAsync()
     {
-        Check.Equal((ushort)34, ProtocolConstants.Version);
+        Check.Equal((ushort)36, ProtocolConstants.Version);
         Check.Equal((ushort)35, (ushort)MessageType.MissionCinematicState);
         Check.Equal((ushort)36, (ushort)MessageType.MissionCinematicAction);
 
@@ -625,7 +626,7 @@ internal static class Program
 
     private static Task AppearanceAndAnimSceneProtocolAsync()
     {
-        Check.Equal((ushort)34, ProtocolConstants.Version);
+        Check.Equal((ushort)36, ProtocolConstants.Version);
         Check.Equal((ushort)37, (ushort)MessageType.PlayerAppearanceState);
         Check.Equal((ushort)38, (ushort)MessageType.AnimSceneReplicaState);
         Check.Equal((ushort)39, (ushort)MessageType.AnimSceneDefinition);
@@ -1945,7 +1946,7 @@ internal static class Program
 
     private static Task PlayerActionProtocolAsync()
     {
-        Check.Equal((ushort)34, ProtocolConstants.Version);
+        Check.Equal((ushort)36, ProtocolConstants.Version);
         Check.Equal((ushort)30, (ushort)MessageType.PlayerAction);
 
         var guestId = NetEntityId.Create(0x11223344, 2);
@@ -2211,7 +2212,7 @@ internal static class Program
 
     private static Task InteractionAuthorityProtocolAsync()
     {
-        Check.Equal((ushort)34, ProtocolConstants.Version);
+        Check.Equal((ushort)36, ProtocolConstants.Version);
         Check.Equal((ushort)32, (ushort)MessageType.InteractionIntent);
         Check.Equal((ushort)33, (ushort)MessageType.InteractionResult);
         Check.Equal((ushort)34, (ushort)MessageType.RestraintState);
@@ -3272,7 +3273,7 @@ internal static class Program
 
     private static Task AnimationReplicationPayloadsAsync()
     {
-        Check.Equal((ushort)34, ProtocolConstants.Version);
+        Check.Equal((ushort)36, ProtocolConstants.Version);
         Check.Equal((ushort)28, (ushort)MessageType.PlayerAnimationState);
         Check.Equal((ushort)29, (ushort)MessageType.MotionReplicationConfig);
 
@@ -3492,7 +3493,7 @@ internal static class Program
 
     private static Task WorldAndEquipmentAsync()
     {
-        Check.Equal((ushort)34, ProtocolConstants.Version);
+        Check.Equal((ushort)36, ProtocolConstants.Version);
         Check.Equal((ushort)23, (ushort)MessageType.WorldState);
         Check.Equal((ushort)24, (ushort)MessageType.EquipmentState);
         Check.Equal((ushort)25, (ushort)MessageType.PauseVote);
@@ -4171,6 +4172,55 @@ internal static class Program
         return Task.CompletedTask;
     }
 
+    private static Task HorseGearPayloadsAsync()
+    {
+        uint[] gear = [0x11223344U, 0x55667788U];
+        var mount = new PlayerMountStatePayload(NetEntityId.Create(123, 1), NetEntityId.Create(123, 10),
+            (byte)SessionRole.Host, PlayerMountStateFlags.Present, 0x12345678U,
+            Vector3.Zero, Vector3.Zero, 0f, 1f, 1, gear);
+        var encoded = BinaryPayloadCodec.EncodePlayerMountState(mount);
+        Check.Equal(72, encoded.Length);
+        Check.SequenceEqual(new byte[] { 2, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55 }, encoded.AsSpan(60).ToArray());
+        Check.True(gear.SequenceEqual(BinaryPayloadCodec.DecodePlayerMountState(encoded).HorseComponents!));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.DecodePlayerMountState(encoded.AsSpan(0, encoded.Length - 1)));
+        encoded[60] = 65;
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.DecodePlayerMountState(encoded));
+        Check.Equal(0, BinaryPayloadCodec.DecodePlayerMountState(BinaryPayloadCodec.EncodePlayerMountState(
+            mount with { HorseComponents = [] })).HorseComponents!.Length);
+        Check.True(BinaryPayloadCodec.DecodePlayerMountState(BinaryPayloadCodec.EncodePlayerMountState(
+            mount with { HorseComponents = null })).HorseComponents is null);
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodePlayerMountState(
+            mount with { HorseComponents = [1, 1] }));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodePlayerMountState(
+            mount with { HorseComponents = [0] }));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodePlayerMountState(
+            mount with { HorseComponents = Enumerable.Range(1, 65).Select(i => (uint)i).ToArray() }));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodePlayerMountState(
+            mount with { Flags = PlayerMountStateFlags.Present | PlayerMountStateFlags.Mounted |
+                PlayerMountStateFlags.Vehicle | PlayerMountStateFlags.VehicleDriver }));
+        var horse = new WorldEntityStatePayload(NetEntityId.Create(123, 1000), mount.ModelHash,
+            WorldEntityKind.Ped, WorldEntityStateFlags.Horse, WorldCombatTargetSlot.None,
+            Vector3.Zero, Vector3.Zero, 0f, 1f, 0, HorseComponents: gear);
+        var worldBytes = BinaryPayloadCodec.EncodeWorldEntityState(horse);
+        Check.Equal(88, worldBytes.Length);
+        Check.SequenceEqual(BinaryPayloadCodec.EncodePlayerMountState(mount).AsSpan(60).ToArray(), worldBytes.AsSpan(76).ToArray());
+        Check.True(gear.SequenceEqual(BinaryPayloadCodec.DecodeWorldEntityState(worldBytes).HorseComponents!));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodeWorldEntityState(
+            horse with { Flags = WorldEntityStateFlags.Human }));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodeWorldEntityState(
+            horse with { Kind = WorldEntityKind.TrainCar }));
+        var graph = new AuthoritativeWorldGraphRegistry(4);
+        Check.Equal(WorldGraphApplyDisposition.Applied, graph.Apply(new ProtocolEnvelope(
+            MessageType.EntityUpdate, 1, 100, worldBytes)));
+        var replay = graph.CaptureSpawnSnapshot();
+        Check.True(gear.SequenceEqual(BinaryPayloadCodec.DecodeWorldEntityState(replay[0].Payload.Span).HorseComponents!));
+        Check.Equal(WorldGraphApplyDisposition.Applied, graph.Apply(new ProtocolEnvelope(
+            MessageType.EntityUpdate, 2, 200, BinaryPayloadCodec.EncodeWorldEntityState(horse with { HorseComponents = [] }))));
+        replay = graph.CaptureSpawnSnapshot();
+        Check.Equal(0, BinaryPayloadCodec.DecodeWorldEntityState(replay[0].Payload.Span).HorseComponents!.Length);
+        return Task.CompletedTask;
+    }
+
     private static Task WorldMirrorPayloadsAsync()
     {
         var entity = new WorldEntityStatePayload(
@@ -4246,6 +4296,25 @@ internal static class Program
             Flags = WorldEntityStateFlags.ScriptOwned,
             TaskKind = WorldTaskKind.Cinematic
         };
+        var trainCar = wildlife with
+        {
+            Kind = WorldEntityKind.TrainCar,
+            TaskKind = WorldTaskKind.Idle,
+            TaskTarget = new Vector3(5f, -3f, 90f),
+            Velocity = new Vector3(20f, 2f, 1f)
+        };
+        Check.Equal(trainCar, BinaryPayloadCodec.DecodeWorldEntityState(
+            BinaryPayloadCodec.EncodeWorldEntityState(trainCar)));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodeWorldEntityState(
+            trainCar with { Flags = WorldEntityStateFlags.Human }));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodeWorldEntityState(
+            trainCar with { TaskKind = WorldTaskKind.Mounted }));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodeWorldEntityState(
+            trainCar with { WeaponHash = 123U }));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodeWorldEntityState(
+            trainCar with { TaskTarget = new Vector3(361f, 0f, 0f) }));
+        Check.Throws<ProtocolException>(() => BinaryPayloadCodec.EncodeWorldEntityState(
+            trainCar with { TaskTarget = new Vector3(float.NaN, 0f, 0f) }));
         Check.Equal(
             animSceneObject,
             BinaryPayloadCodec.DecodeWorldEntityState(

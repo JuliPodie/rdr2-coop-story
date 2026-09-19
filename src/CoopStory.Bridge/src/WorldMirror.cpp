@@ -613,7 +613,8 @@ bool WorldMirrorHost::IsValid(
     const auto combatTarget =
         static_cast<std::uint8_t>(
             sample.combatTargetSlot);
-    const bool object = sample.kind == WorldEntityKind::Object;
+    const bool object = sample.kind == WorldEntityKind::Object ||
+                        sample.kind == WorldEntityKind::TrainCar;
     const bool ped = sample.kind == WorldEntityKind::Ped;
     const bool objectSemantics =
         !object ||
@@ -625,7 +626,15 @@ bool WorldMirrorHost::IsValid(
     return sample.localHandle != 0 &&
            sample.modelHash != 0U &&
            (ped || object) &&
+           ValidHorseComponents(sample.horseComponents) &&
+           (!sample.horseComponents || (ped && horse)) &&
            objectSemantics &&
+           (sample.kind != WorldEntityKind::TrainCar ||
+            (sample.taskKind == WorldTaskKind::Idle &&
+             (sample.flags & ~static_cast<std::uint8_t>(WorldEntityStateFlag::ScriptOwned)) == 0U &&
+             std::abs(sample.taskTarget.x) <= 360.0F &&
+             std::abs(sample.taskTarget.y) <= 360.0F &&
+             std::abs(sample.taskTarget.z) <= 360.0F)) &&
            (sample.flags & ~knownFlags) == 0U &&
            combatTarget <=
                static_cast<std::uint8_t>(
@@ -670,7 +679,7 @@ bool WorldMirrorHost::IsValid(
 WorldEntityStatePayload WorldMirrorHost::ToWireState(
     const HostWorldEntitySample& sample,
     const NetEntityId entityId,
-    const NetEntityId parentEntityId) const noexcept {
+    const NetEntityId parentEntityId) const {
     return {
         entityId,
         sample.modelHash,
@@ -684,7 +693,8 @@ WorldEntityStatePayload WorldMirrorHost::ToWireState(
         sample.weaponHash,
         sample.taskKind,
         parentEntityId,
-        sample.taskTarget};
+        sample.taskTarget,
+        sample.horseComponents};
 }
 
 WorldMirrorGuestGraph::WorldMirrorGuestGraph(

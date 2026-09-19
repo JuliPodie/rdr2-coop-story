@@ -1,10 +1,30 @@
-# Protocol 32 overview
+# Protocol 36 overview
 
-Protocol 32 is the current private-tester wire revision. The implementation in
+Protocol 36 is the current source wire revision. The implementation in
 `src/CoopStory.Protocol` and the matching native bridge code are the source of
 truth; this document records the supported design, not a public compatibility
 promise. Host and guest must always use the same tester package and protocol
 revision.
+
+Protocol 35 adds `WorldEntityKind.TrainCar = 3` to the existing 76-byte
+world-entity payload. For this kind, `taskTarget` carries native Euler rotation
+(order 2, degrees, each component between -360 and 360). The task is `Idle`,
+only `ScriptOwned` may be set, and weapon/combat/parent fields must be empty.
+Position and velocity retain their usual meaning. Existing reliable spawn,
+despawn, reconnect replay, and sequenced update lanes carry each car separately.
+Older peers reject the new revision during negotiation. See
+[train replication](train-replication.md) for implementation and live checks.
+
+Protocol 36 adds an optional horse appearance trailer to `PlayerMountState`
+(60-byte base) and `WorldEntityState` (76-byte base). The trailer is a little-endian
+32-bit count followed by up to 64 unique nonzero 32-bit shop-component hashes.
+No trailer means appearance is unknown; a zero count means a known empty set,
+which removes previously mirrored gear. Only present non-vehicle player mounts
+and world peds flagged `Horse` may carry it. Exact length, count, duplicate and
+zero-hash validation applies on both sides. Maximum world payload size is 336
+bytes, within the existing authenticated UDP budget. Existing lifecycle and
+reconnect snapshots carry the appearance with its horse, avoiding cross-lane
+spawn ordering issues. See [horse gear replication](horse-gear-replication.md).
 
 ## Session establishment
 

@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <array>
+#include <deque>
 #include <optional>
 #include <span>
 #include <string>
@@ -322,6 +323,10 @@ private:
     std::optional<EquipmentStatePayload> remoteEquipment_{};
     std::optional<PlayerMountStatePayload> remoteMountState_{};
     std::optional<PlayerMountStatePayload> pendingRemoteMountAbsentState_{};
+    // Reliable actions can arrive just before the remote PlayerState creates
+    // its local replica. Replay them in order once the replica is available
+    // instead of counting them as permanent apply failures.
+    std::deque<PlayerActionPayload> pendingRemotePlayerActions_{};
     std::optional<PlayerMountStatePayload> lastLocalMountState_{};
     std::optional<EquipmentStatePayload> lastLocalEquipment_{};
     std::optional<PlayerAppearanceStatePayload> lastLocalAppearance_{};

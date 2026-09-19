@@ -1544,6 +1544,18 @@ void BridgeRuntime::ApplyRemotePlayerState(
         }
         remoteReplicaId_ = state.entityId;
         playerEntityIds_[SlotIndex(state.slot)] = state.entityId;
+        while (!pendingRemotePlayerActions_.empty()) {
+            const auto pending = pendingRemotePlayerActions_.front();
+            pendingRemotePlayerActions_.pop_front();
+            if (pending.actorEntityId != state.entityId ||
+                !facade_.ApplyRemotePlayerAction(pending)) {
+                if (pending.actorEntityId == state.entityId) {
+                    pendingRemotePlayerActions_.push_front(pending);
+                }
+                break;
+            }
+            ++playerActionsReceived_;
+        }
         remoteLifecycle_.reset();
         remoteRestraintState_.reset();
         if (!remoteParticipantSceneIsolated_ &&
@@ -1658,6 +1670,7 @@ void BridgeRuntime::DespawnRemoteReplica() noexcept {
     remoteIdentity_.reset();
     remoteAppearance_.reset();
     remoteEquipment_.reset();
+    pendingRemotePlayerActions_.clear();
     remoteMountState_.reset();
     pendingRemoteMountAbsentState_.reset();
     remoteMountAbsentSinceMs_ = 0U;
@@ -2909,6 +2922,7 @@ void BridgeRuntime::Tick() {
                     sample->mount->heading;
                 mountState.healthFraction =
                     sample->mount->healthFraction;
+                mountState.horseComponents = sample->mount->horseComponents;
                 if (!borrowedPeerMount) {
                     previousLocalMountHandle_ =
                         sample->mount->localHandle;
@@ -8285,9 +8299,25 @@ void BridgeRuntime::HandleRemotePlayerAction(
         return;
     }
     if (!facade_.ApplyRemotePlayerAction(action)) {
-        ++playerActionsRejected_;
+        if (remoteReplicaId_.IsValid()) {
+            ++playerActionsRejected_;
+            facade_.Log(
+                "[WARNING][ACTION_APPLY] remote player action was not applied after replica was ready");
+            return;
+        }
+        // The action may legitimately beat the PlayerState that creates the
+        // remote replica. Keep a short ordered backlog so Begin/Active/End
+        // transitions are replayed after spawn instead of losing the melee
+        // or aim entirely.
+        if (pendingRemotePlayerActions_.size() >= 32U) {
+            pendingRemotePlayerActions_.pop_front();
+        }
+        pendingRemotePlayerActions_.push_back(action);
         facade_.Log(
-            "[WARNING][ACTION_APPLY] remote player action was not applied");
+            "[ACTION_APPLY] deferred until remote replica is ready, action-id=" +
+            std::to_string(action.actionId) +
+            ", phase=" +
+            std::to_string(static_cast<std::uint8_t>(action.phase)));
         return;
     }
     ++playerActionsReceived_;
@@ -8508,6 +8538,10 @@ void BridgeRuntime::HandleDamageIntent(
         WorldEntityStateFlag::InCombat);
     if (!targetState.has_value() || !localHandle.has_value()) {
         reject("target-not-in-host-entity-graph");
+        return;
+    }
+    if (targetState->kind != WorldEntityKind::Ped) {
+        reject("target-is-not-a-damageable-ped");
         return;
     }
     if ((targetState->flags &

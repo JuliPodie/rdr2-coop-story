@@ -72,6 +72,24 @@ template <typename T>
     return value <= static_cast<std::uint8_t>(PlayerLifecycle::Spectator);
 }
 
+void AppendHorseComponents(std::vector<std::uint8_t>& bytes, const HorseComponents& components) {
+    if (!components) return;
+    AppendLittleEndian(bytes, static_cast<std::uint32_t>(components->size()));
+    for (const auto component : *components) AppendLittleEndian(bytes, component);
+}
+
+[[nodiscard]] bool ReadHorseComponents(const std::span<const std::uint8_t> bytes,
+    std::size_t offset, HorseComponents& components) {
+    if (offset == bytes.size()) return true;
+    if (bytes.size() - offset < 4U) return false;
+    const auto count = ReadLittleEndian<std::uint32_t>(bytes, offset);
+    if (count > kMaximumHorseComponents || bytes.size() - offset != count * 4U) return false;
+    components.emplace();
+    for (std::uint32_t index = 0; index < count; ++index)
+        components->push_back(ReadLittleEndian<std::uint32_t>(bytes, offset));
+    return ValidHorseComponents(components);
+}
+
 [[nodiscard]] bool IsKnownSlot(const std::uint8_t value) noexcept {
     return value <= static_cast<std::uint8_t>(PlayerSlot::Guest);
 }
@@ -175,7 +193,8 @@ template <typename T>
     return value ==
                static_cast<std::uint8_t>(WorldEntityKind::Ped) ||
            value ==
-               static_cast<std::uint8_t>(WorldEntityKind::Object);
+               static_cast<std::uint8_t>(WorldEntityKind::Object) ||
+           value == static_cast<std::uint8_t>(WorldEntityKind::TrainCar);
 }
 
 [[nodiscard]] bool IsKnownWorldCombatTargetSlot(
@@ -967,7 +986,8 @@ TryComputeAnimSceneDefinitionFingerprint(
     const auto mounted =
         (payload.flags & kMounted) != 0U;
     const auto object =
-        payload.kind == WorldEntityKind::Object;
+        payload.kind == WorldEntityKind::Object ||
+        payload.kind == WorldEntityKind::TrainCar;
     const auto objectSemantics =
         !object ||
         (!human && !horse && !inCombat && !usesWeapon && !mounted &&
@@ -980,7 +1000,16 @@ TryComputeAnimSceneDefinitionFingerprint(
     return payload.entityId.IsValid() &&
            payload.modelHash != 0U &&
            IsKnownWorldEntityKind(kind) &&
+           ValidHorseComponents(payload.horseComponents) &&
+           (!payload.horseComponents || (payload.kind == WorldEntityKind::Ped && horse)) &&
            objectSemantics &&
+           (payload.kind != WorldEntityKind::TrainCar ||
+            (payload.taskKind == WorldTaskKind::Idle &&
+             payload.parentEntityId.Value() == 0U &&
+             (payload.flags & ~static_cast<std::uint8_t>(WorldEntityStateFlag::ScriptOwned)) == 0U &&
+             std::abs(payload.taskTarget.x) <= 360.0F &&
+             std::abs(payload.taskTarget.y) <= 360.0F &&
+             std::abs(payload.taskTarget.z) <= 360.0F)) &&
            (payload.flags & ~kKnownFlags) == 0U &&
            IsKnownWorldCombatTargetSlot(combatTarget) &&
            IsKnownWorldTaskKind(
@@ -1051,6 +1080,8 @@ TryComputeAnimSceneDefinitionFingerprint(
                              PlayerMountStateFlag::VehiclePassenger)) != 0U;
     return payload.playerEntityId.IsValid() &&
            payload.mountEntityId.IsValid() &&
+           ValidHorseComponents(payload.horseComponents) &&
+           (!payload.horseComponents || (present && !vehicle)) &&
            payload.playerEntityId != payload.mountEntityId &&
            IsKnownSlot(
                static_cast<std::uint8_t>(payload.slot)) &&
@@ -2550,12 +2581,14 @@ std::vector<std::uint8_t> EncodeWorldEntityState(
     AppendFloat(bytes, payload.taskTarget.y);
     AppendFloat(bytes, payload.taskTarget.z);
     AppendLittleEndian(bytes, std::uint32_t{0U});
+    AppendHorseComponents(bytes, payload.horseComponents);
     return bytes;
 }
 
 std::optional<WorldEntityStatePayload> DecodeWorldEntityState(
     const std::span<const std::uint8_t> bytes) {
-    if (bytes.size() != kWorldEntityStatePayloadSize) {
+    if (bytes.size() < kWorldEntityStatePayloadSize ||
+        bytes.size() > kWorldEntityStatePayloadSize + 4U + kMaximumHorseComponents * 4U) {
         return std::nullopt;
     }
 
@@ -2613,7 +2646,7 @@ std::optional<WorldEntityStatePayload> DecodeWorldEntityState(
         ReadLittleEndian<std::uint32_t>(
             bytes,
             offset);
-    return reserved == 0U &&
+    return reserved == 0U && ReadHorseComponents(bytes, offset, payload.horseComponents) &&
                    IsValidWorldEntityState(payload)
                ? std::optional{payload}
                : std::nullopt;
@@ -2643,12 +2676,14 @@ std::vector<std::uint8_t> EncodePlayerMountState(
     AppendFloat(bytes, payload.heading);
     AppendFloat(bytes, payload.healthFraction);
     AppendLittleEndian(bytes, payload.generation);
+    AppendHorseComponents(bytes, payload.horseComponents);
     return bytes;
 }
 
 std::optional<PlayerMountStatePayload> DecodePlayerMountState(
     const std::span<const std::uint8_t> bytes) {
-    if (bytes.size() != kPlayerMountStatePayloadSize) {
+    if (bytes.size() < kPlayerMountStatePayloadSize ||
+        bytes.size() > kPlayerMountStatePayloadSize + 4U + kMaximumHorseComponents * 4U) {
         return std::nullopt;
     }
 
@@ -2676,7 +2711,7 @@ std::optional<PlayerMountStatePayload> DecodePlayerMountState(
     payload.healthFraction = ReadFloat(bytes, offset);
     payload.generation =
         ReadLittleEndian<std::uint32_t>(bytes, offset);
-    return reserved == 0U &&
+    return reserved == 0U && ReadHorseComponents(bytes, offset, payload.horseComponents) &&
                    IsValidPlayerMountState(payload)
                ? std::optional{payload}
                : std::nullopt;

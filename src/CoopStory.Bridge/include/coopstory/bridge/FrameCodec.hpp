@@ -1,5 +1,7 @@
 #pragma once
 
+#include "coopstory/bridge/HorseAppearance.hpp"
+
 #include "coopstory/bridge/Domain.hpp"
 #include "coopstory/bridge/AmbientEncounterCoordinator.hpp"
 
@@ -13,7 +15,7 @@
 namespace coopstory::bridge {
 
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
-inline constexpr std::uint16_t kProtocolVersion = 34U;
+inline constexpr std::uint16_t kProtocolVersion = 36U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
@@ -500,6 +502,7 @@ DecodePlayerAppearanceState(std::span<const std::uint8_t> bytes);
 enum class WorldEntityKind : std::uint8_t {
     Ped = 1,
     Object = 2,
+    TrainCar = 3,
 };
 
 enum class WorldEntityStateFlag : std::uint8_t {
@@ -544,9 +547,11 @@ struct WorldEntityStatePayload final {
     std::uint32_t weaponHash{};
     WorldTaskKind taskKind{WorldTaskKind::Idle};
     NetEntityId parentEntityId{};
-    Vec3 taskTarget{};
+    Vec3 taskTarget{}; // TrainCar: native Euler rotation (order 2), in degrees.
+    HorseComponents horseComponents{};
 };
 
+// Base size; an optional horse component trailer adds 4 + count * 4 bytes.
 inline constexpr std::size_t kWorldEntityStatePayloadSize = 76U;
 
 [[nodiscard]] std::vector<std::uint8_t> EncodeWorldEntityState(
@@ -575,8 +580,10 @@ struct PlayerMountStatePayload final {
     float heading{};
     float healthFraction{};
     std::uint32_t generation{};
+    HorseComponents horseComponents{};
 };
 
+// Base size; an optional horse component trailer adds 4 + count * 4 bytes.
 inline constexpr std::size_t kPlayerMountStatePayloadSize = 60U;
 
 [[nodiscard]] std::vector<std::uint8_t> EncodePlayerMountState(

@@ -2439,12 +2439,12 @@ public sealed class SidecarRuntime : IAsyncDisposable
                 {
                     terminalRestraintCleanup =
                         _interactions.HasMatchingTerminalRestraint(intent);
-                    return terminalRestraintCleanup ||
-                        IsRemoteBridgeMappingReady(
-                        network,
-                        peer,
-                        bridge,
-                        intent.ActorEntityId);
+                    // PlayerAction frames are safe to forward before the
+                    // remote replica is spawned.  The bridge retains the
+                    // latest action until its replica mapping is available;
+                    // gating here dropped Begin and left later Sustain/End
+                    // packets stuck in the authoritative FSM.
+                    return true;
                 },
                 () => (
                     _interactions.CaptureTransactionSnapshot(),

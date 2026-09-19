@@ -8,6 +8,17 @@ while failing closed when an exact local state cannot be verified.
 
 ## Implemented tester systems
 
+Source update (Protocol 36): player mounts and host world horses now carry
+portable shop components for gear presentation, including additions/removals
+and reconnect snapshots. [Horse gear replication](horse-gear-replication.md)
+describes the remaining live-game checks.
+
+Source update (Protocol 35): nearby train locomotives and carriages now use the
+host world mirror for position, rotation, velocity, lifecycle and reconnect.
+Native train presentation remains subject to two-PC validation; see
+[train replication](train-replication.md). The historical package results below
+do not validate this change.
+
 | Area | State | Tester-facing behaviour |
 | --- | --- | --- |
 | Private host/guest transport | Implemented | Authenticated TCP/UDP session, reconnect, role negotiation, bounded protocol parsing, and diagnostics. |

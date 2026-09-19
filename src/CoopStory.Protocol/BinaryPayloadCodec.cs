@@ -724,11 +724,48 @@ public static class BinaryPayloadCodec
         return result;
     }
 
+    private const int MaximumHorseComponents = 64;
+
+    private static void ValidateHorseComponents(uint[]? components, bool horse)
+    {
+        if (components is null) return;
+        if (!horse || components.Length > MaximumHorseComponents ||
+            components.Any(static hash => hash == 0) || components.Distinct().Count() != components.Length)
+            throw new ProtocolException("Invalid horse component list.");
+    }
+
+    private static int HorseComponentBytes(uint[]? components) => components is null ? 0 : 4 + components.Length * 4;
+
+    private static void WriteHorseComponents(Span<byte> bytes, uint[]? components)
+    {
+        if (components is null) return;
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)components.Length);
+        for (int index = 0; index < components.Length; ++index)
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes[(4 + index * 4)..], components[index]);
+    }
+
+    private static uint[]? ReadHorseComponents(ReadOnlySpan<byte> bytes, int baseSize)
+    {
+        if (bytes.Length < baseSize || bytes.Length > baseSize + 4 + MaximumHorseComponents * 4)
+            throw new ProtocolException("Invalid horse appearance payload length.");
+        if (bytes.Length == baseSize) return null;
+        var trailer = bytes[baseSize..];
+        if (trailer.Length < 4) throw new ProtocolException("Truncated horse appearance count.");
+        var count = BinaryPrimitives.ReadUInt32LittleEndian(trailer);
+        if (count > MaximumHorseComponents || trailer.Length != 4 + count * 4)
+            throw new ProtocolException("Invalid horse appearance count.");
+        var components = new uint[count];
+        for (int index = 0; index < components.Length; ++index)
+            components[index] = BinaryPrimitives.ReadUInt32LittleEndian(trailer[(4 + index * 4)..]);
+        ValidateHorseComponents(components, true);
+        return components;
+    }
+
     public static byte[] EncodePlayerMountState(
         PlayerMountStatePayload payload)
     {
         ValidatePlayerMountState(payload);
-        var bytes = new byte[PlayerMountStateSize];
+        var bytes = new byte[PlayerMountStateSize + HorseComponentBytes(payload.HorseComponents)];
         var span = bytes.AsSpan();
         BinaryPrimitives.WriteUInt64LittleEndian(
             span,
@@ -747,16 +784,14 @@ public static class BinaryPayloadCodec
             span[52..],
             payload.HealthFraction);
         BinaryPrimitives.WriteUInt32LittleEndian(span[56..], payload.Generation);
+        WriteHorseComponents(span[PlayerMountStateSize..], payload.HorseComponents);
         return bytes;
     }
 
     public static PlayerMountStatePayload DecodePlayerMountState(
         ReadOnlySpan<byte> payload)
     {
-        RequireLength(
-            payload,
-            PlayerMountStateSize,
-            nameof(PlayerMountStatePayload));
+        var horseComponents = ReadHorseComponents(payload, PlayerMountStateSize);
         if (BinaryPrimitives.ReadUInt16LittleEndian(payload[18..]) != 0)
         {
             throw new ProtocolException(
@@ -773,7 +808,7 @@ public static class BinaryPayloadCodec
             ReadVector3(payload[36..]),
             BinaryPrimitives.ReadSingleLittleEndian(payload[48..]),
             BinaryPrimitives.ReadSingleLittleEndian(payload[52..]),
-            BinaryPrimitives.ReadUInt32LittleEndian(payload[56..]));
+            BinaryPrimitives.ReadUInt32LittleEndian(payload[56..]), horseComponents);
         ValidatePlayerMountState(result);
         return result;
     }
@@ -782,7 +817,7 @@ public static class BinaryPayloadCodec
         WorldEntityStatePayload payload)
     {
         ValidateWorldEntityState(payload);
-        var bytes = new byte[WorldEntityStateSize];
+        var bytes = new byte[WorldEntityStateSize + HorseComponentBytes(payload.HorseComponents)];
         var span = bytes.AsSpan();
         BinaryPrimitives.WriteUInt64LittleEndian(span, payload.EntityId.Value);
         BinaryPrimitives.WriteUInt32LittleEndian(span[8..], payload.ModelHash);
@@ -802,16 +837,14 @@ public static class BinaryPayloadCodec
             payload.ParentEntityId.Value);
         WriteVector3(span[60..], payload.TaskTarget);
         BinaryPrimitives.WriteUInt32LittleEndian(span[72..], 0);
+        WriteHorseComponents(span[WorldEntityStateSize..], payload.HorseComponents);
         return bytes;
     }
 
     public static WorldEntityStatePayload DecodeWorldEntityState(
         ReadOnlySpan<byte> payload)
     {
-        RequireLength(
-            payload,
-            WorldEntityStateSize,
-            nameof(WorldEntityStatePayload));
+        var horseComponents = ReadHorseComponents(payload, WorldEntityStateSize);
         if (BinaryPrimitives.ReadUInt32LittleEndian(payload[72..]) != 0)
         {
             throw new ProtocolException(
@@ -832,7 +865,7 @@ public static class BinaryPayloadCodec
             (WorldTaskKind)payload[15],
             new NetEntityId(
                 BinaryPrimitives.ReadUInt64LittleEndian(payload[52..])),
-            ReadVector3(payload[60..]));
+            ReadVector3(payload[60..]), horseComponents);
         ValidateWorldEntityState(result);
         return result;
     }
@@ -2082,6 +2115,9 @@ public static class BinaryPayloadCodec
     private static void ValidatePlayerMountState(
         PlayerMountStatePayload payload)
     {
+        ValidateHorseComponents(payload.HorseComponents,
+            (payload.Flags & PlayerMountStateFlags.Present) != 0 &&
+            (payload.Flags & PlayerMountStateFlags.Vehicle) == 0);
         const PlayerMountStateFlags allowedFlags =
             PlayerMountStateFlags.Present |
             PlayerMountStateFlags.Mounted |
@@ -2159,6 +2195,8 @@ public static class BinaryPayloadCodec
     private static void ValidateWorldEntityState(
         WorldEntityStatePayload payload)
     {
+        ValidateHorseComponents(payload.HorseComponents,
+            payload.Kind == WorldEntityKind.Ped && (payload.Flags & WorldEntityStateFlags.Horse) != 0);
         const WorldEntityStateFlags allowedFlags =
             WorldEntityStateFlags.Human |
             WorldEntityStateFlags.Horse |
@@ -2225,7 +2263,18 @@ public static class BinaryPayloadCodec
 
         var mounted =
             (payload.Flags & WorldEntityStateFlags.Mounted) != 0;
-        if (payload.Kind == WorldEntityKind.Object &&
+        if (payload.Kind == WorldEntityKind.TrainCar &&
+            (payload.TaskKind != WorldTaskKind.Idle ||
+             payload.ParentEntityId.Value != 0 ||
+             (payload.Flags & ~WorldEntityStateFlags.ScriptOwned) != 0 ||
+             MathF.Abs(payload.TaskTarget.X) > 360f ||
+             MathF.Abs(payload.TaskTarget.Y) > 360f ||
+             MathF.Abs(payload.TaskTarget.Z) > 360f))
+        {
+            throw new ProtocolException("Train car state requires bounded Euler rotation and no ped tasks.");
+        }
+        if ((payload.Kind == WorldEntityKind.Object ||
+             payload.Kind == WorldEntityKind.TrainCar) &&
             (human || horse || inCombat || mounted ||
              payload.CombatTargetSlot != WorldCombatTargetSlot.None ||
              payload.ParentEntityId.IsValid || payload.WeaponHash != 0 ||

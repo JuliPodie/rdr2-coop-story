@@ -530,6 +530,7 @@ private:
     float interpolationDelayMs_{kRemoteSnapshotBaseInterpolationDelayMs};
     float arrivalJitterMs_{};
     std::uint64_t senderTimelineResets_{};
+    std::uint64_t epochHoldUntilMs_{};
     bool hasSenderTimeline_{};
 };
 

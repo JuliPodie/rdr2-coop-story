@@ -538,7 +538,8 @@ public readonly record struct PlayerMountStatePayload(
     Vector3 Velocity,
     float Heading,
     float HealthFraction,
-    uint Generation);
+    uint Generation,
+    uint[]? HorseComponents = null);
 
 [Flags]
 public enum WorldEntityStateFlags : byte
@@ -557,7 +558,8 @@ public enum WorldEntityStateFlags : byte
 public enum WorldEntityKind : byte
 {
     Ped = 1,
-    Object = 2
+    Object = 2,
+    TrainCar = 3
 }
 
 public enum WorldCombatTargetSlot : byte
@@ -592,7 +594,8 @@ public readonly record struct WorldEntityStatePayload(
     uint WeaponHash,
     WorldTaskKind TaskKind = WorldTaskKind.Idle,
     NetEntityId ParentEntityId = default,
-    Vector3 TaskTarget = default);
+    Vector3 TaskTarget = default,
+    uint[]? HorseComponents = null);
 
 public readonly record struct EntityDespawnPayload(NetEntityId EntityId);
 

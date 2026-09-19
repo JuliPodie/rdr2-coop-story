@@ -43,6 +43,7 @@ struct HostWorldEntitySample final {
     HostWorldEntityPriority selectionPriority{
         HostWorldEntityPriority::Ambient};
     float selectionDistanceMeters{};
+    HorseComponents horseComponents{};
 };
 
 enum class WorldMirrorSignalKind {
@@ -122,7 +123,7 @@ private:
     [[nodiscard]] WorldEntityStatePayload ToWireState(
         const HostWorldEntitySample& sample,
         NetEntityId entityId,
-        NetEntityId parentEntityId) const noexcept;
+        NetEntityId parentEntityId) const;
 
     NetEntityIdGenerator generator_;
     const std::size_t maximumNodes_;

@@ -1117,6 +1117,13 @@ bool RemoteSnapshotBuffer::Push(
         latest.state.locomotionEpoch != 0U &&
         state.locomotionEpoch != 0U &&
         latest.state.locomotionEpoch != state.locomotionEpoch;
+    if (changedLocomotionEpoch) {
+        // Preserve the surrounding route, but present the new gait anchor as
+        // a one-interpolation-window hold so the native task can switch
+        // cleanly without a visible positional jump.
+        epochHoldUntilMs_ = receivedAtMs +
+            static_cast<std::uint64_t>(std::lround(interpolationDelayMs_));
+    }
     if (receivedAtMs < latest.receivedAtMs) {
         return false;
     }
@@ -1128,8 +1135,13 @@ bool RemoteSnapshotBuffer::Push(
             latest.state.position,
             state.position) >=
         kRemoteMotionSnapDistanceMeters;
-    if (changedIdentity || changedLocomotionEpoch ||
-        longGap || spatialDiscontinuity) {
+    // Locomotion epochs describe a gait/task transition (walk to run,
+    // traversal start, etc.), not a positional discontinuity. Resetting the
+    // interpolation buffer for every epoch discarded the two surrounding
+    // samples and made an otherwise smooth player appear to teleport. Keep
+    // the timeline unless identity, a real receive gap, or an explicit large
+    // spatial jump requires a hard re-anchor.
+    if (changedIdentity || longGap || spatialDiscontinuity) {
         const auto timelineResetCount = senderTimelineResets_;
         Reset();
         senderTimelineResets_ = timelineResetCount;
@@ -1184,6 +1196,11 @@ std::optional<RemoteSnapshotSample> RemoteSnapshotBuffer::Sample(
     sample.sourceAgeMs =
         Elapsed(newest.receivedAtMs, nowMs);
     sample.senderTickMs = newest.senderTickMs;
+
+    if (epochHoldUntilMs_ != 0U && nowMs <= epochHoldUntilMs_) {
+        sample.mode = RemoteSnapshotSampleMode::Hold;
+        return sample;
+    }
 
     if (size_ == 1U) {
         sample.mode = RemoteSnapshotSampleMode::Hold;
@@ -1319,6 +1336,7 @@ void RemoteSnapshotBuffer::Reset() noexcept {
         kRemoteSnapshotBaseInterpolationDelayMs;
     arrivalJitterMs_ = 0.0F;
     senderTimelineResets_ = 0U;
+    epochHoldUntilMs_ = 0U;
     hasSenderTimeline_ = false;
 }
 

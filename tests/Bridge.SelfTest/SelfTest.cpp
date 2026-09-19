@@ -186,6 +186,121 @@ void WorldProxyCombatMotionAndRecovery() {
     CHECK(CorrectWorldProxyPosition({}, next.position, 0.016F, true, false).x == next.position.x);
 }
 
+void HorseGearReplication() {
+    CHECK(IsHorseGearCategory(0xBAA7E618U)); // Saddle
+    CHECK(IsHorseGearCategory(0x94B2E3AFU)); // Bridle
+    CHECK(!IsHorseGearCategory(0x378AD10CU)); // Head
+    CHECK(!IsHorseGearCategory(0xAA0217ABU)); // Mane
+    CHECK(!IsHorseGearCategory(0xA63CAE10U)); // Tail
+    CHECK(!IsHorseGearCategory(0U));
+    const HorseComponents gear = std::vector<std::uint32_t>{0x11223344U, 0x55667788U};
+    const HorseComponents bare = std::vector<std::uint32_t>{};
+    auto changes = PlanHorseComponentChanges({0x11223344U, 0x99U}, gear);
+    CHECK(changes.remove == std::vector<std::uint32_t>{0x99U});
+    CHECK(changes.apply == std::vector<std::uint32_t>{0x55667788U});
+    CHECK(PlanHorseComponentChanges(*gear, gear).apply.empty());
+    CHECK(PlanHorseComponentChanges(*gear, bare).remove == *gear);
+    CHECK(PlanHorseComponentChanges(*gear, std::nullopt).remove.empty());
+    CHECK(!ValidHorseComponents(std::vector<std::uint32_t>{1U, 1U}));
+    CHECK(!ValidHorseComponents(std::vector<std::uint32_t>{0U}));
+
+    PlayerMountStatePayload mount{NetEntityId::Compose(123U, 1U), NetEntityId::Compose(123U, 10U),
+        PlayerSlot::Host, static_cast<std::uint8_t>(PlayerMountStateFlag::Present),
+        0x12345678U, {}, {}, 0.0F, 1.0F, 1U, gear};
+    auto bytes = EncodePlayerMountState(mount);
+    CHECK(bytes.size() == kPlayerMountStatePayloadSize + 12U);
+    CHECK(bytes[60] == 2U && bytes[64] == 0x44U && bytes[67] == 0x11U);
+    CHECK(DecodePlayerMountState(bytes)->horseComponents == gear);
+    bytes.pop_back();
+    CHECK(!DecodePlayerMountState(bytes));
+    bytes = EncodePlayerMountState(mount);
+    bytes[60] = 65U;
+    CHECK(!DecodePlayerMountState(bytes));
+    mount.horseComponents = bare;
+    CHECK(DecodePlayerMountState(EncodePlayerMountState(mount))->horseComponents == bare);
+    mount.horseComponents.reset();
+    CHECK(!DecodePlayerMountState(EncodePlayerMountState(mount))->horseComponents);
+
+    HostWorldEntitySample horse;
+    horse.localHandle = 100;
+    horse.modelHash = mount.modelHash;
+    horse.flags = static_cast<std::uint8_t>(WorldEntityStateFlag::Horse);
+    horse.horseComponents = gear;
+    WorldMirrorHost host{123U};
+    const auto signals = host.Update(std::span{&horse, 1U}, 1'000U);
+    CHECK(signals.size() == 1U);
+    const auto& state = signals.front().state;
+    CHECK(state.horseComponents == gear);
+    auto worldBytes = EncodeWorldEntityState(state);
+    CHECK(worldBytes.size() == kWorldEntityStatePayloadSize + 12U);
+    CHECK(worldBytes[76] == 2U && worldBytes[80] == 0x44U && worldBytes[83] == 0x11U);
+    CHECK(DecodeWorldEntityState(worldBytes)->horseComponents == gear);
+    CHECK(host.ReplayStableSpawns().front().state.horseComponents == gear);
+    worldBytes[13] = static_cast<std::uint8_t>(WorldEntityStateFlag::Human);
+    CHECK(!DecodeWorldEntityState(worldBytes));
+    worldBytes = EncodeWorldEntityState(state);
+    std::copy_n(worldBytes.begin() + 80, 4U, worldBytes.begin() + 84);
+    CHECK(!DecodeWorldEntityState(worldBytes));
+    horse.horseComponents = bare;
+    CHECK(host.Update(std::span{&horse, 1U}, 1'100U).front().state.horseComponents == bare);
+    CHECK(host.ReplayStableSpawns().front().state.horseComponents == bare);
+}
+
+void TrainCarsReplicateAndRecover() {
+    WorldMirrorHost host{0xAABBCCDEU, 2'000U};
+    std::array<HostWorldEntitySample, 3> cars{};
+    for (std::size_t index = 0; index < cars.size(); ++index) {
+        auto& car = cars[index];
+        car.localHandle = static_cast<LocalEntityHandle>(300 + index);
+        car.modelHash = 0x10203040U + static_cast<std::uint32_t>(index);
+        car.kind = WorldEntityKind::TrainCar;
+        car.position = {100.0F - 15.0F * static_cast<float>(index), 20.0F, 30.0F};
+        car.velocity = {20.0F, 2.0F, 1.0F};
+        car.heading = 90.0F;
+        car.taskTarget = {5.0F, -3.0F, 90.0F};
+    }
+    const auto spawned = host.Update(cars, 1'000U);
+    CHECK(spawned.size() == 3U);
+    WorldMirrorGuestGraph guest;
+    for (const auto& signal : spawned) {
+        CHECK(signal.kind == WorldMirrorSignalKind::Spawn);
+        auto bytes = EncodeWorldEntityState(signal.state);
+        const auto decoded = DecodeWorldEntityState(bytes);
+        CHECK(decoded.has_value());
+        CHECK(decoded->kind == WorldEntityKind::TrainCar);
+        CHECK(decoded->taskTarget.x == 5.0F);
+        CHECK(decoded->taskTarget.y == -3.0F);
+        CHECK(guest.ApplyState(*decoded, 1U).size() == 1U);
+        const auto motion = PlanWorldProxyMotion(*decoded, 1'000U, 1'100U);
+        CHECK(std::abs(motion.position.x - decoded->position.x - 2.0F) < 0.001F);
+        CHECK(std::abs(motion.position.z - 30.1F) < 0.001F);
+        const auto stale = PlanWorldProxyMotion(*decoded, 1'000U, 10'000U);
+        CHECK(stale.stale && stale.speed == 0.0F);
+        CHECK(stale.position.x == decoded->position.x + 5.0F);
+        bytes[13] = static_cast<std::uint8_t>(WorldEntityStateFlag::Human);
+        CHECK(!DecodeWorldEntityState(bytes).has_value());
+        bytes[13] = 0U;
+        bytes[15] = static_cast<std::uint8_t>(WorldTaskKind::Combat);
+        CHECK(!DecodeWorldEntityState(bytes).has_value());
+    }
+    cars[0].position.x += 2.0F;
+    const auto updated = host.Update(cars, 1'100U);
+    CHECK(updated.size() == 3U);
+    CHECK(host.ReplayStableSpawns().size() == 3U);
+    for (const auto& signal : updated) {
+        CHECK(guest.ApplyState(signal.state, 2U).size() == 1U);
+        CHECK(guest.ApplyState(signal.state, 1U).empty());
+    }
+    const auto priorId = host.FindNetwork(cars[0].localHandle);
+    cars[0].modelHash += 10U;
+    (void)host.Update(cars, 1'200U);
+    CHECK(host.FindNetwork(cars[0].localHandle) != priorId);
+    CHECK(host.Update({}, 2'000U).size() == 3U);
+    CHECK(host.Size() == 0U);
+    cars[0].taskTarget.x = 361.0F;
+    CHECK(host.Update(std::span{cars.data(), 1U}, 3'000U).empty());
+}
+
 void WorldProxyMountRetriesUntilConfirmed() {
     auto decision = PlanWorldProxyMount(true, false, false, false, 0U, 1'000U);
     CHECK(decision.action == WorldProxyMountAction::None);
@@ -1891,7 +2006,7 @@ void PayloadContracts() {
 }
 
 void AnimationReplicationPayloadContracts() {
-    CHECK(kProtocolVersion == 34U);
+    CHECK(kProtocolVersion == 36U);
     CHECK(
         static_cast<std::uint16_t>(MessageType::PlayerAnimationState) ==
         28U);
@@ -5133,6 +5248,7 @@ void RuntimeLoopback() {
     localMount.heading = 90.0F;
     localMount.healthFraction = 0.8F;
     localMount.mounted = true;
+    localMount.horseComponents = std::vector<std::uint32_t>{0x11223344U, 0x55667788U};
     facade.sample.mount = localMount;
     facade.sample.mounted = true;
     TestTransport transport;
@@ -5174,6 +5290,7 @@ void RuntimeLoopback() {
          static_cast<std::uint8_t>(
              PlayerMountStateFlag::Mounted)) != 0U);
     CHECK(lastLocalMount->modelHash == 0xA1B2C3D4U);
+    CHECK(lastLocalMount->horseComponents == localMount.horseComponents);
     CHECK(
         (lastLocalMount->flags &
          static_cast<std::uint8_t>(
@@ -10519,6 +10636,37 @@ void RuntimeHostStreamsAndCleansWorldMirror() {
     CHECK(replayedDespawnPayload->entityId == spawned->entityId);
 }
 
+void RuntimeGuestHorseGearUpdates() {
+    TestFacade facade;
+    TestTransport transport;
+    BridgeRuntime runtime{facade, transport};
+    const GameIdentity supported{std::string{kSupportedExecutableName}, std::string{kSupportedFileVersion},
+        std::string{kSupportedExecutableSha256}};
+    std::string error;
+    CHECK(runtime.Start(supported, error));
+    runtime.Tick();
+    WorldEntityStatePayload horse{NetEntityId::Compose(0x12345678U, 1'000U), 0x10203040U,
+        WorldEntityKind::Ped, static_cast<std::uint8_t>(WorldEntityStateFlag::Horse),
+        WorldCombatTargetSlot::None, {10.0F, 20.0F, 30.0F}};
+    horse.horseComponents = std::vector<std::uint32_t>{0x11223344U, 0x55667788U};
+    const auto send = [&] {
+        Frame frame;
+        frame.header.type = MessageType::EntityUpdate;
+        frame.header.sequence = ++transport.inboundSequence;
+        frame.header.tick = facade.tick;
+        frame.payload = EncodeWorldEntityState(horse);
+        transport.inbound.push_back(std::move(frame));
+        runtime.Tick();
+    };
+    send(); // Update before spawn is an upsert; gear must survive it.
+    CHECK(facade.worldEntitySpawns.size() == 1U);
+    CHECK(facade.worldEntitySpawns.back().horseComponents == horse.horseComponents);
+    horse.horseComponents = std::vector<std::uint32_t>{};
+    send();
+    CHECK(!facade.worldEntityUpdates.empty());
+    CHECK(facade.worldEntityUpdates.back().horseComponents == horse.horseComponents);
+}
+
 void RuntimeGuestUpsertsAndCleansWorldMirror() {
     TestFacade facade;
     TestTransport transport;
@@ -11903,6 +12051,8 @@ int main() {
         {"NpcAnimationWireAndJournal", NpcAnimationWireAndJournal},
         {"WorldProxyCombatMotionAndRecovery", WorldProxyCombatMotionAndRecovery},
         {"WorldProxyMountRetriesUntilConfirmed", WorldProxyMountRetriesUntilConfirmed},
+        {"TrainCarsReplicateAndRecover", TrainCarsReplicateAndRecover},
+        {"HorseGearReplication", HorseGearReplication},
         {"WorldProxyTaskRefreshAndDeduplication", WorldProxyTaskRefreshAndDeduplication},
         {"WorldMirrorEntityGraphOrdering",
          WorldMirrorEntityGraphOrdering},
@@ -11993,6 +12143,7 @@ int main() {
          RuntimeHostStreamsAndCleansWorldMirror},
         {"RuntimeGuestUpsertsAndCleansWorldMirror",
          RuntimeGuestUpsertsAndCleansWorldMirror},
+        {"RuntimeGuestHorseGearUpdates", RuntimeGuestHorseGearUpdates},
         {"RuntimeHostValidatesGuestDamageIntent",
          RuntimeHostValidatesGuestDamageIntent},
         {"RuntimeScriptOwnedDamageRequiresActiveHostMission",

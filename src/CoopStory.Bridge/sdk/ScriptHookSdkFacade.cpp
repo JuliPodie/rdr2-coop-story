@@ -141,8 +141,10 @@ constexpr int kRemoteTaskTimeoutMilliseconds = 12'000;
 constexpr int kRemoteIdleTaskMilliseconds = 1'000;
 constexpr float kRemoteTaskStoppingRangeMeters = 0.15F;
 constexpr std::size_t kWorldPedPoolCapacity = 1'024U;
+constexpr float kTrainMirrorRadiusMeters = 350.0F;
 constexpr std::uint64_t kWorldDamageIntentMinimumIntervalMilliseconds = 90U;
 constexpr float kWorldDamageIntentFixedDamage = 25.0F;
+constexpr float kPeerMeleeDamage = 15.0F;
 // Ambient population remains bounded to the runtime's normal 80 m bubble.
 // Mission parties regularly spread farther apart while riding, so actors the
 // host script owns stay observable across the complete soft-bubble instead of
@@ -1188,7 +1190,8 @@ void SetRandomOutfitVariation(const Ped ped) {
 
 [[nodiscard]] Hash GetShopItemComponentAtIndex(
     const Ped ped,
-    const int index) {
+    const int index,
+    const bool resolveSelection = false) {
     // Both output records are intentionally over-allocated. Their layout is
     // private to MetaPed and is not placed on the wire; the native only needs
     // valid writable storage while returning the portable shop-item hash.
@@ -1198,13 +1201,41 @@ void SetRandomOutfitVariation(const Ped ped) {
         0x77BA37622E22023B,
         ped,
         index,
-        FALSE,
+        resolveSelection ? TRUE : FALSE,
         componentData.data(),
         variationData.data());
 }
 
 void ResetPedComponents(const Ped ped) {
     invoke<Void>(0x0BFA1BD465CDFEFD, ped);
+}
+
+[[nodiscard]] bool IsHorseGearComponent(const Ped horse, const std::uint32_t component) {
+    const auto metaPedType = invoke<int>(0xEC9A1261BF0CE510, horse);
+    const auto category = invoke<Hash>(0x5FF9A878C3D115B8, static_cast<Hash>(component), metaPedType, FALSE);
+    return IsHorseGearCategory(static_cast<std::uint32_t>(category));
+}
+
+[[nodiscard]] HorseComponents ReadHorseShopComponents(const Ped horse) {
+    if (horse == 0 || ENTITY::DOES_ENTITY_EXIST(horse) == FALSE ||
+        ENTITY::GET_ENTITY_TYPE(horse) != 1 ||
+        invoke<BOOL>(0xA0BC8FAED8CFEB3C, horse) == FALSE) return std::nullopt;
+    std::vector<std::uint32_t> components;
+    for (std::size_t index = 0; index < kMaximumHorseComponents; ++index) {
+        auto hash = static_cast<std::uint32_t>(GetShopItemComponentAtIndex(horse, static_cast<int>(index)));
+        if (hash == 0U) {
+            // Script-created horses may have an outfit without populated shop
+            // cache entries. Ask the native resolver for their portable items.
+            hash = static_cast<std::uint32_t>(GetShopItemComponentAtIndex(horse, static_cast<int>(index), true));
+        }
+        if (hash != 0U && IsHorseGearComponent(horse, hash) &&
+            std::find(components.begin(), components.end(), hash) == components.end())
+            components.push_back(hash);
+    }
+    // Do not advertise a truncated set as authoritative: it could remove gear.
+    if (GetShopItemComponentAtIndex(horse, static_cast<int>(kMaximumHorseComponents), true) != 0U)
+        return std::nullopt;
+    return components;
 }
 
 void ApplyShopItemToPed(
@@ -3876,6 +3907,7 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
             PED::GET_MOUNT(ped) == ownedMount;
         mount.dead = mountDead;
         mount.borrowedPeerMount = borrowedPeerMount;
+        mount.horseComponents = SampleHorseComponents(ownedMount);
         if (mount.modelHash != 0U &&
             IsFinite(mount.position) &&
             IsFinite(mount.velocity)) {
@@ -4475,6 +4507,71 @@ ScriptHookSdkFacade::SampleLocalPlayer() noexcept {
 #else
     return std::nullopt;
 #endif
+}
+
+HorseComponents ScriptHookSdkFacade::SampleHorseComponents(const LocalEntityHandle horse) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        if (horse == 0 || ENTITY::DOES_ENTITY_EXIST(horse) == FALSE) return std::nullopt;
+        if (horseAppearanceCache_.size() >= 128U && !horseAppearanceCache_.contains(horse))
+            horseAppearanceCache_.clear();
+        auto& cache = horseAppearanceCache_[horse];
+        const auto model = static_cast<std::uint32_t>(ENTITY::GET_ENTITY_MODEL(horse));
+        if (cache.modelHash != model) cache = HorseAppearanceCache{model};
+        const auto now = TickMilliseconds();
+        if (now >= cache.nextSampleMs) {
+            cache.nextSampleMs = now + 1'000U;
+            if (auto observed = ReadHorseShopComponents(horse)) cache.sampled = std::move(observed);
+        }
+        return cache.sampled;
+#else
+        (void)horse;
+#endif
+    } catch (...) {}
+    return std::nullopt;
+}
+
+void ScriptHookSdkFacade::MaintainHorseComponents(
+    const LocalEntityHandle horse, const HorseComponents& components) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        // Only bridge-created horses may be dressed. A borrowed/local horse
+        // retains its owner's gear, even when it is used by the remote player.
+        if (!components || !ValidHorseComponents(components) ||
+            (!remoteMountReplicas_.FindNetwork(horse) && !worldEntityReplicas_.FindNetwork(horse)) ||
+            ENTITY::DOES_ENTITY_EXIST(horse) == FALSE || CanPedBeMounted(horse) == FALSE) return;
+        if (horseAppearanceCache_.size() >= 128U && !horseAppearanceCache_.contains(horse))
+            horseAppearanceCache_.clear();
+        auto& cache = horseAppearanceCache_[horse];
+        const auto model = static_cast<std::uint32_t>(ENTITY::GET_ENTITY_MODEL(horse));
+        if (cache.modelHash != model) cache = HorseAppearanceCache{model};
+        const auto now = TickMilliseconds();
+        if (now < cache.nextApplyMs) return;
+        cache.nextApplyMs = now + 500U;
+        const auto current = ReadHorseShopComponents(horse);
+        if (!current) return; // Retry after the MetaPed finishes loading.
+        // Reject unresolved or non-gear source items before making any changes.
+        // An empty gear list must never remove body components from the replica.
+        for (const auto component : *components)
+            if (!IsHorseGearComponent(horse, component)) return;
+        const auto changes = PlanHorseComponentChanges(*current, components);
+        if (changes.remove.empty() && changes.apply.empty()) return;
+        for (const auto component : changes.remove)
+            invoke<Void>(0x0D7FFA1B2F69ED82, horse, static_cast<Hash>(component), 0, FALSE);
+        // Reapply in source order after removals to preserve dependent layers.
+        // Never reset the entire MetaPed: that can erase the horse's body.
+        for (const auto component : *components) ApplyShopItemToPed(horse, static_cast<Hash>(component));
+        UpdatePedVariation(horse);
+        Log("[HORSE_GEAR] applying source components=" + std::to_string(components->size()) +
+            ", removed=" + std::to_string(changes.remove.size()));
+        // The next pass reads the native components again. A streaming request
+        // is not treated as successful application merely because it was sent.
+#else
+        (void)horse; (void)components;
+#endif
+    } catch (...) {
+        Log("[HORSE_GEAR] component application deferred after native failure");
+    }
 }
 
 std::optional<PlayerAppearanceStatePayload>
@@ -6109,7 +6206,8 @@ ScriptHookSdkFacade::SampleWorldEntities(
                         parentLocalHandle,
                         taskTarget,
                         selectionPriority,
-                        distance}});
+                        distance,
+                        horse ? SampleHorseComponents(ped) : HorseComponents{}}});
             humanCandidates += human ? 1U : 0U;
             nativeHumanCandidates +=
                 reliableHuman && !usedPedTypeFallback ? 1U : 0U;
@@ -6183,6 +6281,40 @@ ScriptHookSdkFacade::SampleWorldEntities(
                     HostWorldEntityPriority::ScriptOwned,
                     distance}});
             ++animSceneObjectCandidates;
+        }
+
+        // Trains are vehicles even when nobody occupies a seat. Enumerate every
+        // streamed car so bends, slopes and detached carriages retain host roots.
+        std::size_t trainCarCandidates{};
+        std::array<int, kWorldPedPoolCapacity> vehicles{};
+        const auto vehicleCount = std::clamp(
+            worldGetAllVehicles(vehicles.data(), static_cast<int>(vehicles.size())),
+            0, static_cast<int>(vehicles.size()));
+        for (int index = 0; index < vehicleCount; ++index) {
+            const auto vehicle = static_cast<Vehicle>(vehicles[index]);
+            if (vehicle == 0 || ENTITY::DOES_ENTITY_EXIST(vehicle) == FALSE ||
+                worldEntityReplicas_.FindNetwork(vehicle).has_value() ||
+                remoteVehicleReplicas_.FindNetwork(vehicle).has_value()) continue;
+            const auto model = ENTITY::GET_ENTITY_MODEL(vehicle);
+            if (VEHICLE::IS_THIS_MODEL_A_TRAIN(model) == FALSE ||
+                ENTITY::IS_ENTITY_VISIBLE(vehicle) == FALSE) continue;
+            const auto position = ToBridgeVector(ENTITY::GET_ENTITY_COORDS(vehicle, TRUE, FALSE));
+            const auto velocity = ToBridgeVector(ENTITY::GET_ENTITY_VELOCITY(vehicle, 0));
+            const auto rotation = ToBridgeVector(ENTITY::GET_ENTITY_ROTATION(vehicle, 2));
+            const auto distance = Distance(localPosition, position);
+            const bool scriptOwned = ENTITY::IS_ENTITY_A_MISSION_ENTITY(vehicle) != FALSE;
+            const auto range = std::max(radiusMeters, kTrainMirrorRadiusMeters);
+            if (!IsFinite(position) || !IsFinite(velocity) || !IsFinite(rotation) ||
+                !std::isfinite(distance) || distance > range) continue;
+            auto heading = std::fmod(rotation.z, 360.0F);
+            if (heading < 0.0F) heading += 360.0F;
+            candidates.push_back(Candidate{distance, HostWorldEntitySample{
+                vehicle, static_cast<std::uint32_t>(model), WorldEntityKind::TrainCar,
+                scriptOwned ? static_cast<std::uint8_t>(WorldEntityStateFlag::ScriptOwned) : std::uint8_t{},
+                WorldCombatTargetSlot::None, position, velocity, heading, 1.0F,
+                0U, WorldTaskKind::Idle, 0, rotation,
+                HostWorldEntityPriority::ScriptOwned, distance}});
+            ++trainCarCandidates;
         }
 
         std::ranges::sort(
@@ -6274,6 +6406,7 @@ ScriptHookSdkFacade::SampleWorldEntities(
                 std::to_string(cinematicCandidates) +
                 ", animscene-objects=" +
                 std::to_string(animSceneObjectCandidates) +
+                ", train-cars=" + std::to_string(trainCarCandidates) +
                 ", combat=" +
                 std::to_string(combatCandidates) +
                 ", combat-host=" +
@@ -6382,6 +6515,9 @@ ScriptHookSdkFacade::SampleWorldDamageIntent(
         if (!targetId.has_value()) {
             return std::nullopt;
         }
+        const auto targetEntry = worldProxyEntries_.find(*targetId);
+        if (targetEntry == worldProxyEntries_.end() ||
+            targetEntry->second.state.kind != WorldEntityKind::Ped) return std::nullopt;
 
         Hash weaponHash{};
         if (WEAPON::GET_CURRENT_PED_WEAPON(
@@ -8154,6 +8290,17 @@ bool ScriptHookSdkFacade::ApplyRemotePlayerAction(
                         previousRemoteMeleeTaskMs_ =
                             channel.receivedAtMs;
                         ++remotePlayerActionMeleeVisualStarts_;
+                        // The remote ped is a local proxy, so RDR2's native
+                        // melee task does not own the real player's health.
+                        // Apply one authenticated hit at the action Begin;
+                        // epoch filtering above guarantees it cannot repeat
+                        // on Sustain packets or duplicate frames.
+                        PED::APPLY_DAMAGE_TO_PED(
+                            localPed,
+                            static_cast<int>(std::lround(kPeerMeleeDamage)),
+                            TRUE,
+                            0,
+                            0);
                         if (motionReplicationMode_ ==
                             MotionReplicationWireMode::AnimGraphReplica) {
                             ++animGraphMeleeTaskStarts_;
@@ -13321,6 +13468,50 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
                 return false;
             }
             const auto rider = static_cast<Ped>(*remotePlayer);
+            if (VEHICLE::IS_THIS_MODEL_A_TRAIN(static_cast<Hash>(state.modelHash)) != FALSE) {
+                if (remoteVehicleId_.IsValid() || remoteMountId_.IsValid()) ClearRemoteMount();
+                // The world lane owns trains, including occupied cars. Reuse its
+                // car instead of creating a second vehicle through the wagon lane.
+                Vehicle trainCar{};
+                auto bestDistance = 12.0F;
+                const auto consider = [&](const Vehicle candidate) {
+                    if (candidate == 0 || ENTITY::DOES_ENTITY_EXIST(candidate) == FALSE ||
+                        static_cast<std::uint32_t>(ENTITY::GET_ENTITY_MODEL(candidate)) != state.modelHash) return;
+                    const auto distance = Distance(state.position,
+                        ToBridgeVector(ENTITY::GET_ENTITY_COORDS(candidate, TRUE, FALSE)));
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        trainCar = candidate;
+                    }
+                };
+                if (worldMirrorGuestActive_) {
+                    for (const auto& [id, entry] : worldProxyEntries_) {
+                        if (entry.state.kind == WorldEntityKind::TrainCar)
+                            consider(worldEntityReplicas_.FindLocal(id).value_or(0));
+                    }
+                } else {
+                    // A guest passenger resolves against the host's original car.
+                    std::array<int, kWorldPedPoolCapacity> vehicles{};
+                    const auto count = std::clamp(worldGetAllVehicles(vehicles.data(),
+                        static_cast<int>(vehicles.size())), 0, static_cast<int>(vehicles.size()));
+                    for (int index = 0; index < count; ++index) consider(vehicles[index]);
+                }
+                if (trainCar == 0) {
+                    remotePlayerMounted_ = false;
+                    remotePlayerMountHandle_ = 0;
+                    return true; // Wait for model streaming / world replay.
+                }
+                const auto seat = vehicleDriver ? -1 : 0;
+                const auto occupant = VEHICLE::GET_PED_IN_VEHICLE_SEAT(trainCar, seat);
+                if (PED::GET_VEHICLE_PED_IS_IN(rider, FALSE) != trainCar &&
+                    (occupant == 0 || occupant == rider))
+                    PED::SET_PED_INTO_VEHICLE(rider, trainCar, seat);
+                remotePlayerMounted_ = PED::GET_VEHICLE_PED_IS_IN(rider, FALSE) == trainCar;
+                remotePlayerMountHandle_ = trainCar;
+                remotePlayerMountBorrowed_ = true; // Never let the player motor move this car.
+                remoteMountMoving_ = WorldProxyDistance(state.velocity, {}) > 0.05F;
+                return true;
+            }
             const bool borrowed = (state.flags & kBorrowedPeerMount) != 0U;
             const bool aliasesLocalVehicle =
                 localState.has_value() &&
@@ -13400,6 +13591,25 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
             if (PED::GET_VEHICLE_PED_IS_IN(rider, FALSE) != vehicleHandle ||
                 VEHICLE::GET_PED_IN_VEHICLE_SEAT(vehicleHandle, desiredSeat) != rider) {
                 PED::SET_PED_INTO_VEHICLE(rider, vehicleHandle, desiredSeat);
+            }
+            // Keep the same mount bookkeeping used by horse replicas. The
+            // motion pipeline consults these fields to suppress pedestrian
+            // locomotion and to apply vehicle root motion; without them the
+            // rider is treated as on foot even though the native seat task is
+            // active, which produces visible rubber-banding for both peers.
+            const bool seated =
+                PED::GET_VEHICLE_PED_IS_IN(rider, FALSE) == vehicleHandle &&
+                VEHICLE::GET_PED_IN_VEHICLE_SEAT(vehicleHandle, desiredSeat) == rider;
+            remotePlayerMounted_ = seated;
+            remotePlayerMountHandle_ =
+                static_cast<LocalEntityHandle>(vehicleHandle);
+            remotePlayerMountBorrowed_ = borrowed || aliasesLocalVehicle;
+            remoteMountMoving_ =
+                std::fabs(state.velocity.x) > 0.05F ||
+                std::fabs(state.velocity.y) > 0.05F ||
+                std::fabs(state.velocity.z) > 0.05F;
+            if (seated) {
+                previousRemoteMountDismountAttemptMs_ = 0U;
             }
             return true;
         }
@@ -13600,6 +13810,7 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
                            kWorldModelLoadTimeoutMilliseconds;
             }
             SetRandomOutfitVariation(mount);
+            horseAppearanceCache_.erase(static_cast<LocalEntityHandle>(mount));
             ENTITY::SET_ENTITY_AS_MISSION_ENTITY(
                 mount,
                 TRUE,
@@ -13635,6 +13846,7 @@ bool ScriptHookSdkFacade::MaintainRemoteMount(
         }
 
         const auto mount = static_cast<Ped>(*handle);
+        MaintainHorseComponents(mount, state.horseComponents);
         // Guest population suppression used to hide this mission-owned horse
         // after it was spawned. Reassert the cosmetic proxy invariants so a
         // script/population transition cannot leave an interactive invisible
@@ -13858,6 +14070,13 @@ void ScriptHookSdkFacade::ClearRemoteMount() noexcept {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
         const auto remotePlayer =
             replicas_.FindLocal(remotePlayerId_);
+        if (remotePlayer.has_value() && *remotePlayer != PLAYER::PLAYER_PED_ID() &&
+            ENTITY::DOES_ENTITY_EXIST(*remotePlayer) != FALSE && remotePlayerMountBorrowed_) {
+            const auto vehicle = PED::GET_VEHICLE_PED_IS_IN(*remotePlayer, FALSE);
+            if (vehicle != 0 && ENTITY::DOES_ENTITY_EXIST(vehicle) != FALSE &&
+                VEHICLE::IS_THIS_MODEL_A_TRAIN(ENTITY::GET_ENTITY_MODEL(vehicle)) != FALSE)
+                AI::TASK_LEAVE_VEHICLE(*remotePlayer, vehicle, 16, 0);
+        }
         if (remotePlayer.has_value() &&
             *remotePlayer != PLAYER::PLAYER_PED_ID() &&
             replicas_.FindNetwork(*remotePlayer) ==
@@ -14162,7 +14381,8 @@ bool ScriptHookSdkFacade::SpawnWorldEntityProxy(
             state.entityId == remotePlayerId_ ||
             state.modelHash == 0U ||
             (state.kind != WorldEntityKind::Ped &&
-             state.kind != WorldEntityKind::Object) ||
+             state.kind != WorldEntityKind::Object &&
+             state.kind != WorldEntityKind::TrainCar) ||
             !IsFinite(state.position) ||
             !IsFinite(state.velocity) ||
             !IsFinite(state.taskTarget) ||
@@ -14282,6 +14502,9 @@ void ScriptHookSdkFacade::DespawnWorldEntityProxy(
                 ENTITY::SET_ENTITY_COLLISION(entity, TRUE, TRUE);
                 ENTITY::SET_ENTITY_HAS_GRAVITY(entity, TRUE);
                 ENTITY::FREEZE_ENTITY_POSITION(entity, FALSE);
+            } else if (kind == WorldEntityKind::TrainCar) {
+                auto vehicle = static_cast<Vehicle>(entity);
+                VEHICLE::DELETE_VEHICLE(&vehicle);
             } else if (kind == WorldEntityKind::Object) {
                 auto object = static_cast<Object>(entity);
                 OBJECT::DELETE_OBJECT(&object);
@@ -14457,7 +14680,64 @@ void ScriptHookSdkFacade::MaintainHiddenPedAttachments() noexcept {
     }
 }
 
+void ScriptHookSdkFacade::MaintainLocalTrainMask(
+    const bool active, const Vec3& center, const float radius) noexcept {
+    try {
+#if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
+        std::unordered_set<LocalEntityHandle> desired;
+        if (active) {
+            std::array<int, kWorldPedPoolCapacity> vehicles{};
+            const auto count = std::clamp(worldGetAllVehicles(vehicles.data(),
+                static_cast<int>(vehicles.size())), 0, static_cast<int>(vehicles.size()));
+            const auto player = PLAYER::PLAYER_PED_ID();
+            const auto occupied = PED::GET_VEHICLE_PED_IS_IN(player, FALSE);
+            for (int index = 0; index < count; ++index) {
+                const auto car = vehicles[index];
+                if (car == 0 || car == occupied || ENTITY::DOES_ENTITY_EXIST(car) == FALSE ||
+                    worldEntityReplicas_.FindNetwork(car).has_value() ||
+                    remoteVehicleReplicas_.FindNetwork(car).has_value() ||
+                    VEHICLE::IS_THIS_MODEL_A_TRAIN(ENTITY::GET_ENTITY_MODEL(car)) == FALSE) continue;
+                const auto position = ToBridgeVector(ENTITY::GET_ENTITY_COORDS(car, TRUE, FALSE));
+                if (IsFinite(position) && Distance(center, position) <= radius) desired.insert(car);
+            }
+        }
+        for (auto it = hiddenLocalTrainCars_.begin(); it != hiddenLocalTrainCars_.end();) {
+            const auto car = it->first;
+            const bool same = ENTITY::DOES_ENTITY_EXIST(car) != FALSE &&
+                static_cast<std::uint32_t>(ENTITY::GET_ENTITY_MODEL(car)) == it->second.modelHash;
+            // Hidden entities can disappear from the pool enumeration. Keep
+            // their mask until they actually leave the controlled area.
+            if (same && active &&
+                PED::GET_VEHICLE_PED_IS_IN(PLAYER::PLAYER_PED_ID(), FALSE) != car) {
+                const auto position = ToBridgeVector(ENTITY::GET_ENTITY_COORDS(car, TRUE, FALSE));
+                if (IsFinite(position) && Distance(center, position) <= radius) desired.insert(car);
+            }
+            if (same && desired.contains(car)) { ++it; continue; }
+            if (same) {
+                ENTITY::SET_ENTITY_VISIBLE(car, it->second.wasVisible ? TRUE : FALSE);
+                ENTITY::RESET_ENTITY_ALPHA(car);
+                ENTITY::SET_ENTITY_COLLISION(car, TRUE, TRUE);
+            }
+            it = hiddenLocalTrainCars_.erase(it);
+        }
+        for (const auto car : desired) {
+            hiddenLocalTrainCars_.try_emplace(car, HiddenAmbientEntry{
+                static_cast<std::uint32_t>(ENTITY::GET_ENTITY_MODEL(car)),
+                ENTITY::IS_ENTITY_VISIBLE(car) != FALSE});
+            ENTITY::SET_ENTITY_VISIBLE(car, FALSE);
+            ENTITY::SET_ENTITY_ALPHA(car, 0, FALSE);
+            ENTITY::SET_ENTITY_COLLISION(car, FALSE, TRUE);
+        }
+#else
+        (void)active; (void)center; (void)radius;
+#endif
+    } catch (...) {
+        // Keep recorded originals so the next tick / disconnect can restore them.
+    }
+}
+
 void ScriptHookSdkFacade::CleanupWorldEntityProxies() noexcept {
+    MaintainLocalTrainMask(false, {}, 0.0F);
     npcAnimationInboxes_.clear();
     try {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS
@@ -14487,6 +14767,10 @@ void ScriptHookSdkFacade::CleanupWorldEntityProxies() noexcept {
                 }
                 const auto kind = kindsByHandle.find(handle);
                 if (kind != kindsByHandle.end() &&
+                    kind->second == WorldEntityKind::TrainCar) {
+                    auto vehicle = static_cast<Vehicle>(entity);
+                    VEHICLE::DELETE_VEHICLE(&vehicle);
+                } else if (kind != kindsByHandle.end() &&
                     kind->second == WorldEntityKind::Object) {
                     auto object = static_cast<Object>(entity);
                     OBJECT::DELETE_OBJECT(&object);
@@ -14726,7 +15010,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                         continue;
                     }
                 }
-                if (STREAMING::IS_MODEL_VALID(model) == FALSE) {
+                if (STREAMING::IS_MODEL_VALID(model) == FALSE ||
+                    (entry.state.kind == WorldEntityKind::TrainCar &&
+                     VEHICLE::IS_THIS_MODEL_A_TRAIN(model) == FALSE)) {
                     entry.spawnDisposition =
                         WorldProxySpawnDisposition::PermanentFailure;
                     if (!entry.permanentFailureLogged) {
@@ -14762,10 +15048,15 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
 
                 const bool objectKind =
                     entry.state.kind == WorldEntityKind::Object;
-                const auto spawnPosition = objectKind
+                const bool trainKind = entry.state.kind == WorldEntityKind::TrainCar;
+                const auto spawnPosition = (objectKind || trainKind)
                     ? entry.state.position
                     : GroundSafePedPosition(entry.state.position, model);
-                auto entity = objectKind
+                auto entity = trainKind
+                                  ? static_cast<Entity>(VEHICLE::CREATE_VEHICLE(
+                                        model, spawnPosition.x, spawnPosition.y, spawnPosition.z,
+                                        entry.state.heading, FALSE, FALSE, TRUE, FALSE))
+                                  : objectKind
                                   ? static_cast<Entity>(
                                         OBJECT::CREATE_OBJECT(
                                             model,
@@ -14818,8 +15109,9 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 const auto ped = static_cast<Ped>(entity);
                 // CREATE_PED may produce a valid, collidable MetaPed with no
                 // visible components until its outfit is initialized.
-                if (!objectKind) {
+                if (!objectKind && !trainKind) {
                     SetRandomOutfitVariation(ped);
+                    horseAppearanceCache_.erase(static_cast<LocalEntityHandle>(ped));
                 }
                 ENTITY::SET_ENTITY_AS_MISSION_ENTITY(
                     entity,
@@ -14833,7 +15125,12 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 ENTITY::SET_ENTITY_CAN_BE_DAMAGED(entity, FALSE);
                 ENTITY::SET_ENTITY_VISIBLE(entity, TRUE);
                 ENTITY::RESET_ENTITY_ALPHA(entity);
-                if (!objectKind) {
+                if (trainKind) {
+                    // Independent, collidable cars follow host transforms. Local
+                    // railway AI must never drive them down a different track.
+                    ENTITY::FREEZE_ENTITY_POSITION(entity, TRUE);
+                }
+                if (!objectKind && !trainKind) {
                     ENTITY::FREEZE_ENTITY_POSITION(ped, TRUE);
                     PED::SET_BLOCKING_OF_NON_TEMPORARY_EVENTS(ped, TRUE);
                     PED::SET_PED_KEEP_TASK(ped, TRUE);
@@ -14844,7 +15141,10 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 if (!worldEntityReplicas_.Bind(
                         entityId,
                         static_cast<LocalEntityHandle>(entity))) {
-                    if (objectKind) {
+                    if (trainKind) {
+                        auto vehicle = static_cast<Vehicle>(entity);
+                        VEHICLE::DELETE_VEHICLE(&vehicle);
+                    } else if (objectKind) {
                         auto object = static_cast<Object>(entity);
                         OBJECT::DELETE_OBJECT(&object);
                     } else {
@@ -14887,6 +15187,21 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 // Preserve visibility/collision, but never layer proxy
                 // locomotion, heading snaps, health rewrites or semantic tasks
                 // over an actor controlled by the exact native AnimScene.
+                continue;
+            }
+            if (!entry.borrowedLocalEntity &&
+                (entry.state.flags & static_cast<std::uint8_t>(WorldEntityStateFlag::Horse)) != 0U)
+                MaintainHorseComponents(*handle, entry.state.horseComponents);
+            if (entry.state.kind == WorldEntityKind::TrainCar) {
+                const auto motion = PlanWorldProxyMotion(entry.state, entry.receivedAtMs, now);
+                ENTITY::FREEZE_ENTITY_POSITION(entity, TRUE);
+                ENTITY::SET_ENTITY_COLLISION(entity, TRUE, TRUE);
+                ENTITY::SET_ENTITY_COORDS_NO_OFFSET(entity,
+                    motion.position.x, motion.position.y, motion.position.z, FALSE, FALSE, FALSE);
+                const auto rotation = entry.state.taskTarget;
+                ENTITY::SET_ENTITY_ROTATION(entity, rotation.x, rotation.y, rotation.z, 2, TRUE);
+                const auto velocity = motion.stale ? Vec3{} : entry.state.velocity;
+                ENTITY::SET_ENTITY_VELOCITY(entity, velocity.x, velocity.y, velocity.z);
                 continue;
             }
             if (entry.state.kind == WorldEntityKind::Object) {
@@ -15249,6 +15564,7 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
         const auto localPed = PLAYER::PLAYER_PED_ID();
         if (localPed == 0 ||
             ENTITY::DOES_ENTITY_EXIST(localPed) == FALSE) {
+            MaintainLocalTrainMask(false, {}, 0.0F);
             RestoreHiddenAmbientPeds();
             return;
         }
@@ -15257,6 +15573,14 @@ void ScriptHookSdkFacade::MaintainWorldMirrorGuest(
                 localPed,
                 TRUE,
                 FALSE));
+        const bool hasTrainReplica = std::ranges::any_of(worldProxyEntries_,
+            [&](const auto& item) {
+                return item.second.state.kind == WorldEntityKind::TrainCar &&
+                    worldEntityReplicas_.FindLocal(item.first).has_value();
+            });
+        MaintainLocalTrainMask(authoritativePopulationReady &&
+            !preserveSameProcessSourceActors && hasTrainReplica, localPosition,
+            std::max(radiusMeters, kTrainMirrorRadiusMeters));
         const auto remotePlayer =
             replicas_.FindLocal(remotePlayerId_);
         std::array<int, kWorldPedPoolCapacity> peds{};
@@ -15593,6 +15917,7 @@ bool ScriptHookSdkFacade::ApplyWorldEntityDamage(
         const auto ped = static_cast<Ped>(target);
         if (ped == 0 ||
             ENTITY::DOES_ENTITY_EXIST(ped) == FALSE ||
+            ENTITY::GET_ENTITY_TYPE(ped) != 1 ||
             !std::isfinite(damage) ||
             damage <= 0.0F) {
             return false;
@@ -15633,6 +15958,7 @@ bool ScriptHookSdkFacade::ApplyMissionWorldEntityDamage(
             *attacker == 0 ||
             *attacker == victim ||
             ENTITY::DOES_ENTITY_EXIST(victim) == FALSE ||
+            ENTITY::GET_ENTITY_TYPE(victim) != 1 ||
             ENTITY::DOES_ENTITY_EXIST(*attacker) == FALSE ||
             PED::IS_PED_DEAD_OR_DYING(victim, TRUE) != FALSE ||
             weaponHash == 0U ||
@@ -16912,7 +17238,7 @@ void ScriptHookSdkFacade::MaintainMissionSpectator(
                         : "[ANIMSCENE_REPLICA][PROXY_CAST_FALLBACK] exact local AnimScene attached; kinematic host cast hidden");
             }
             for (const auto& [entityId, entry] : worldProxyEntries_) {
-                (void)entry;
+                if (entry.state.kind == WorldEntityKind::TrainCar) continue;
                 const auto proxy =
                     worldEntityReplicas_.FindLocal(entityId);
                 if (!proxy.has_value() ||
@@ -17174,7 +17500,7 @@ void ScriptHookSdkFacade::MaintainMissionSpectator(
             missionSpectatorCamera_ = 0;
         }
         for (const auto& [entityId, entry] : worldProxyEntries_) {
-            (void)entry;
+            if (entry.state.kind == WorldEntityKind::TrainCar) continue;
             const auto proxy =
                 worldEntityReplicas_.FindLocal(entityId);
             if (!proxy.has_value() ||
