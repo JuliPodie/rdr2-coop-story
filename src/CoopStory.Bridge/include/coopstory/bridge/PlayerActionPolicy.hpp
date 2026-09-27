@@ -6,9 +6,10 @@
 
 namespace coopstory::bridge {
 
-// A PlayerAction channel is a small, reliable transaction stream.  Action
-// identifiers are monotonic uint32 values and therefore need serial-number
-// arithmetic rather than a plain numeric comparison at wraparound.
+// Small pure rules for deciding whether a remote action update is newer/allowed.
+// BridgeRuntime uses these before delayed combat/action packets affect RDR2.
+// A PlayerAction channel is a small, reliable transaction stream.
+// Action identifiers are monotonic uint32 values and therefore need serial-number arithmetic rather than a plain numeric comparison at wraparound.
 [[nodiscard]] constexpr bool IsNewerPlayerActionId(
     const std::uint32_t candidate,
     const std::uint32_t current) noexcept {
@@ -39,10 +40,9 @@ enum class RemotePlayerActionEpochDecision : std::uint8_t {
            phase == PlayerActionPhase::Snapshot;
 }
 
-// TASK_LASSO_PED performs the complete wind-up and throw autonomously. Starting
-// it from Begin/target acquisition therefore makes the receiving PC release the
-// rope while the sender is still holding aim. Only a sender-confirmed physical
-// catch may start the native task on the receiving PC.
+// TASK_LASSO_PED performs the complete wind-up and throw autonomously.
+// Starting it from Begin/target acquisition therefore makes the receiving PC release the rope while the sender is still holding aim.
+// Only a sender-confirmed physical catch may start the native task on the receiving PC.
 [[nodiscard]] constexpr bool ShouldStartNativeLassoTask(
     const PlayerActionKind kind,
     const PlayerActionPhase phase,
@@ -57,9 +57,8 @@ enum class RemotePlayerActionEpochDecision : std::uint8_t {
            physicalTargetEffect;
 }
 
-// An End/Cancel belonging to an older action must never cancel the newer
-// visual task currently owning the channel.  Likewise, a Sustain without its
-// reliable Begin is not allowed to manufacture a new action after reconnect.
+// An End/Cancel belonging to an older action must never cancel the newer visual task currently owning the channel.
+// Likewise, a Sustain without its reliable Begin is not allowed to manufacture a new action after reconnect.
 [[nodiscard]] constexpr RemotePlayerActionEpochDecision
 EvaluateRemotePlayerActionEpoch(
     const std::uint32_t currentActionId,

@@ -6,6 +6,7 @@
 
 namespace coopstory::bridge {
 
+// Limits how often bridge diagnostics/player telemetry are emitted so logging does not run every RDR2 frame and hide the useful multiplayer information.
 inline constexpr std::uint32_t kTelemetryFrequencyHz = 20U;
 inline constexpr std::uint64_t kTelemetryIntervalMs = 1'000U / kTelemetryFrequencyHz;
 

@@ -1,5 +1,7 @@
 namespace CoopStory.Protocol;
 
+// Wire-level limits used before any message-specific code runs. The UDP cap is
+// deliberately far smaller than MaxPayloadSize to avoid fragmented snapshots.
 public static class ProtocolConstants
 {
     public const uint Magic = 0x50433252;
@@ -10,6 +12,8 @@ public static class ProtocolConstants
     public const int AuthenticationTagSize = 16;
 }
 
+// Every message that can cross the pipe or LAN. Routing policy—not this enum—
+// decides whether an individual type must use reliable TCP or realtime UDP.
 public enum MessageType : ushort
 {
     Hello = 1,

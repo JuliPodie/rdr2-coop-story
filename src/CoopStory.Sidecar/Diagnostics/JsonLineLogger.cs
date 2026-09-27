@@ -4,6 +4,8 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Diagnostics;
 
+// Serializes structured session diagnostics to one JSON object per line.
+// It rotates finite history and redacts credentials before bytes touch the disk.
 public sealed class JsonLineLogger : IAsyncDisposable
 {
     private const long MaximumSegmentBytes = 8L * 1024L * 1024L;
@@ -20,6 +22,7 @@ public sealed class JsonLineLogger : IAsyncDisposable
         Directory.CreateDirectory(
             Path.GetDirectoryName(fullPath)
                 ?? throw new ArgumentException("Log path has no parent directory.", nameof(path)));
+        // Keep a small bounded log history; older segments are shifted at a new session only after their current size crossed the configured limit.
         RotateAtSessionStart(fullPath);
         _stream = new FileStream(
             fullPath,
@@ -141,9 +144,11 @@ public sealed class JsonLineLogger : IAsyncDisposable
             eventName,
             message,
             data);
+        // Redact after JSON serialization so both messages and structured data receive the same credential protection before the write is queued.
         var line = SecretRedactor.Redact(
             JsonSerializer.Serialize(entry, PayloadJson.Options));
 
+        // Multiple networking/pipe loops may log together; keep each JSON line intact by serializing its writer access through this gate.
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {

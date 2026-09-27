@@ -9,6 +9,8 @@
 
 namespace coopstory::bridge {
 
+// Converts in-game key presses into local Bridge menu commands such as resync.
+// BridgeRuntime/Sidecar still decide which commands may affect shared state.
 struct MenuInputState final {
     bool f7{};
     bool f8{};

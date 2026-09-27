@@ -6,6 +6,7 @@
 namespace coopstory::bridge {
 namespace {
 
+// The emergency F8 overlay has only local display/stop actions; HOST/JOIN itself lives in the launcher and sidecar, not in the native game UI.
 constexpr std::array kActions{
     SessionOverlayAction::StopSession,
     SessionOverlayAction::ToggleHud,
@@ -18,6 +19,7 @@ SessionMenuUpdate SessionMenuController::Update(
     const MenuInputState& input) {
     SessionMenuUpdate result;
 
+    // Keep key actions edge-triggered so one F8 press changes visibility once.
     if (Rising(input.f8, previous_.f8)) {
         open_ = !open_;
         result.visibilityChanged = true;
@@ -61,6 +63,7 @@ SessionMenuUpdate SessionMenuController::Update(
 }
 
 void SessionMenuController::SetSidecarConnected(const bool connected) {
+    // Connection state drives the helpful overlay phase without directly starting/stopping a session—that remains a sidecar authority decision.
     if (connected == sidecarConnected_) {
         return;
     }
@@ -91,6 +94,7 @@ void SessionMenuController::SetStatus(
 void SessionMenuController::MarkSessionReady(
     const bool host,
     std::string message) {
+    // A matching role acknowledgement unlocks the normal in-game presentation.
     sessionReady_ = true;
     phase_ = host
                  ? SessionOverlayPhase::ReadyHost

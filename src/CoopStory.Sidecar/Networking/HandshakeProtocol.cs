@@ -3,10 +3,14 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Networking;
 
+// The only peer identity that is trusted after the proof exchange completes.
+// ControlSequence becomes the starting point for replay/order validation.
 internal readonly record struct AuthenticatedPeerHandshake(
     Guid InstanceId,
     uint ControlSequence);
 
+// Performs the TCP challenge-response handshake before any gameplay packet is accepted.
+// Knowing an invite's session ID alone is not enough: the secret is needed to prove membership in the session.
 internal static class HandshakeProtocol
 {
     public static async Task<AuthenticatedPeerHandshake> AcceptGuestAsync(
@@ -16,6 +20,7 @@ internal static class HandshakeProtocol
         Func<uint> nextSequence,
         CancellationToken cancellationToken)
     {
+        // A guest must identify itself first; no arbitrary gameplay frame may establish a TCP connection's identity.
         var envelope = await connection.ReceiveAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new ProtocolException("Peer closed before sending Hello.");
         if (envelope.Type != MessageType.Hello)
@@ -24,6 +29,7 @@ internal static class HandshakeProtocol
         }
 
         var hello = PayloadJson.Deserialize<HelloPayload>(envelope.Payload.Span);
+        // Verify protocol version, session ID, declared role, and HMAC proof before allocating this TCP connection to a guest.
         var rejection = ValidateHello(hello, credentials);
         if (rejection is not null)
         {
@@ -44,6 +50,7 @@ internal static class HandshakeProtocol
             throw new ProtocolException($"Guest handshake rejected: {rejection}");
         }
 
+        // Use a fresh server nonce so a captured old HelloAck cannot be replayed as a successful response to this guest's connection attempt.
         var serverNonce = SessionCredentials.CreateNonce();
         var proof = credentials.CreateServerProof(
             hostInstanceId,
@@ -75,6 +82,7 @@ internal static class HandshakeProtocol
         Func<uint> nextSequence,
         CancellationToken cancellationToken)
     {
+        // The guest supplies a new unpredictable challenge for this particular host connection attempt.
         var nonce = SessionCredentials.CreateNonce();
         var hello = new HelloPayload(
             credentials.SessionId,
@@ -90,6 +98,7 @@ internal static class HandshakeProtocol
                 PayloadJson.Serialize(hello)),
             cancellationToken).ConfigureAwait(false);
 
+        // Do not consider the host connected until its reply proves it knows both the shared secret and the nonce just generated above.
         var envelope = await connection.ReceiveAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new ProtocolException("Host closed before sending HelloAck.");
         if (envelope.Type != MessageType.HelloAck)
@@ -103,6 +112,7 @@ internal static class HandshakeProtocol
             throw new ProtocolException($"Host rejected handshake: {ack.Reason ?? "unspecified"}");
         }
 
+        // Reject a valid-looking acknowledgement from another version/session, or one whose proof was not made for this exact guest nonce.
         if (ack.ProtocolVersion != ProtocolConstants.Version ||
             ack.SessionId != credentials.SessionId ||
             !credentials.VerifyServerProof(
@@ -124,6 +134,7 @@ internal static class HandshakeProtocol
         HelloPayload hello,
         SessionCredentials credentials)
     {
+        // Return a terse machine-readable reason because this answer is sent to an unauthenticated peer and must not disclose session details.
         if (hello.ProtocolVersion != ProtocolConstants.Version)
         {
             return "protocol-version";

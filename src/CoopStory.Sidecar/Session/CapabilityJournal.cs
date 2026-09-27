@@ -1,7 +1,9 @@
 namespace CoopStory.Sidecar.Session;
 
-// Shared campaign permissions only.  Private possessions, currency, horse
-// state and consumables must never enter this journal.
+// In-memory list of host-approved Story permissions.
+// It remembers processed event IDs so a capability resend cannot create a duplicate local unlock.
+// Shared campaign permissions only.
+// Private possessions, currency, horse state and consumables must never enter this journal.
 public enum CapabilityKind : byte
 {
     WeaponShopEligibility = 1,
@@ -55,8 +57,8 @@ public sealed class CapabilityJournal
     public IReadOnlyList<CapabilityGrant> CaptureReplay() { lock (_gate) return _effective.Values.OrderBy(x => x.Kind).ThenBy(x => x.RecordHash).ToArray(); }
     public IReadOnlyList<CapabilityGrant> CaptureState() { lock (_gate) return _byEvent.Values.OrderBy(x => x.HostEventId).ToArray(); }
 
-    // An acknowledgement proves only that the guest's local native accepted
-    // a shared capability. It never reports ownership, money or inventory.
+    // An acknowledgement proves only that the guest's local native accepted a shared capability.
+    // It never reports ownership, money or inventory.
     public bool Acknowledge(ulong hostEventId, long acknowledgedAtUnixMilliseconds)
     {
         if (hostEventId == 0 || acknowledgedAtUnixMilliseconds <= 0)

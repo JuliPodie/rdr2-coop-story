@@ -10,6 +10,8 @@
 
 namespace {
 
+// Memory-only transport used by the Bridge simulation.
+// It acts like the local pipe without opening RDR2 or Windows named-pipe resources.
 class MemoryTransport final : public coopstory::bridge::IFrameTransport {
 public:
     bool Connect(std::string& error) override {

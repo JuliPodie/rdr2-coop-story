@@ -9,6 +9,7 @@ NetEntityIdGenerator::NetEntityIdGenerator(
     const std::uint32_t epoch,
     const std::uint32_t firstCounter)
     : epoch_(epoch), nextCounter_(firstCounter) {
+    // Zero is reserved for "no entity"; every replicated identity must carry a nonzero session epoch and counter before entering maps or frames.
     if (epoch_ == 0U) {
         throw std::invalid_argument("NetEntityId epoch must be non-zero");
     }
@@ -18,6 +19,7 @@ NetEntityIdGenerator::NetEntityIdGenerator(
 }
 
 NetEntityId NetEntityIdGenerator::Next() {
+    // Counter exhaustion is fatal for this epoch instead of silently reusing an ID that a guest could still associate with another RDR2 proxy.
     if (nextCounter_ == 0U) {
         throw std::overflow_error("NetEntityId counter exhausted for this epoch");
     }
@@ -37,6 +39,8 @@ bool EntityRegistry::Bind(
         return false;
     }
 
+    // Maintain a strict one-to-one relationship between local RDR2 handles and portable network IDs.
+    // A contradictory binding would corrupt despawns.
     const auto existingId = byLocalHandle_.find(handle);
     if (existingId != byLocalHandle_.end() && existingId->second != id) {
         return false;
@@ -81,6 +85,7 @@ bool EntityRegistry::Remove(const NetEntityId id) {
 }
 
 std::vector<LocalEntityHandle> EntityRegistry::Drain() {
+    // Teardown callers need the native handles before clearing both lookup directions, so they can safely delete/release their game resources.
     std::vector<LocalEntityHandle> handles;
     handles.reserve(byNetworkId_.size());
     for (const auto& [id, handle] : byNetworkId_) {

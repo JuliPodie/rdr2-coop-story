@@ -10,6 +10,8 @@
 
 namespace coopstory::bridge {
 
+// Packs/unpacks compact player-animation snapshots.
+// These supplement positions so remote players look like they are moving, aiming, or reloading correctly.
 inline constexpr std::uint8_t kPlayerAnimationStateSchemaVersion = 1U;
 inline constexpr std::uint8_t kMotionReplicationConfigSchemaVersion = 1U;
 inline constexpr std::size_t kPlayerAnimationStatePayloadSize = 72U;
@@ -50,9 +52,9 @@ enum class PlayerAnimationSampleSource : std::uint8_t {
     VersionedMemoryReader = 3,
 };
 
-// Optional exact graph sample. All unavailable fields must remain zero and
-// must not have a validity bit. This lets version-specific graph readers be
-// added without inventing hashes when a field cannot yet be resolved.
+// Optional exact graph sample.
+// All unavailable fields must remain zero and must not have a validity bit.
+// This lets version-specific graph readers be added without inventing hashes when a field cannot yet be resolved.
 struct PlayerAnimationStatePayload final {
     NetEntityId entityId{};
     PlayerSlot slot{PlayerSlot::Host};

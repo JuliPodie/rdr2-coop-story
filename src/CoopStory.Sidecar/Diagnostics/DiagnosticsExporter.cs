@@ -7,6 +7,8 @@ using CoopStory.Sidecar.Configuration;
 
 namespace CoopStory.Sidecar.Diagnostics;
 
+// Builds a safe ZIP bundle for multiplayer debugging.
+// It collects configuration and diagnostics while redacting secrets instead of exposing an invite password.
 public sealed record DiagnosticsExportResult(
     string OutputPath,
     bool IncludedLog,

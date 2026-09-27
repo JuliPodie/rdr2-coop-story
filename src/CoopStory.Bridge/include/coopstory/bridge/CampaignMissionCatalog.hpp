@@ -8,8 +8,10 @@
 
 namespace coopstory::bridge {
 
-// Stable RAGE/joaat script hash. Mission names are internal script names, not
-// localized UI text or a chapter number.
+// Known Story mission identifiers and rules used by the safe mission handshake.
+// The host/guest must match one catalogue ID, not trust arbitrary script names.
+// Stable RAGE/joaat script hash.
+// Mission names are internal script names, not localized UI text or a chapter number.
 [[nodiscard]] constexpr std::uint32_t CampaignMissionId(
     const std::string_view value) noexcept {
     std::uint32_t hash{};
@@ -29,36 +31,28 @@ namespace coopstory::bridge {
 
 enum class CampaignCompletionBinding : std::uint8_t {
     None = 0,
-    // MissionData completion and the exact host rating, followed by the
-    // vanilla mission-log refresh that exposes every chapter, activity, shop,
-    // recipe and encounter gate derived from that MissionData record. The
-    // generic progression pipeline may then apply only this mission's
-    // explicit, idempotent direct reward records. Cash is deliberately
-    // excluded: a wallet delta is not a mission reward receipt.
+    // MissionData completion and the exact host rating, followed by the vanilla mission-log refresh that exposes every chapter, activity, shop, recipe and encounter gate derived from that MissionData record.
+    // The generic progression pipeline may then apply only this mission's explicit, idempotent direct reward records.
+    // Cash is deliberately excluded: a wallet delta is not a mission reward receipt.
     MissionDataRatingAndDerivedUnlocks = 1,
 };
 
-// Mission scripts award concrete records through distinct native systems. The
-// catalog keeps those records attached to their exact mission instead of
-// treating an arbitrary host inventory change as a campaign reward.
+// Mission scripts award concrete records through distinct native systems.
+// The catalog keeps those records attached to their exact mission instead of treating an arbitrary host inventory change as a campaign reward.
 enum class CampaignMissionRewardBinding : std::uint8_t {
     WeaponOwnership = 1,
     UnlockVisible = 2,
-    // A concrete Story inventory record such as a document/map or a
-    // pamphlet. Pamphlets are recipe ownership records in RDR2, so this is
-    // one half of a verified recipe award.
+    // A concrete Story inventory record such as a document/map or a pamphlet.
+    // Pamphlets are recipe ownership records in RDR2, so this is one half of a verified recipe award.
     InventoryItem = 3,
-    // A recipe's UNLOCK entitlement is independent from the physical
-    // pamphlet/document item. A mission that permanently awards a recipe must
-    // carry both records when its script proves that it grants both.
+    // A recipe's UNLOCK entitlement is independent from the physical pamphlet/document item.
+    // A mission that permanently awards a recipe must carry both records when its script proves that it grants both.
     RecipeUnlock = 4,
-    // Some Story rewards unlock an entitlement rather than merely making a
-    // menu/activity visible. This deliberately sets and verifies both bits;
-    // use UnlockVisible above for scripts that only expose a progression gate.
+    // Some Story rewards unlock an entitlement rather than merely making a menu/activity visible.
+    // This deliberately sets and verifies both bits; use UnlockVisible above for scripts that only expose a progression gate.
     UnlockEntitlement = 5,
-    // A weapon can become purchasable without being granted. The facade
-    // resolves the weapon's own unlock record through the public unlock
-    // resolver, then marks that entitlement visible and unlocked.
+    // A weapon can become purchasable without being granted.
+    // The facade resolves the weapon's own unlock record through the public unlock resolver, then marks that entitlement visible and unlocked.
     WeaponShopEligibility = 6,
 };
 
@@ -70,12 +64,11 @@ struct CampaignMissionReward final {
 
 struct CampaignMissionDefinition final {
     std::uint32_t missionId{};
-    // MissionData's canonical four-character ID. This is the stable ID sent
-    // over the progression protocol and supplied to the MissionData natives.
+    // MissionData's canonical four-character ID.
+    // This is the stable ID sent over the progression protocol and supplied to the MissionData natives.
     std::string_view scriptName{};
-    // The actual RAGE script registered in init_all_sp. It is deliberately
-    // separate: many Story missions use different runtime and MissionData
-    // names (for example hunting1 / HNT1).
+    // The actual RAGE script registered in init_all_sp.
+    // It is deliberately separate: many Story missions use different runtime and MissionData names (for example hunting1 / HNT1).
     std::string_view runtimeScriptName{};
     std::string_view displayName{};
     CampaignCompletionBinding completionBinding{
@@ -83,12 +76,10 @@ struct CampaignMissionDefinition final {
     std::span<const CampaignMissionReward> rewards{};
 };
 
-// Dialogue is always played by each machine's own Story script.  The network
-// only conveys a cue after a locally-created scripted-conversation root has
-// been observed.  A profile exists for every catalogued Story mission so the
-// protocol can reject cross-mission cues, even where no source-reviewed root
-// has been admitted yet.  Roots are deliberately a small reviewed allow-list:
-// ScriptHook exposes no safe "enumerate active conversations" native.
+// Dialogue is always played by each machine's own Story script.
+// The network only conveys a cue after a locally-created scripted-conversation root has been observed.
+// A profile exists for every catalogued Story mission so the protocol can reject cross-mission cues, even where no source-reviewed root has been admitted yet.
+// Roots are deliberately a small reviewed allow-list: ScriptHook exposes no safe "enumerate active conversations" native.
 [[nodiscard]] constexpr std::uint32_t CampaignMissionDialogueProfileId(
     const std::uint32_t missionId) noexcept {
     return missionId;
@@ -123,60 +114,49 @@ inline constexpr std::uint8_t kCampaignDialogueArthurDutchHosea =
 inline constexpr std::uint32_t kFud1MissionId = CampaignMissionId("FUD1");
 inline constexpr std::uint32_t kHunt1MissionId = CampaignMissionId("HNT1");
 
-// Source evidence: hunting1 makes SP_CHAL_HUNT_ROOT visible when the
-// legendary-animal map route becomes available. This application is
-// idempotent locally. A fishing-rod check in feud1 is a precondition, not an
-// award, so it intentionally has no reward record here.
+// Source evidence: hunting1 makes SP_CHAL_HUNT_ROOT visible when the legendary-animal map route becomes available.
+// This application is idempotent locally.
+// A fishing-rod check in feud1 is a precondition, not an award, so it intentionally has no reward record here.
 inline constexpr CampaignMissionReward kHunt1MissionRewards[]{
-    // hunting1's mission-ending function grants this exact map through the
-    // standard inventory grant helper before showing the reward treatment.
+    // hunting1's mission-ending function grants this exact map through the standard inventory grant helper before showing the reward treatment.
     {CampaignMissionRewardBinding::InventoryItem,
      CampaignMissionId("DOCUMENT_MAP_LEGENDARY_ANIMALS"), 1U},
     {CampaignMissionRewardBinding::UnlockVisible,
      CampaignMissionId("SP_CHAL_HUNT_ROOT"), 0U},
 };
-// winter4 (WNT4 / Old Friends) awards the Carbine Repeater and Lasso. The
-// former is on the script's player weapon grant path; the latter is the
-// mission's permanent Story reward. Utility weapons are handled specially by
-// the facade because ScriptHook's IS_WEAPON_VALID does not reliably classify
-// the lasso as a conventional weapon in the prologue.
+// winter4 (WNT4 / Old Friends) awards the Carbine Repeater and Lasso.
+// The former is on the script's player weapon grant path; the latter is the mission's permanent Story reward.
+// Utility weapons are handled specially by the facade because ScriptHook's IS_WEAPON_VALID does not reliably classify the lasso as a conventional weapon in the prologue.
 inline constexpr CampaignMissionReward kWnt4MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_REPEATER_CARBINE"), 99U},
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_LASSO"), 1U},
 };
-// feud1 (FUD1 / The New South) gives Arthur WEAPON_FISHINGROD when it is
-// absent before the fishing objective. Unlike RABI1, feud1 has no matching
-// fishing-rod removal path, so it is a permanent prerequisite/reward.
+// feud1 (FUD1 / The New South) gives Arthur WEAPON_FISHINGROD when it is absent before the fishing objective.
+// Unlike RABI1, feud1 has no matching fishing-rod removal path, so it is a permanent prerequisite/reward.
 inline constexpr CampaignMissionReward kFud1MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_FISHINGROD"), 1U},
 };
-// sadie3 (SAD3 / Uncle's Bad Day) gives Arthur a Carcano with 50 rounds when
-// absent for the sniper sequence and contains no Carcano-removal path.
+// sadie3 (SAD3 / Uncle's Bad Day) gives Arthur a Carcano with 50 rounds when absent for the sniper sequence and contains no Carcano-removal path.
 inline constexpr CampaignMissionReward kSad3MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_SNIPERRIFLE_CARCANO"), 50U},
 };
-// marston8 (MAR8 / American Venom) has a persistent fallback grant for the
-// Binoculars; the mission only invokes it if the player does not own them.
+// marston8 (MAR8 / American Venom) has a persistent fallback grant for the Binoculars; the mission only invokes it if the player does not own them.
 inline constexpr CampaignMissionReward kMar8MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_KIT_BINOCULARS"), 0U},
 };
-// abigail2_1 (AB21 / The Tool Box) grants Sadie's telegram at mission start
-// only when the document is absent; it is a persistent Story document.
+// abigail2_1 (AB21 / The Tool Box) grants Sadie's telegram at mission start only when the document is absent; it is a persistent Story document.
 inline constexpr CampaignMissionReward kAb21MissionRewards[]{
     {CampaignMissionRewardBinding::InventoryItem,
      CampaignMissionId("DOCUMENT_LETTER_SADIE_TELEGRAM"), 1U},
 };
-// Mission reward pages are cross-checked against the canonical runtime IDs
-// below. These are durable weapon awards, not optional battlefield pickups:
-// SEN1 / The First Shall Be the Last awards the Tomahawk; DST1 / Paying a
-// Social Call awards the Double-Barreled Shotgun and Throwing Knife. Their
-// Cash is not inferred from wallet movement; no authoritative mission-owned
-// cash receipt is available through the current public-native surface.
+// Mission reward pages are cross-checked against the canonical runtime IDs below.
+// These are durable weapon awards, not optional battlefield pickups: SEN1 / The First Shall Be the Last awards the Tomahawk; DST1 / Paying a Social Call awards the Double-Barreled Shotgun and Throwing Knife.
+// Their Cash is not inferred from wallet movement; no authoritative mission-owned cash receipt is available through the current public-native surface.
 inline constexpr CampaignMissionReward kSen1MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_THROWN_TOMAHAWK"), 1U},
@@ -188,10 +168,8 @@ inline constexpr CampaignMissionReward kDst1MissionRewards[]{
      CampaignMissionId("WEAPON_THROWN_THROWING_KNIVES"), 1U},
 };
 inline constexpr CampaignMissionReward kInd3MissionRewards[]{
-    // IND3 / A Fine Night of Debauchery makes these weapons purchasable; it
-    // does not grant a free Semi-Auto Shotgun. The Reutlinger watch is an
-    // explicit inventory reward (not a document) and industry3's mission
-    // path grants this exact provision record when it is absent.
+    // IND3 / A Fine Night of Debauchery makes these weapons purchasable; it does not grant a free Semi-Auto Shotgun.
+    // The Reutlinger watch is an explicit inventory reward (not a document) and industry3's mission path grants this exact provision record when it is absent.
     {CampaignMissionRewardBinding::WeaponShopEligibility,
      CampaignMissionId("WEAPON_SHOTGUN_SEMIAUTO"), 0U},
     {CampaignMissionRewardBinding::WeaponShopEligibility,
@@ -199,35 +177,31 @@ inline constexpr CampaignMissionReward kInd3MissionRewards[]{
     {CampaignMissionRewardBinding::InventoryItem,
      CampaignMissionId("PROVISION_POCKET_WATCH_REUTLINGE"), 1U},
 };
-// MUD4 / The Sheep and the Goats makes the standard Rolling Block Rifle part
-// of Story progression.
+// MUD4 / The Sheep and the Goats makes the standard Rolling Block Rifle part of Story progression.
 inline constexpr CampaignMissionReward kMud4MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_SNIPERRIFLE_ROLLINGBLOCK"), 100U},
 };
-// TRE1 / Magicians for Sport uses RDR2's distinct rare/exotic Rolling Block
-// record. Do not collapse it to the ordinary MUD4 weapon: that would lose the
-// mission's unique variant for a guest who follows the same Story path.
+// TRE1 / Magicians for Sport uses RDR2's distinct rare/exotic Rolling Block record.
+// Do not collapse it to the ordinary MUD4 weapon: that would lose the mission's unique variant for a guest who follows the same Story path.
 inline constexpr CampaignMissionReward kTre1MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_SNIPERRIFLE_ROLLINGBLOCK_EXOTIC"), 100U},
 };
-// MUD1 / Americans at Rest does not award a Tomahawk; it makes the weapon
-// purchasable at gunsmiths. Model that as an entitlement, not ownership.
+// MUD1 / Americans at Rest does not award a Tomahawk; it makes the weapon purchasable at gunsmiths.
+// Model that as an entitlement, not ownership.
 inline constexpr CampaignMissionReward kMud1MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponShopEligibility,
      CampaignMissionId("WEAPON_THROWN_TOMAHAWK"), 0U},
 };
-// GRY1 / American Distillation makes the Evans Repeater purchasable at
-// gunsmiths; it is an entitlement, never a free weapon grant.
+// GRY1 / American Distillation makes the Evans Repeater purchasable at gunsmiths; it is an entitlement, never a free weapon grant.
 inline constexpr CampaignMissionReward kGry1MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponShopEligibility,
      CampaignMissionId("WEAPON_REPEATER_EVANS"), 0U},
 };
 // UTP2 / An American Pastoral Scene grants the Lancaster Repeater directly.
-// MUD6 / Pouring Forth Oil makes the Pump-Action Shotgun purchasable; GNG3 /
-// Visiting Hours does the same for the Repeating Shotgun. These are distinct
-// entitlement cases and must not be represented as free weapon grants.
+// MUD6 / Pouring Forth Oil makes the Pump-Action Shotgun purchasable; GNG3 / Visiting Hours does the same for the Repeating Shotgun.
+// These are distinct entitlement cases and must not be represented as free weapon grants.
 inline constexpr CampaignMissionReward kUtp2MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_REPEATER_LANCASTER"), 60U},
@@ -240,10 +214,8 @@ inline constexpr CampaignMissionReward kGng3MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponShopEligibility,
      CampaignMissionId("WEAPON_SHOTGUN_REPEATING"), 0U},
 };
-// DST5 / Goodbye, Dear Friend places a permanent Carcano pickup for Arthur
-// and makes the Litchfield Repeater purchasable. Mary's keepsakes are omitted
-// until their exact persistent inventory IDs (rather than mission prop IDs)
-// are verified.
+// DST5 / Goodbye, Dear Friend places a permanent Carcano pickup for Arthur and makes the Litchfield Repeater purchasable.
+// Mary's keepsakes are omitted until their exact persistent inventory IDs (rather than mission prop IDs) are verified.
 inline constexpr CampaignMissionReward kDst5MissionRewards[]{
     {CampaignMissionRewardBinding::WeaponOwnership,
      CampaignMissionId("WEAPON_SNIPERRIFLE_CARCANO"), 60U},
@@ -251,10 +223,9 @@ inline constexpr CampaignMissionReward kDst5MissionRewards[]{
      CampaignMissionId("WEAPON_REPEATER_LITCHFIELD"), 0U},
 };
 
-// Source-reviewed conversation roots.  These were traced to direct scripted
-// conversation helper calls in the corresponding Story scripts.  More roots
-// may be admitted only after the exact game build has been reviewed and a
-// two-PC capture confirms that they have the same local cast and line order.
+// Source-reviewed conversation roots.
+// These were traced to direct scripted conversation helper calls in the corresponding Story scripts.
+// More roots may be admitted only after the exact game build has been reviewed and a two-PC capture confirms that they have the same local cast and line order.
 inline constexpr std::array<CampaignMissionDialogueRoot, 8U>
     kCampaignMissionDialogueRoots{{
         {kHunt1MissionId, "RH1_TRACK_CHAT", kCampaignDialogueArthurHosea},
@@ -371,9 +342,8 @@ FindCampaignMission(const std::uint32_t missionId) noexcept {
             CampaignCompletionBinding::MissionDataRatingAndDerivedUnlocks;
 }
 
-// Unlocks which vanilla derives from a Story MissionData completion are part
-// of every admitted mapping. Direct item/weapon entitlements remain in the
-// per-mission reward span because they are not derivable from MissionData.
+// Unlocks which vanilla derives from a Story MissionData completion are part of every admitted mapping.
+// Direct item/weapon entitlements remain in the per-mission reward span because they are not derivable from MissionData.
 [[nodiscard]] constexpr bool PropagatesCampaignMissionDerivedUnlocks(
     const std::uint32_t missionId) noexcept {
     return HasVerifiedCampaignCompletionMapping(missionId);
@@ -386,9 +356,8 @@ CampaignMissionRewards(const std::uint32_t missionId) noexcept {
                                   : std::span<const CampaignMissionReward>{};
 }
 
-// Every catalogued mission has a dialogue profile.  A profile without roots
-// intentionally falls back to that game's normal local mission dialogue; it
-// never causes a peer to manufacture, restart, pause, or skip a conversation.
+// Every catalogued mission has a dialogue profile.
+// A profile without roots intentionally falls back to that game's normal local mission dialogue; it never causes a peer to manufacture, restart, pause, or skip a conversation.
 [[nodiscard]] constexpr bool HasCampaignMissionDialogueProfile(
     const std::uint32_t missionId,
     const std::uint32_t profileId) noexcept {

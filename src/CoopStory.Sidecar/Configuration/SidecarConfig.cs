@@ -6,6 +6,8 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Configuration;
 
+// User-facing session settings.
+// Validation keeps local pipe, LAN transport, motion smoothing, mission-bubble, and mandatory Story Mode safeguards sane.
 public sealed record SidecarConfig
 {
     public const int CurrentSchemaVersion = 1;
@@ -26,6 +28,7 @@ public sealed record SidecarConfig
 
     public string Nickname { get; init; } = "Player";
 
+    // Both peers negotiate this visual strategy before gameplay state is passed through; mismatched locomotion modes are intentionally not mixed.
     public MotionReplicationMode MotionReplicationMode { get; init; } =
         MotionReplicationMode.AnimGraphReplica;
 
@@ -38,14 +41,13 @@ public sealed record SidecarConfig
     public string ProfilePath { get; init; } =
         "%LOCALAPPDATA%\\RDR2CoopStory\\guest-profile.json";
 
-    // Host-only, append-safe state for campaign permissions which may be
-    // replayed after a guest reconnects.  This deliberately is not an RDR2
-    // save path and must never contain private player inventory or money.
+    // Host-only, append-safe state for campaign permissions which may be replayed after a guest reconnects.
+    // This deliberately is not an RDR2 save path and must never contain private player inventory or money.
     public string CapabilityJournalPath { get; init; } =
         "%LOCALAPPDATA%\\RDR2CoopStory\\campaign-capabilities.json";
 
-    // Host-only co-op claim cursors. This is not an RDR2 save and never
-    // contains a game wallet or item inventory.
+    // Host-only co-op claim cursors.
+    // This is not an RDR2 save and never contains a game wallet or item inventory.
     public string PickupClaimStatePath { get; init; } =
         "%LOCALAPPDATA%\\RDR2CoopStory\\pickup-claims.json";
 
@@ -109,6 +111,7 @@ public sealed record SidecarConfig
                 "bubble.teleportMeters must be greater than bubble.warningMeters, and both must be positive.");
         }
 
+        // Snapshot rate controls how often current state is sent; interpolation delay controls how far behind the receiver renders to absorb jitter.
         if (Replication.SnapshotRateHz is < 1 or > 60)
         {
             throw new ConfigurationException(
@@ -121,6 +124,7 @@ public sealed record SidecarConfig
                 "replication.interpolationDelayMs must be between 0 and 2000.");
         }
 
+        // These bounds prevent a timeout that fires before a normal heartbeat and constrain reconnect/diagnostics to meaningful timing values.
         if (Network.HeartbeatIntervalMs < 100 ||
             Network.HeartbeatTimeoutMs <= Network.HeartbeatIntervalMs ||
             Network.ReconnectMinMs < 100 ||
@@ -312,6 +316,7 @@ public static class HostAddressValidator
     }
 }
 
+// Mission distance guard: warning is presentation only; teleport is a single host-authoritative correction when a player leaves the cooperative bubble.
 public sealed record BubbleConfig
 {
     public float WarningMeters { get; init; } = 200f;
@@ -319,6 +324,7 @@ public sealed record BubbleConfig
     public float TeleportMeters { get; init; } = 250f;
 }
 
+// Default 20 Hz state feed plus 100 ms delayed rendering trades a little visual latency for smoother remote movement when UDP arrival times jitter.
 public sealed record ReplicationConfig
 {
     public int SnapshotRateHz { get; init; } = 20;
@@ -326,6 +332,8 @@ public sealed record ReplicationConfig
     public int InterpolationDelayMs { get; init; } = 100;
 }
 
+// Liveness/reconnect defaults.
+// A five-second TCP silence triggers a reconnect and reliable resync instead of allowing an indefinitely stale peer session.
 public sealed record NetworkConfig
 {
     public int HeartbeatIntervalMs { get; init; } = 1000;
@@ -362,6 +370,7 @@ public static class SidecarConfigStore
                 FileShare.Read,
                 16 * 1024,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
+            // Deserialize with the shared protocol JSON settings, then validate before sockets, paths, or pipe names are allowed to use the data.
             var config = await JsonSerializer.DeserializeAsync<SidecarConfig>(
                 stream,
                 PayloadJson.Options,
@@ -387,6 +396,7 @@ public static class SidecarConfigStore
         Directory.CreateDirectory(
             Path.GetDirectoryName(fullPath)
                 ?? throw new ConfigurationException("Configuration path has no directory."));
+        // CreateNew protects existing session credentials from accidental overwrite by a second launcher/session-generation attempt.
         await using var stream = new FileStream(
             fullPath,
             FileMode.CreateNew,

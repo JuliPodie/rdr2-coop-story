@@ -6,6 +6,8 @@
 namespace coopstory::bridge {
 namespace {
 
+// Fixed F9 command order is also the menu selection index.
+// BridgeRuntime owns permission checks; this controller only turns edge-triggered input into a request.
 constexpr std::array kCommands{
     BridgeCommand::SkipCutscene,
     BridgeCommand::TeleportToPlayer,
@@ -39,6 +41,7 @@ static_assert(kCommands.size() == 25U);
 }  // namespace
 
 MenuUpdate MenuController::Update(const MenuInputState& input) {
+    // Rising-edge input prevents a held key from repeatedly toggling/issuing a dangerous command during every native game tick.
     MenuUpdate result;
     if (Rising(input.f9, previous_.f9)) {
         open_ = !open_;
@@ -74,6 +77,7 @@ MenuUpdate MenuController::Update(const MenuInputState& input) {
                 selection_ + kColumnSize < kCommands.size()) {
                 selection_ += kColumnSize;
             }
+            // Return the selected request; no action is performed inside this UI-only class, keeping multiplayer authority in BridgeRuntime.
             if (Rising(input.confirm, previous_.confirm)) {
                 result.command = kCommands[selection_];
             }

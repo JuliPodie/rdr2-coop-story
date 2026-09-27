@@ -6,16 +6,21 @@ using CoopStory.Sidecar.Configuration;
 
 namespace CoopStory.Sidecar.Session;
 
+// Complete configuration produced by the menu's Host/Join choice.
+// The caller passes this to the running session; it does not itself open sockets.
 public sealed record SessionActivation(
     SidecarConfig Config,
     SessionCredentials Credentials,
     string InviteCode);
 
+// Converts local menu input into validated host or guest session settings.
+// Keeping this outside the game bridge makes joining testable without RDR2.
 public static class InGameSessionCoordinator
 {
     public static SessionActivation CreateHost(SidecarConfig bootstrap)
     {
         ArgumentNullException.ThrowIfNull(bootstrap);
+        // Prefer the saved adapter choice, otherwise offer the first active private/virtual-LAN IPv4 address that can be shared with a guest.
         var address = SuggestedLanAddress(bootstrap.HostAddress) ??
             throw new ConfigurationException(
                 "No private host IPv4 address was detected. Connect the computer " +
@@ -30,6 +35,7 @@ public static class InGameSessionCoordinator
         ArgumentNullException.ThrowIfNull(bootstrap);
         var address = advertisedAddress.Trim();
         _ = HostAddressValidator.Validate(address, requireRemote: true);
+        // A host creates a new session ID and secret for every fresh invite.
         var credentials = SessionCredentials.Generate();
         var config = bootstrap with
         {
@@ -38,6 +44,7 @@ public static class InGameSessionCoordinator
             SessionToken = credentials.ExportToken()
         };
         config.Validate();
+        // The compact code contains connection coordinates plus the credential token that the later TCP/UDP authentication proof relies on.
         var code = SessionInviteCodeCodec.Encode(
             new SessionInviteCode(
                 address,
@@ -55,6 +62,7 @@ public static class InGameSessionCoordinator
         SidecarConfig config;
         SessionCredentials credentials;
 
+        // A guest must join from a complete host-produced invite, rather than attempting to reuse partial menu text or a stale blank value.
         if (string.IsNullOrWhiteSpace(inviteCode))
         {
             throw new ConfigurationException(
@@ -75,6 +83,7 @@ public static class InGameSessionCoordinator
                     exception);
             }
 
+            // The invite is input from another machine: validate both normal host syntax and the product's private-LAN-only policy.
             _ = HostAddressValidator.Validate(
                 invite.HostAddress,
                 requireRemote: true);
@@ -123,6 +132,7 @@ public static class InGameSessionCoordinator
         IEnumerable<IPAddress> activeLocalAddresses)
     {
         ArgumentNullException.ThrowIfNull(activeLocalAddresses);
+        // Adapter discovery can include VPNs; Hamachi's 25.x range is admitted deliberately alongside the ordinary private IPv4 ranges.
         var candidates = activeLocalAddresses
             .Where(address =>
                 address.AddressFamily == AddressFamily.InterNetwork &&
@@ -145,6 +155,7 @@ public static class InGameSessionCoordinator
     private static bool IsPrivateOrVirtualLanAddress(IPAddress address)
     {
         var bytes = address.GetAddressBytes();
+        // 25.x is Hamachi. The other ranges are RFC1918 plus link-local.
         return bytes[0] == 25 ||
                bytes[0] == 10 ||
                (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||

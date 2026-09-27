@@ -4,6 +4,8 @@ using CoopStory.Sidecar.Session;
 
 namespace CoopStory.Sidecar.Persistence;
 
+// Saves host-approved capability events with a backup copy.
+// This lets a guest remember it applied an unlock even if the session disconnects right away.
 public sealed class CapabilityJournalStore
 {
     public async Task SaveAsync(string path, CapabilityJournal journal, CancellationToken cancellationToken = default)

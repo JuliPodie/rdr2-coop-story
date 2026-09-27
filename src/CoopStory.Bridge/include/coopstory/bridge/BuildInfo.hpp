@@ -2,9 +2,9 @@
 
 #include <string_view>
 
+// One build label is logged to make multiplayer reports traceable to the exact Bridge build loaded in RDR2.
 // CMake supplies a UTC configure-time identifier for every bridge build.
-// Keep a fallback so SDK-independent tooling can still compile the core when
-// it is built outside the normal preset workflow.
+// Keep a fallback so SDK-independent tooling can still compile the core when it is built outside the normal preset workflow.
 #ifndef COOPSTORY_BRIDGE_BUILD_ID
 #define COOPSTORY_BRIDGE_BUILD_ID "dev"
 #endif

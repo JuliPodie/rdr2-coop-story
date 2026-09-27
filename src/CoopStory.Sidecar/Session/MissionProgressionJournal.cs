@@ -2,6 +2,8 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Session;
 
+// Saved record of one verified mission completion.
+// EventId makes a completion unique, so a resend after a disconnect cannot grant/apply it a second time.
 public sealed record MissionProgressionCompletionRecord(
     uint MissionId,
     uint MissionEpoch,

@@ -20,6 +20,8 @@
 
 namespace {
 
+// Global objects for the ASI plugin entry point.
+// Windows/ScriptHook call this layer each game tick; it creates the Bridge and connects it to the Sidecar.
 HMODULE g_module{};
 DWORD g_lastNativeExceptionCode{};
 std::uintptr_t g_lastNativeExceptionAddress{};
@@ -37,10 +39,8 @@ LONG CaptureNativeException(
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-// ScriptHook reports a generic id=31 popup when an access violation escapes
-// ScriptMain. C++ catch blocks compiled with /EHsc do not catch SEH raised by
-// a native call, so keep the native-facing tick behind a tiny SEH boundary and
-// persist the exact exception before ending the session cleanly.
+// ScriptHook reports a generic id=31 popup when an access violation escapes ScriptMain.
+// C++ catch blocks compiled with /EHsc do not catch SEH raised by a native call, so keep the native-facing tick behind a tiny SEH boundary and persist the exact exception before ending the session cleanly.
 bool TickWithNativeExceptionBoundary(
     coopstory::bridge::BridgeRuntime* runtime) noexcept {
     __try {
@@ -97,11 +97,9 @@ void ScriptMain() {
 
 }  // namespace
 
-// The private-package builder requires this exported capability marker. A
-// structurally valid ASI compiled with native bindings disabled would load
-// fail-closed and could otherwise be mistaken for the playable test bridge.
-// Keeping the safe CMake option default OFF remains intentional; only the
-// explicit private-validation presets enable and emit this marker.
+// The private-package builder requires this exported capability marker.
+// A structurally valid ASI compiled with native bindings disabled would load fail-closed and could otherwise be mistaken for the playable test bridge.
+// Keeping the safe CMake option default OFF remains intentional; only the explicit private-validation presets enable and emit this marker.
 extern "C" __declspec(dllexport) const char*
 CoopStoryNativeBindingsCapability() noexcept {
 #if COOPSTORY_ENABLE_UNVERIFIED_NATIVE_BINDINGS

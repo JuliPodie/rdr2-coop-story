@@ -3,17 +3,24 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Session;
 
+// Says whether a message was queued, replaced an old update, or was dropped because the queue is full/stopping.
 internal enum NetworkBridgeEnqueueDisposition
 {
+    // The message received a new waiting place.
     Queued,
+    // A waiting place already existed for this type or NPC, so the newest usable state is kept there.
     Coalesced,
+    // The message could not be queued, for example because its queue was full or shutting down.
     Rejected
 }
 
+// Tell the caller what happened and how much work remains, including an active delivery.
 internal readonly record struct NetworkBridgeEnqueueResult(
     NetworkBridgeEnqueueDisposition Disposition,
     int Backlog);
 
+// A report for diagnostics about queue activity and the message currently being written to the game.
+// Delivered counts successful local writes, rather than proof that an NPC has moved on screen.
 internal readonly record struct NetworkBridgePumpSnapshot(
     long Queued,
     long Coalesced,
@@ -28,12 +35,15 @@ internal readonly record struct NetworkBridgePumpSnapshot(
     long ActiveMilliseconds);
 
 /// <summary>
-/// Decouples authenticated LAN receive loops from a potentially blocked game
-/// pipe. Replaceable state occupies one latest-only slot per message type while
-/// commands and lifecycle events retain FIFO ordering in a bounded queue.
+/// Holds messages from the other computer while the local Bridge is busy receiving earlier ones.
+/// The network can keep receiving without waiting for RDR2 to finish every pipe write.
+/// Frequent state updates keep one waiting entry per type, while NPC updates keep one per entity ID.
+/// Events such as creating and removing an NPC keep their arrival order in a queue with a size limit.
 /// </summary>
 internal sealed class NetworkBridgeDeliveryPump
 {
+    // Keep the message with a final validity check and an optional callback for successful delivery.
+    // Those callbacks let SidecarRuntime prevent an old session's message reaching a newly connected game.
     private sealed record QueuedDelivery(
         ProtocolEnvelope Envelope,
         Func<bool>? IsValid,
@@ -56,6 +66,7 @@ internal sealed class NetworkBridgeDeliveryPump
             catch (ProtocolException) { return null; }
         }
 
+        // Recheck the connection/session at delivery time because it may have changed while we waited.
         public bool IsStillValid()
         {
             try
@@ -68,6 +79,7 @@ internal sealed class NetworkBridgeDeliveryPump
             }
         }
 
+        // Tell the owner that the local write completed so it can update readiness and diagnostics.
         public void NotifyDelivered()
         {
             try
@@ -77,12 +89,13 @@ internal sealed class NetworkBridgeDeliveryPump
             catch
             {
                 // Delivery accounting and the barrier must always complete.
-                // A best-effort observer may withhold its derived readiness
-                // lease, but it cannot terminate the pump worker.
+                // A best-effort observer may withhold its derived readiness lease, but it cannot terminate the pump worker.
             }
         }
     }
 
+    // Owning this object means normal deliveries are temporarily paused for a reset.
+    // Disposing it resumes delivery, including when an await using block exits after an error.
     private sealed class DeliveryBarrierLease : IAsyncDisposable
     {
         private NetworkBridgeDeliveryPump? _owner;
@@ -94,15 +107,21 @@ internal sealed class NetworkBridgeDeliveryPump
 
         public ValueTask DisposeAsync()
         {
+            // Clear the owner atomically so disposing twice cannot resume or release the same pause twice.
             Interlocked.Exchange(ref _owner, null)?.ExitDeliveryBarrier();
             return ValueTask.CompletedTask;
         }
     }
 
+    // Network callbacks and the delivery worker can run at the same time.
+    // This lock protects the shared queues and counters while either side changes them.
     private readonly object _sync = new();
+    // Important messages stay in order.
+    // Fast updates keep only the newest one so a slow game pipe cannot build an endless queue.
     private readonly Queue<QueuedDelivery> _criticalQueue = new();
     private readonly Dictionary<MessageType, QueuedDelivery> _coalesced = [];
     private readonly Dictionary<NetEntityId, QueuedDelivery> _entityUpdates = [];
+    // Wake the worker when there is work, and allow only one reset owner to pause delivery at a time.
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly SemaphoreSlim _deliveryBarrierGate = new(1, 1);
     private readonly Func<ProtocolEnvelope, ValueTask<bool>> _deliverAsync;
@@ -125,6 +144,8 @@ internal sealed class NetworkBridgeDeliveryPump
     private int _maxBacklog;
     private int _runStarted;
 
+    // The caller supplies the function that actually writes an envelope to the local Bridge.
+    // Separate queue limits prevent a burst of different NPCs or critical events from growing memory forever.
     public NetworkBridgeDeliveryPump(
         Func<ProtocolEnvelope, ValueTask<bool>> deliverAsync,
         int criticalCapacity = 128,
@@ -152,11 +173,14 @@ internal sealed class NetworkBridgeDeliveryPump
         _entityUpdateCapacity = entityUpdateCapacity;
     }
 
+    // Add an incoming message to the appropriate waiting area without waiting for the game to read it.
+    // Coalescing means several updates share one entry that keeps the newest usable value.
     public NetworkBridgeEnqueueResult TryEnqueue(
         ProtocolEnvelope envelope,
         Func<bool>? isValid = null,
         Action<ProtocolEnvelope>? afterDelivered = null)
     {
+        // Make our own copy because the network code may reuse its byte buffer.
         var frozen = Freeze(envelope);
         NetworkBridgeEnqueueDisposition disposition;
         int backlog;
@@ -173,6 +197,8 @@ internal sealed class NetworkBridgeDeliveryPump
             }
 
             var enqueueOrder = unchecked(++_nextEnqueueOrder);
+            // This is local queue order, separate from the sender's network sequence number.
+            // Replacing a waiting state preserves its existing turn so a busy type does not wait forever.
             if (enqueueOrder == 0)
             {
                 enqueueOrder = unchecked(++_nextEnqueueOrder);
@@ -183,11 +209,12 @@ internal sealed class NetworkBridgeDeliveryPump
                 afterDelivered,
                 enqueueOrder);
 
+            // Cutscene messages must stay in order.
+            // A new cutscene setup cannot jump in front of the state that says it is allowed.
             if (IsOrderedReliableCinematicType(frozen.Type))
             {
-                // The cinematic FSM, definition revisions and 2PC controls
-                // share one reliable receive order. A Definition may not jump
-                // ahead of the FSM generation that authorizes it.
+                // Keep mission state, cutscene phase, scene definitions, and readiness/play controls in their received order.
+                // A scene definition must not overtake the cutscene state that says which scene generation is current.
                 if (_criticalQueue.Count >= _criticalCapacity)
                 {
                     _rejected++;
@@ -209,6 +236,8 @@ internal sealed class NetworkBridgeDeliveryPump
                         GetBacklogLocked());
                 }
 
+                // Keep only the newest update for each NPC/object.
+                // Make/remove messages still stay in order.
                 var replaced = _entityUpdates.TryGetValue(
                     entityId,
                     out var pendingEntityUpdate);
@@ -222,6 +251,8 @@ internal sealed class NetworkBridgeDeliveryPump
 
                 var pendingEntityUpdateValid =
                     replaced && pendingEntityUpdate!.IsStillValid();
+                // Arrival order is not necessarily sender order because UDP messages can arrive late.
+                // Keep the existing update if it is still valid and the arriving sequence is not newer.
                 if (!replaced ||
                     !pendingEntityUpdateValid ||
                     SequenceNumber.IsNewer(
@@ -245,11 +276,14 @@ internal sealed class NetworkBridgeDeliveryPump
             }
             else if (IsCoalescedType(frozen.Type))
             {
+                // For player/camera/animation updates, old data is not useful.
+                // Send the newest view instead of a long backlog.
                 var replaced = _coalesced.TryGetValue(
                     frozen.Type,
                     out var pendingState);
                 var pendingStateValid =
                     replaced && pendingState!.IsStillValid();
+                // As with NPC updates, a delayed older sample must not replace a newer pending sample.
                 if (!replaced ||
                     !pendingStateValid ||
                     SequenceNumber.IsNewer(
@@ -299,6 +333,8 @@ internal sealed class NetworkBridgeDeliveryPump
         return new NetworkBridgeEnqueueResult(disposition, backlog);
     }
 
+    // Start the single worker that removes waiting messages and writes them to the Bridge one at a time.
+    // For example, NPC B can keep receiving network updates while NPC A's local write is still waiting.
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         if (Interlocked.Exchange(ref _runStarted, 1) != 0)
@@ -315,6 +351,8 @@ internal sealed class NetworkBridgeDeliveryPump
                 while (!cancellationToken.IsCancellationRequested &&
                        TryTakeNext(out var queued))
                 {
+                    // The game may reconnect after this was queued.
+                    // Do not send it to the new game connection if it belongs to the old one.
                     var preparedEnvelope = queued.PrepareEnvelope();
                     if (!queued.IsStillValid() || preparedEnvelope is null)
                     {
@@ -327,17 +365,14 @@ internal sealed class NetworkBridgeDeliveryPump
                     var delivered = false;
                     try
                     {
-                        // A protocol frame is never cancelled half-way through
-                        // a pipe write. Runtime shutdown closes the connection
-                        // to release a blocked write and discards that stream.
+                        // A protocol frame is never cancelled half-way through a pipe write.
+                        // Runtime shutdown closes the connection to release a blocked write and discards that stream.
                         delivered = await _deliverAsync(preparedEnvelope)
                             .ConfigureAwait(false);
                         if (delivered)
                         {
-                            // Publish causal readiness while the delivery is
-                            // still in-flight. A reset barrier therefore cannot
-                            // rotate the logical pipe token between the full
-                            // frame write and this callback.
+                            // Publish causal readiness while the delivery is still in-flight.
+                            // A reset barrier therefore cannot rotate the logical pipe token between the full frame write and this callback.
                             queued.NotifyDelivered();
                         }
                     }
@@ -357,6 +392,8 @@ internal sealed class NetworkBridgeDeliveryPump
         }
     }
 
+    // Refuse further enqueues and wake the worker so shutdown can continue.
+    // The cancellation token controls the worker's lifetime separately.
     public void StopAccepting()
     {
         lock (_sync)
@@ -367,6 +404,8 @@ internal sealed class NetworkBridgeDeliveryPump
         SignalWorker();
     }
 
+    // Remove queued messages that should not survive a resync.
+    // This does not stop an already-started write; the delivery barrier handles that case.
     public void ClearPending()
     {
         lock (_sync)
@@ -376,10 +415,9 @@ internal sealed class NetworkBridgeDeliveryPump
     }
 
     /// <summary>
-    /// Stops new pipe deliveries, discards every queued pre-reset frame and
-    /// waits for an already active full-frame write to finish. Frames arriving
-    /// while the barrier is held remain queued and resume only after the owner
-    /// has delivered the reset directly to the bridge.
+    /// Pause ordinary delivery while the caller sends a reset directly to the Bridge.
+    /// Clear the existing queue and wait for any current write to finish so old bytes cannot follow the reset.
+    /// New arrivals wait in the queue until the returned object is disposed.
     /// </summary>
     public async ValueTask<IAsyncDisposable> EnterDeliveryBarrierAsync(
         CancellationToken cancellationToken = default)
@@ -417,6 +455,8 @@ internal sealed class NetworkBridgeDeliveryPump
         }
     }
 
+    // Copy the counters while holding the lock so the log sees one consistent view of queue activity.
+    // ActiveMilliseconds helps detect a write that has been stuck waiting for the game.
     public NetworkBridgePumpSnapshot ReadSnapshot()
     {
         lock (_sync)
@@ -439,10 +479,13 @@ internal sealed class NetworkBridgeDeliveryPump
         }
     }
 
+    // Choose the oldest waiting place across the critical, per-type, and per-NPC collections.
+    // Mark it active before releasing the lock so a simultaneous reset knows a write is in progress.
     private bool TryTakeNext(out QueuedDelivery queued)
     {
         lock (_sync)
         {
+            // Pause normal messages while the reset message is sent directly.
             if (_deliveryPaused ||
                 _criticalQueue.Count == 0 &&
                 _coalesced.Count == 0 &&
@@ -457,6 +500,7 @@ internal sealed class NetworkBridgeDeliveryPump
             var selectedCoalescedType = default(MessageType);
             var selectedEntityId = NetEntityId.None;
 
+            // Pick the oldest message we kept so replacing old updates does not mess up the important message order.
             if (_criticalQueue.TryPeek(out var critical))
             {
                 oldest = critical;
@@ -515,6 +559,8 @@ internal sealed class NetworkBridgeDeliveryPump
         }
     }
 
+    // Record whether the write succeeded, failed, or was skipped because the session changed.
+    // Wake a reset operation that was waiting for this active delivery to finish.
     private void CompleteDelivery(bool delivered, bool invalidated)
     {
         lock (_sync)
@@ -540,6 +586,7 @@ internal sealed class NetworkBridgeDeliveryPump
         }
     }
 
+    // Resume normal queue delivery after the caller has finished its direct reset work.
     private void ExitDeliveryBarrier()
     {
         lock (_sync)
@@ -550,6 +597,8 @@ internal sealed class NetworkBridgeDeliveryPump
         SignalWorker();
     }
 
+    // Empty all three waiting areas while the caller holds the queue lock.
+    // The active write is tracked separately and is not removed by clearing these collections.
     private void ClearPendingLocked()
     {
         _criticalQueue.Clear();
@@ -557,12 +606,15 @@ internal sealed class NetworkBridgeDeliveryPump
         _entityUpdates.Clear();
     }
 
+    // Include a write already underway as well as messages still waiting in the collections.
     private int GetBacklogLocked() =>
         _criticalQueue.Count +
         _coalesced.Count +
         _entityUpdates.Count +
         (_inFlight ? 1 : 0);
 
+    // Give the worker one wake-up notice even if many packets arrived while it was busy.
+    // The worker drains available work after waking, so extra notices are unnecessary.
     private void SignalWorker()
     {
         try
@@ -575,6 +627,7 @@ internal sealed class NetworkBridgeDeliveryPump
         }
     }
 
+    // These messages describe a current view, so retaining old versions has no value once a newer version is ready for the same local bridge.
     private static bool IsCoalescedType(MessageType type) =>
         type is MessageType.PlayerState or
             MessageType.PlayerAnimationState or
@@ -586,12 +639,15 @@ internal sealed class NetworkBridgeDeliveryPump
             MessageType.PlayerAppearanceState or
             MessageType.PlayerMountState;
 
+    // Keep every step of mission/cutscene setup because later steps depend on earlier ones being delivered.
     private static bool IsOrderedReliableCinematicType(MessageType type) =>
         type is MessageType.MissionState or
             MessageType.MissionCinematicState or
             MessageType.AnimSceneDefinition or
             MessageType.AnimSceneControl;
 
+    // Read just the leading network ID to choose this NPC's waiting entry.
+    // This is a queue lookup check, not a replacement for the full entity payload validation elsewhere.
     private static bool TryReadEntityUpdateId(
         ProtocolEnvelope envelope,
         out NetEntityId entityId)
@@ -607,6 +663,8 @@ internal sealed class NetworkBridgeDeliveryPump
         return entityId.IsValid;
     }
 
+    // Own a separate payload array for as long as this message waits in the queue.
+    // ReadOnlyMemory prevents writes through that view, but the original array could still be reused by its owner.
     private static ProtocolEnvelope Freeze(ProtocolEnvelope envelope) =>
         new(
             envelope.Type,

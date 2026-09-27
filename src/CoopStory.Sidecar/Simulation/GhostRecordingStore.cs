@@ -5,6 +5,8 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Simulation;
 
+// On-disk recording of player snapshots for ghost playback tests.
+// It stores copied multiplayer state, not live RDR2 handles or a real player's save.
 internal sealed record GhostRecordingDocument(
     int FormatVersion,
     DateTimeOffset RecordedAtUtc,

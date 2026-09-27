@@ -7,6 +7,8 @@ using CoopStory.Sidecar.Networking;
 
 namespace CoopStory.Sidecar.Simulation;
 
+// Runs an in-process host and guest with artificial network loss/delay.
+// This tests replication behavior without launching two RDR2 games.
 public sealed record SimulationResult(
     int AttemptedSnapshots,
     int DeliveredByImpairment,

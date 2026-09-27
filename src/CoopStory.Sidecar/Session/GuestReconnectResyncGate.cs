@@ -2,6 +2,7 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Session;
 
+// Tells the caller whether a reconnect reset was remembered or was already waiting; duplicate resets should never rebuild the local world twice.
 internal enum GuestReconnectResyncDeferDisposition
 {
     Stored,
@@ -23,9 +24,8 @@ internal readonly record struct GuestReconnectResyncReplayResult(
     bool PeerRequested);
 
 /// <summary>
-/// Holds the guest-local reconnect reset while motion-mode negotiation gates
-/// normal network-to-bridge traffic. Replay retains the validated request
-/// until both the local bridge delivery and the host replay request succeed.
+/// Holds the guest-local reconnect reset while motion-mode negotiation gates normal network-to-bridge traffic.
+/// Replay retains the validated request until both the local bridge delivery and the host replay request succeed.
 /// </summary>
 internal sealed class GuestReconnectResyncGate
 {
@@ -35,6 +35,7 @@ internal sealed class GuestReconnectResyncGate
         CancellationTokenSource Stop);
 
     private readonly object _sync = new();
+    // Only one replay may clear the bridge and request the host snapshot at a time, even if reconnect and motion negotiation finish together.
     private readonly SemaphoreSlim _replayGate = new(1, 1);
     private PendingRequest? _pending;
     private PendingRequest? _active;
@@ -43,6 +44,7 @@ internal sealed class GuestReconnectResyncGate
     public GuestReconnectResyncDeferDisposition Defer(
         ProtocolEnvelope envelope)
     {
+        // Store an immutable copy because the original envelope may be backed by a receive buffer that is reused after this callback returns.
         Validate(envelope);
         lock (_sync)
         {
@@ -51,6 +53,7 @@ internal sealed class GuestReconnectResyncGate
                 return GuestReconnectResyncDeferDisposition.Duplicate;
             }
 
+            // Generation/cancellation lets Clear invalidate a replay already part-way through an asynchronous bridge or host send.
             var generation = unchecked(++_nextGeneration);
             if (generation == 0)
             {
@@ -76,6 +79,7 @@ internal sealed class GuestReconnectResyncGate
         ArgumentNullException.ThrowIfNull(requestHostReplay);
         cancellationToken.ThrowIfCancellationRequested();
 
+        // The critical ordering is: clear stale guest state, tell the local bridge, then ask the host to send its authoritative snapshot.
         await _replayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         PendingRequest? request = null;
         try
@@ -96,6 +100,7 @@ internal sealed class GuestReconnectResyncGate
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken,
                 request.Stop.Token);
+            // Purge all old cached proxy/mirror state before accepting the host replay; otherwise new and old entity identities could be mixed.
             clearGuestState();
             if (!await deliverToBridge(request.Envelope, linked.Token)
                     .ConfigureAwait(false))
@@ -107,6 +112,7 @@ internal sealed class GuestReconnectResyncGate
                     PeerRequested: false);
             }
 
+            // A new disconnect/reset can replace this request while its pipe delivery was pending, so it must not request an obsolete replay.
             if (!IsCurrent(request))
             {
                 return new GuestReconnectResyncReplayResult(
@@ -117,6 +123,7 @@ internal sealed class GuestReconnectResyncGate
 
             var peerRequested = await requestHostReplay(linked.Token)
                 .ConfigureAwait(false);
+            // Retain the request after a failed host send so a later retry repeats the complete safe reset rather than silently proceeding.
             if (peerRequested)
             {
                 lock (_sync)
@@ -166,6 +173,7 @@ internal sealed class GuestReconnectResyncGate
 
     public void Clear()
     {
+        // Cancel the pending or active work outside the lock to avoid running cancellation callbacks while other state is protected.
         PendingRequest? cleared;
         var dispose = false;
         lock (_sync)
@@ -209,6 +217,7 @@ internal sealed class GuestReconnectResyncGate
     private static void Validate(ProtocolEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        // This gate is intentionally narrow: it defers only the empty resync command, never arbitrary network gameplay frames.
         if (envelope.Type != MessageType.ResyncRequest ||
             envelope.Version != ProtocolConstants.Version ||
             !envelope.Payload.IsEmpty)

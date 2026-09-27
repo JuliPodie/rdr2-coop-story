@@ -2,6 +2,8 @@ using System.Numerics;
 
 namespace CoopStory.Sidecar.Simulation;
 
+// Fake motion used only by local tests.
+// It gives the multiplayer code a known repeatable route, making jitter/interpolation bugs easier to reproduce.
 public enum LocalGameTestMotionProfile
 {
     LiveMirror,

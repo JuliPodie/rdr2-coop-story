@@ -7,9 +7,10 @@
 
 namespace coopstory::bridge {
 
-// Exact-event contracts are deliberately separate from ambient filename
-// discovery. They define the small, explicit presentation/reward surface that
-// a bridge-owned adaptation is permitted to expose.
+// Reviewed list of exact Story encounter adaptations that may be shown to both peers.
+// Entries define safe presentation/reward rules, not permission to run scripts.
+// Exact-event contracts are deliberately separate from ambient filename discovery.
+// They define the small, explicit presentation/reward surface that a bridge-owned adaptation is permitted to expose.
 enum class EncounterPeerRole : std::uint8_t {
     Participant = 1,
     Companion = 2,
@@ -20,17 +21,16 @@ struct ExactEncounterDefinition final {
     const char* scriptName{};
     AmbientEncounterProfile profile{AmbientEncounterProfile::HostageRescue};
     bool companionMayLootGeneric{};
-    // A bridge scene may never infer or clone a special pickup from a local
-    // Rockstar event. Set this only after an independently reviewed mapping.
+    // A bridge scene may never infer or clone a special pickup from a local Rockstar event.
+    // Set this only after an independently reviewed mapping.
     bool sceneMayContainUniqueLoot{};
     bool synchronizesHonor{};
 };
 
-// The Valentine O'Driscoll extortion beat. Decompiled script evidence pins the
-// exact script identity; its generic hostile scene can be represented with the
-// bridge-owned hostage-rescue profile. A companion may fight and loot generic
-// supplies. The bridge scene never contains unique event rewards or Honor
-// changes, even for a participant.
+// The Valentine O'Driscoll extortion beat.
+// Decompiled script evidence pins the exact script identity; its generic hostile scene can be represented with the bridge-owned hostage-rescue profile.
+// A companion may fight and loot generic supplies.
+// The bridge scene never contains unique event rewards or Honor changes, even for a participant.
 inline constexpr ExactEncounterDefinition kExtortionEncounter{
     CampaignMissionId("beat_odriscoll_town_encounter"),
     "beat_odriscoll_town_encounter",
@@ -39,9 +39,8 @@ inline constexpr ExactEncounterDefinition kExtortionEncounter{
     false,
     false};
 
-// This is an authenticated wire sentinel, not a Rockstar script identifier
-// and never a reward key. It lets a guest explicitly answer a host's exact
-// Extortion preflight when that guest's private save does not offer the beat.
+// This is an authenticated wire sentinel, not a Rockstar script identifier and never a reward key.
+// It lets a guest explicitly answer a host's exact Extortion preflight when that guest's private save does not offer the beat.
 inline constexpr std::uint32_t kExtortionCompanionPreflightEvidence =
     0x4350'4D50U;
 

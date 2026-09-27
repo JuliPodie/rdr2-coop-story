@@ -3,6 +3,8 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Simulation;
 
+// Repeatable fake combat/action timeline for local multiplayer tests.
+// It lets developers test aim, shooting, reloads, jumps, and movement without input.
 internal readonly record struct SyntheticActionSample(
     PlayerStateFlags Flags,
     Vector3 AimTarget,
@@ -59,11 +61,9 @@ internal static class SyntheticPlayerActionCourse
         var movementBlocked =
             cycleSeconds is >= ReloadStartSeconds and < ReloadEndSeconds;
 
-        // The action and movement courses share one logical clock. While a
-        // full-body reload owns the puppet task graph, the network marker is
-        // frozen at the same point instead of continuing along the route and
-        // creating an impossible 10-15 metre catch-up. Subtracting every
-        // completed reload keeps the trajectory continuous across cycles.
+        // The action and movement courses share one logical clock.
+        // While a full-body reload owns the puppet task graph, the network marker is frozen at the same point instead of continuing along the route and creating an impossible 10-15 metre catch-up.
+        // Subtracting every completed reload keeps the trajectory continuous across cycles.
         return new SyntheticMovementCoupling(
             TimeSpan.FromSeconds(
                 Math.Max(0d, totalSeconds - totalBlockedSeconds)),

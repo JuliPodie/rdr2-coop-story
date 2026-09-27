@@ -6,6 +6,8 @@ using CoopStory.Sidecar.Diagnostics;
 
 namespace CoopStory.Sidecar.Networking;
 
+// Guest-side counterpart to LanSessionHost.
+// It reconnects with backoff, proves identity over TCP, then rebuilds its remote-world view from a host resync.
 public sealed class LanSessionGuest : ILanSession
 {
     private readonly object _peerSync = new();
@@ -135,6 +137,7 @@ public sealed class LanSessionGuest : ILanSession
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _stop.Token);
+        // Back off repeated connection attempts so an unavailable host does not consume the guest's CPU/network or flood its diagnostic log.
         var reconnectDelay = _config.Network.ReconnectMinMs;
         var attempt = 0;
 
@@ -154,6 +157,7 @@ public sealed class LanSessionGuest : ILanSession
                         ["attempt"] = attempt
                     },
                     linked.Token).ConfigureAwait(false);
+                // This returns on disconnect/timeout, after which the loop schedules a fresh authenticated connection attempt.
                 await ConnectAndRunAsync(linked.Token).ConfigureAwait(false);
                 reconnectDelay = _config.Network.ReconnectMinMs;
             }
@@ -190,6 +194,7 @@ public sealed class LanSessionGuest : ILanSession
                 },
                 cancellationToken: linked.Token).ConfigureAwait(false);
             await Task.Delay(reconnectDelay, linked.Token).ConfigureAwait(false);
+            // Exponential backoff is capped by configuration so recovery still happens promptly once the host comes back online.
             reconnectDelay = Math.Min(
                 reconnectDelay * 2,
                 _config.Network.ReconnectMaxMs);
@@ -270,6 +275,7 @@ public sealed class LanSessionGuest : ILanSession
             return false;
         }
 
+        // Latest movement/world updates accept UDP loss, but still include an HMAC and this guest's instance ID before leaving the machine.
         var datagram = AuthenticatedDatagramCodec.Encode(
             CreateEnvelope(type, payload, tick),
             _credentials,
@@ -307,6 +313,7 @@ public sealed class LanSessionGuest : ILanSession
 
     private async Task ConnectAndRunAsync(CancellationToken cancellationToken)
     {
+        // Resolve before opening sockets so invite codes may use either a LAN IPv4 address or a host name that resolves to one.
         var addresses = await Dns.GetHostAddressesAsync(
             _config.HostAddress,
             cancellationToken).ConfigureAwait(false);
@@ -319,6 +326,7 @@ public sealed class LanSessionGuest : ILanSession
             .ConfigureAwait(false);
         await using var peer = new ControlConnection(tcp);
         var authenticated = false;
+        // TCP must authenticate successfully before the guest creates/binds its UDP snapshot lane or advertises itself as connected to the bridge.
         var handshake = await HandshakeProtocol.ConnectToHostAsync(
             peer,
             _credentials,
@@ -330,6 +338,7 @@ public sealed class LanSessionGuest : ILanSession
 
         using var udp = new UdpClient(new IPEndPoint(_udpListenAddress, 0));
         var hostUdpEndpoint = new IPEndPoint(address, _config.UdpPort);
+        // The host TCP identity and endpoint seed the policy that decides which future UDP datagrams are permitted into gameplay callbacks.
         var hostUdpBinding = new UdpPeerBinding(
             hostUdpEndpoint.Address,
             hostUdpEndpoint.Port,
@@ -338,6 +347,7 @@ public sealed class LanSessionGuest : ILanSession
         lock (_peerSync)
         {
             _activePeer = peer;
+            // Any queued work using the former host connection becomes stale immediately when this replacement generation is installed.
             _controlPeerGeneration = NextPeerGeneration(
                 _controlPeerGeneration);
             _udp = udp;
@@ -345,6 +355,7 @@ public sealed class LanSessionGuest : ILanSession
         }
         _ = TryCaptureControlPeer(out var peerToken);
 
+        // Every successful guest connection asks for a reliable authoritative snapshot; otherwise the bridge could keep replicas from last session.
         var resync = CreateEnvelope(
             MessageType.ResyncRequest,
             ReadOnlyMemory<byte>.Empty,
@@ -372,6 +383,7 @@ public sealed class LanSessionGuest : ILanSession
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            // Disconnect if any of the four lanes fails: TCP control, UDP receive, heartbeat send, or liveness timeout.
             var receive = ReceiveControlLoopAsync(
                 peer,
                 peerToken,
@@ -450,6 +462,7 @@ public sealed class LanSessionGuest : ILanSession
         while (!cancellationToken.IsCancellationRequested)
         {
             var received = await udp.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            // Drop traffic from any endpoint other than the authenticated host before spending time verifying/parsing its payload.
             if (!hostBinding.IsSourceAllowed(received.RemoteEndPoint))
             {
                 await LogUdpPolicyRejectionAsync(
@@ -461,6 +474,7 @@ public sealed class LanSessionGuest : ILanSession
             ProtocolEnvelope envelope;
             try
             {
+                // Verify sender instance and HMAC before handing a UDP frame to the replay window or the runtime's state application logic.
                 envelope = AuthenticatedDatagramCodec.Decode(
                     received.Buffer,
                     _credentials,
@@ -476,6 +490,7 @@ public sealed class LanSessionGuest : ILanSession
                 continue;
             }
 
+            // This applies message-type and sequence/replay policy, then pins the endpoint once the first valid host datagram arrives.
             if (!hostBinding.TryAccept(
                     received.RemoteEndPoint,
                     envelope,
@@ -499,6 +514,7 @@ public sealed class LanSessionGuest : ILanSession
         string reason,
         CancellationToken cancellationToken)
     {
+        // Sample the warnings after the first few failures to retain evidence of a bad route without writing one line for every rejected packet.
         var count = Interlocked.Increment(ref _udpPolicyRejections);
         if (count > 3 && (count & (count - 1)) != 0)
         {
@@ -524,6 +540,7 @@ public sealed class LanSessionGuest : ILanSession
             TimeSpan.FromMilliseconds(_config.Network.HeartbeatIntervalMs));
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
+            // TCP can otherwise be idle during gameplay, so periodically prove that both the reliable channel and the remote process are alive.
             var heartbeat = new HeartbeatPayload(
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 NetworkClock.Tick);
@@ -544,6 +561,7 @@ public sealed class LanSessionGuest : ILanSession
             TimeSpan.FromMilliseconds(_config.Network.HeartbeatIntervalMs));
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
+            // A stale host is treated as disconnected; applying old snapshots is worse than reconnecting and receiving a fresh authoritative set.
             if (Environment.TickCount64 - peer.LastReceivedTimestamp >
                 _config.Network.HeartbeatTimeoutMs)
             {

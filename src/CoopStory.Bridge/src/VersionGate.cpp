@@ -43,6 +43,8 @@ namespace {
 VersionGateResult VersionGate::Evaluate(
     const GameIdentity& identity,
     const RuntimeMode& mode) {
+    // Fail closed before any network/ScriptHook logic becomes active.
+    // The mod supports one known offline executable rather than guessing native offsets.
     if (identity.executableName.empty() || identity.fileVersion.empty() ||
         identity.sha256.empty()) {
         return Deny(
@@ -66,6 +68,7 @@ VersionGateResult VersionGate::Evaluate(
             GateFailure::UnsupportedHash,
             "unsupported RDR2.exe SHA-256; no compatibility fallback is allowed");
     }
+    // Online use is explicitly refused; this multiplayer implementation is for offline Story Mode and must not attach to an online/network session.
     if (mode.onlineSessionActive) {
         return Deny(
             GateFailure::OnlineSessionDetected,

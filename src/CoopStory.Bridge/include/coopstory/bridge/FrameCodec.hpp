@@ -14,12 +14,16 @@
 
 namespace coopstory::bridge {
 
+// Every message starts with this small header.
+// The rest of the message holds the data for that message type.
 inline constexpr std::uint32_t kFrameMagic = 0x50433252U;  // LE bytes: "R2CP"
 inline constexpr std::uint16_t kProtocolVersion = 36U;
 inline constexpr std::size_t kFrameHeaderSize = 24U;
 inline constexpr std::uint32_t kMaximumFramePayload = 1'048'576U;
 inline constexpr std::size_t kMaximumUdpDatagram = 1'200U;
 
+// This says what the message is, like PlayerState or EntitySpawn.
+// The sidecar decides whether to send it with TCP or UDP.
 enum class MessageType : std::uint16_t {
     Hello = 1,
     HelloAck = 2,
@@ -66,10 +70,8 @@ enum class MessageType : std::uint16_t {
     PickupCollected = 43,
     MissionProgression = 44,
     MissionObjective = 45,
-    // Host -> guest: a read-only observation of an admitted local Story
-    // conversation. A companion-only guest may present the same catalogued
-    // root with bridge-owned hidden voice proxies; it never skips or mutates
-    // a guest Story mission conversation.
+    // Host -> guest: a read-only observation of an admitted local Story conversation.
+    // A companion-only guest may present the same catalogued root with bridge-owned hidden voice proxies; it never skips or mutates a guest Story mission conversation.
     MissionDialogueCue = 46,
     // Guest -> host: readiness/diagnostic for the exact cue identity.
     MissionDialogueReady = 47,
@@ -107,12 +109,15 @@ struct DecodeResult final {
     std::string error{};
 };
 
+// Turns one full message into bytes and bytes back into a message.
+// It does not send anything by itself.
 class FrameCodec final {
 public:
     [[nodiscard]] static std::vector<std::uint8_t> Encode(const Frame& frame);
     [[nodiscard]] static DecodeResult DecodeOne(std::span<const std::uint8_t> bytes);
 };
 
+// Puts a full message back together when the pipe gives us only part of it.
 class FrameStreamDecoder final {
 public:
     void Append(std::span<const std::uint8_t> bytes);
@@ -133,6 +138,7 @@ enum class SequenceDisposition {
     Stale,
 };
 
+// Helps ignore old messages so they cannot replace newer game state.
 class SequenceWindow final {
 public:
     [[nodiscard]] SequenceDisposition Observe(std::uint32_t sequence) noexcept;
@@ -154,6 +160,8 @@ private:
     std::uint32_t next_;
 };
 
+// Remote-player movement messages.
+// The host/guest send the same fixed layout through the pipe, while the Sidecar chooses TCP for important actions and UDP for frequent state snapshots.
 enum class PlayerTraversalKind : std::uint8_t {
     None = 0,
     Jump = 1,
@@ -180,9 +188,8 @@ struct PlayerStatePayload final {
     std::uint32_t flags{};
     Vec3 aimTarget{};
     std::uint32_t fireSequence{};
-    // Semantic locomotion intent. Position/velocity remain authoritative
-    // checkpoints, while these fields let the receiver reproduce the route
-    // and action without trying to infer everything from delayed transforms.
+    // Semantic locomotion intent.
+    // Position/velocity remain authoritative checkpoints, while these fields let the receiver reproduce the route and action without trying to infer everything from delayed transforms.
     float movementHeading{};
     float localForwardSpeed{};
     float localRightSpeed{};
@@ -301,8 +308,7 @@ enum class PlayerActionFlag : std::uint32_t {
 };
 
 // Stable semantic discriminator carried in the existing variantHash field.
-// It distinguishes a deliberate mounted-player pull from an ordinary
-// Knockdown, whose input controls overlap vanilla talk/mount prompts.
+// It distinguishes a deliberate mounted-player pull from an ordinary Knockdown, whose input controls overlap vanilla talk/mount prompts.
 inline constexpr std::uint32_t kPlayerActionVariantPeerMountPull =
     0x4D50554CU; // "MPUL"
 
@@ -335,6 +341,8 @@ inline constexpr std::size_t kPlayerActionPayloadSize = 88U;
 [[nodiscard]] std::optional<PlayerActionPayload> DecodePlayerAction(
     std::span<const std::uint8_t> bytes);
 
+// Host-checked interactions such as revive, lasso release, and mounting.
+// A guest can ask for them, but only the host confirms the result.
 enum class InteractionKind : std::uint8_t {
     None = 0,
     ReleaseRestraint = 1,
@@ -428,6 +436,7 @@ inline constexpr std::size_t kInteractionResultPayloadSize = 44U;
 [[nodiscard]] std::optional<InteractionResultPayload>
 DecodeInteractionResult(std::span<const std::uint8_t> bytes);
 
+// Restraint state is separate from the action that caused it so a reconnecting player can rebuild the current lasso/hogtie result without replaying input.
 enum class PlayerRestraintState : std::uint8_t {
     Free = 0,
     Lassoed = 1,
@@ -456,6 +465,8 @@ inline constexpr std::size_t kRestraintStatePayloadSize = 28U;
 [[nodiscard]] std::optional<RestraintStatePayload>
 DecodeRestraintState(std::span<const std::uint8_t> bytes);
 
+// Player identity and appearance are lower-rate snapshots.
+// They allow a newly connected/reconnected game to make the correct remote player before motion snapshots start arriving.
 struct PlayerIdentityPayload final {
     NetEntityId entityId{};
     PlayerSlot slot{PlayerSlot::Host};
@@ -476,10 +487,9 @@ enum class PlayerAppearanceStateFlag : std::uint16_t {
     StoryMetaPed = 1U << 1U,
 };
 
-// A portable MetaPed description. Local handles, pointers and texture objects
-// never leave the process; only stable shop-component hashes are replicated.
-// The original component order is retained because some Story MetaPed layers
-// override earlier layers during UPDATE_PED_VARIATION.
+// A portable MetaPed description.
+// Local handles, pointers and texture objects never leave the process; only stable shop-component hashes are replicated.
+// The original component order is retained because some Story MetaPed layers override earlier layers during UPDATE_PED_VARIATION.
 struct PlayerAppearanceStatePayload final {
     NetEntityId entityId{};
     PlayerSlot slot{PlayerSlot::Host};
@@ -499,6 +509,8 @@ inline constexpr std::size_t kMaximumPlayerAppearanceComponents = 64U;
 [[nodiscard]] std::optional<PlayerAppearanceStatePayload>
 DecodePlayerAppearanceState(std::span<const std::uint8_t> bytes);
 
+// World-mirror messages describe host-owned NPCs/objects.
+// The guest creates a local RDR2 proxy from these values; it never receives the host's local handle.
 enum class WorldEntityKind : std::uint8_t {
     Ped = 1,
     Object = 2,
@@ -641,6 +653,8 @@ inline constexpr std::size_t kWorldStatePayloadSize = 24U;
 [[nodiscard]] std::optional<WorldStatePayload> DecodeWorldState(
     std::span<const std::uint8_t> bytes);
 
+// Mission and cinematic state are host-owned.
+// Epochs, generations, and revisions make old packets harmless after a reconnect or checkpoint change.
 enum class MissionPhase : std::uint8_t {
     Idle = 0,
     Active = 1,
@@ -773,6 +787,7 @@ inline constexpr std::size_t kMissionCinematicActionPayloadSize = 32U;
 [[nodiscard]] std::optional<MissionCinematicActionPayload>
 DecodeMissionCinematicAction(std::span<const std::uint8_t> bytes);
 
+// Animation-scene replication is the safe portable description of a cutscene: state, roles, resources, and camera timing—not an RDR2 scene handle.
 enum class AnimSceneReplicaStateFlag : std::uint32_t {
     Active = 1U << 0U,
     Running = 1U << 1U,
@@ -782,16 +797,13 @@ enum class AnimSceneReplicaStateFlag : std::uint32_t {
 };
 
 // Identifies an engine-owned AnimScene by portable characteristics only.
-// The local AnimScene handle is deliberately not transmitted. A guest may
-// attach only to an already existing local scene whose dictionary hash and
-// duration match this state; otherwise the camera-replication fallback stays
-// active.
+// The local AnimScene handle is deliberately not transmitted.
+// A guest may attach only to an already existing local scene whose dictionary hash and duration match this state; otherwise the camera-replication fallback stays active.
 struct AnimSceneReplicaStatePayload final {
     NetEntityId hostEntityId{};
     std::uint32_t missionEpoch{};
     std::uint32_t cinematicGeneration{};
-    // Zero keeps the dictionary-signature SAFE_FALLBACK path valid when the
-    // runtime capture layer could not produce a complete definition.
+    // Zero keeps the dictionary-signature SAFE_FALLBACK path valid when the runtime capture layer could not produce a complete definition.
     std::uint32_t definitionRevision{};
     std::uint32_t revision{};
     std::uint32_t dictionaryHash{};
@@ -891,8 +903,7 @@ inline constexpr std::size_t kMaximumAnimSceneResourceBytes = 256U;
 inline constexpr std::size_t kMaximumAnimScenePlaybackListBytes = 128U;
 inline constexpr std::size_t kMaximumAnimSceneRoleNameBytes = 64U;
 
-// Computes SHA-256 over the canonical wire payload with the 16 fingerprint
-// bytes cleared, then returns the first 16 digest bytes as two LE words.
+// Computes SHA-256 over the canonical wire payload with the 16 fingerprint bytes cleared, then returns the first 16 digest bytes as two LE words.
 // All other definition fields must already satisfy canonical validation.
 [[nodiscard]] AnimSceneDefinitionFingerprint
 ComputeAnimSceneDefinitionFingerprint(
@@ -967,8 +978,8 @@ enum class MissionCameraStateFlag : std::uint32_t {
     SourceGameplayCameraFallback = 1U << 6U,
 };
 
-// A portable rendering-camera snapshot. This intentionally does not expose
-// local camera handles, AnimScene identities or pointers across processes.
+// A portable rendering-camera snapshot.
+// This intentionally does not expose local camera handles, AnimScene identities or pointers across processes.
 struct MissionCameraStatePayload final {
     NetEntityId hostEntityId{};
     std::uint32_t missionEpoch{};
@@ -1003,6 +1014,8 @@ inline constexpr std::size_t kMissionCameraStatePayloadSize = 56U;
 [[nodiscard]] std::optional<MissionCameraStatePayload>
 DecodeMissionCameraState(std::span<const std::uint8_t> bytes);
 
+// Small player-control snapshots.
+// They keep equipment and a shared pause vote consistent without giving either peer control over the other's inventory.
 enum class EquipmentStateFlag : std::uint32_t {
     Equipped = 1U << 0U,
     Reloading = 1U << 1U,
@@ -1050,6 +1063,8 @@ inline constexpr std::size_t kPauseVotePayloadSize = 12U;
 [[nodiscard]] std::optional<PauseVotePayload> DecodePauseVote(
     std::span<const std::uint8_t> bytes);
 
+// Local menu commands sent from this Bridge to its own Sidecar.
+// These are not LAN wire opcodes; the Sidecar translates/authorizes any cross-peer action.
 enum class BridgeCommand : std::uint16_t {
     ToggleSoloOverride = 1,
     TeleportGuest = 2,
@@ -1078,6 +1093,8 @@ enum class BridgeCommand : std::uint16_t {
     ToggleGuestWorldView = 25,
 };
 
+// Host-approved campaign unlocks and pickup evidence.
+// These messages contain small safe identifiers instead of save paths, full inventories, or balances.
 enum class CampaignCapabilityKind : std::uint8_t {
     WeaponShopEligibility = 1,
     Recipe = 2,
@@ -1109,14 +1126,14 @@ struct PickupCollectedPayload final {
     std::uint32_t pickupHash{};
 };
 
-// A deny-by-default per-mission handshake.  It contains only a catalog mission
-// ID and transaction identity—never a save path, inventory, or script memory.
+// A deny-by-default per-mission handshake.
+// It contains only a catalog mission ID and transaction identity—never a save path, inventory, or script memory.
 enum class MissionProgressionPhase : std::uint8_t {
     Offer = 1,
     Eligibility = 2,
     Completion = 3,
-    // Guest acknowledgement that the idempotent MissionData/reward
-    // transaction has persisted locally. It carries no save data itself.
+    // Guest acknowledgement that the idempotent MissionData/reward transaction has persisted locally.
+    // It carries no save data itself.
     Applied = 4,
     // The host permits one short, exact-ID guest Story mission start window.
     StartBarrierOpen = 5,
@@ -1139,9 +1156,8 @@ struct MissionProgressionPayload final {
     std::uint64_t eventId{};
     MissionProgressionPhase phase{MissionProgressionPhase::Offer};
     std::uint8_t flags{};
-    // MissionData rating from the host's completed mission: normal complete
-    // (2), bronze (3), silver (4), or gold (5). It is zero for offer and
-    // eligibility frames and audit-only completions.
+    // MissionData rating from the host's completed mission: normal complete (2), bronze (3), silver (4), or gold (5).
+    // It is zero for offer and eligibility frames and audit-only completions.
     std::uint8_t completionRating{};
     // Positive local-cash delta observed over this exact host mission run.
     // It is bounded and never represents the host's total balance.
@@ -1154,8 +1170,8 @@ inline constexpr std::size_t kMissionProgressionPayloadSize = 24U;
     const MissionProgressionPayload& payload);
 [[nodiscard]] std::optional<MissionProgressionPayload> DecodeMissionProgression(
 std::span<const std::uint8_t> bytes);
-// Presentation-only host objective. It contains a bounded UTF-8 line from
-// UILOG and no script globals, pointers, save data, or guest-authored state.
+// Presentation-only host objective.
+// It contains a bounded UTF-8 line from UILOG and no script globals, pointers, save data, or guest-authored state.
 struct MissionObjectivePayload final {
     NetEntityId hostEntityId{};
     std::uint32_t missionEpoch{};
@@ -1172,9 +1188,8 @@ inline constexpr std::size_t kMaximumMissionObjectiveUtf8Bytes = 192U;
 [[nodiscard]] std::optional<MissionObjectivePayload> DecodeMissionObjective(
     std::span<const std::uint8_t> bytes);
 
-// Scripted-conversation roots are represented by catalog-owned numeric IDs,
-// never arbitrary strings supplied by a peer. The tuple identifies a single
-// observation within a host Story mission/checkpoint instance.
+// Scripted-conversation roots are represented by catalog-owned numeric IDs, never arbitrary strings supplied by a peer.
+// The tuple identifies a single observation within a host Story mission/checkpoint instance.
 struct MissionDialogueCuePayload final {
     NetEntityId hostEntityId{};
     std::uint32_t missionEpoch{};
@@ -1275,8 +1290,9 @@ inline constexpr std::size_t kCampaignCapabilityAckPayloadSize = 16U;
 [[nodiscard]] std::vector<std::uint8_t> EncodeCampaignCapabilityAck(const CampaignCapabilityAckPayload& payload);
 [[nodiscard]] std::optional<CampaignCapabilityAckPayload> DecodeCampaignCapabilityAck(std::span<const std::uint8_t> bytes);
 
-// Wire opcodes are shared with the C# sidecar. They are intentionally separate
-// from the local F9 menu enum above and must never be converted by numeric cast.
+// Commands and downed/revive messages sent across the Bridge/Sidecar boundary.
+// Wire opcodes are shared with the C# sidecar.
+// They are intentionally separate from the local F9 menu enum above and must never be converted by numeric cast.
 enum class CommandOpcode : std::uint16_t {
     SpawnReplica = 1,
     ApplyTransform = 2,

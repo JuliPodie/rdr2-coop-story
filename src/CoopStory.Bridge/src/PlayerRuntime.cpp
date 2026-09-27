@@ -6,6 +6,7 @@
 namespace coopstory::bridge {
 
 CoopPlayerStateMachine::CoopPlayerStateMachine() {
+    // Spectator is an overlay state; remember the genuine lifecycle it must restore when a player leaves solo/spectator mode.
     stateBeforeSpectator_.fill(PlayerLifecycle::Alive);
 }
 
@@ -19,6 +20,8 @@ const PlayerRuntimeState& CoopPlayerStateMachine::State(
 }
 
 void CoopPlayerStateMachine::SetDowned(const PlayerSlot slot) {
+    // Network health is logical co-op state.
+    // The facade separately applies the RDR2 downed presentation once BridgeRuntime receives these signals.
     auto& state = players_[Index(slot)];
     state.lifecycle = PlayerLifecycle::Downed;
     state.healthFraction = 0.0F;
@@ -39,6 +42,7 @@ std::vector<PlayerRuntimeSignal> CoopPlayerStateMachine::SetSpectator(
     const bool enabled) {
     std::vector<PlayerRuntimeSignal> signals;
     auto& state = players_[Index(slot)];
+    // Enter/exit emits an edge signal only once so the native facade does not recreate camera/visibility effects on every following simulation tick.
     if (enabled && state.lifecycle != PlayerLifecycle::Spectator) {
         stateBeforeSpectator_[Index(slot)] =
             state.lifecycle == PlayerLifecycle::Reviving
@@ -76,6 +80,7 @@ std::vector<PlayerRuntimeSignal> CoopPlayerStateMachine::Tick(
     std::vector<PlayerRuntimeSignal> signals;
     std::optional<PlayerSlot> validTarget;
 
+    // Advance a revive only while its interaction, range, lifecycle and reviver eligibility remain valid; releasing any condition cancels it below.
     if (reviveAttempt.has_value()) {
         const auto& attempt = *reviveAttempt;
         auto& target = players_[Index(attempt.target)];
@@ -120,14 +125,15 @@ std::vector<PlayerRuntimeSignal> CoopPlayerStateMachine::Tick(
         }
     }
 
+    // Any target not confirmed during this tick loses its in-progress revive.
     for (const auto slot : {PlayerSlot::Host, PlayerSlot::Guest}) {
         if (!validTarget.has_value() || validTarget.value() != slot) {
             CancelRevive(slot, signals);
         }
     }
 
-    // A mutual down is a revive/recovery state, not consent to discard a
-    // checkpoint.  The host must explicitly choose any retry from the menu.
+    // A mutual down is a revive/recovery state, not consent to discard a checkpoint.
+    // The host must explicitly choose any retry from the menu.
     return signals;
 }
 

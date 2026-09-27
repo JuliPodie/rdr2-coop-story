@@ -2,6 +2,8 @@ using System.Numerics;
 
 namespace CoopStory.Protocol;
 
+// Legacy/protocol-side bounded snapshot history.
+// It exposes the same essential idea as the bridge's remote-motion buffer without depending on RDR2 natives.
 public sealed class PlayerStateInterpolationBuffer
 {
     private readonly List<TimedState> _states;
@@ -24,6 +26,7 @@ public sealed class PlayerStateInterpolationBuffer
 
     public bool TryAdd(uint sequence, ulong tick, PlayerStatePayload state)
     {
+        // Never place duplicate or late data into this strictly ordered history.
         if (!_sequence.TryAccept(sequence))
         {
             return false;
@@ -41,6 +44,7 @@ public sealed class PlayerStateInterpolationBuffer
         }
 
 
+        // A locomotion epoch marks a discontinuity such as respawn/teleport; discard the old route rather than visually blending across it.
         if (_states.Count > 0 &&
             _states[^1].State.LocomotionEpoch != 0 &&
             state.LocomotionEpoch != 0 &&
@@ -79,6 +83,8 @@ public sealed class PlayerStateInterpolationBuffer
             return false;
         }
 
+        // Render behind the sender's now-tick so two confirmed snapshots are usually available.
+        // Outside history, hold the closest state safely.
         var delay = (ulong)interpolationDelayMs;
         var targetTick = remoteNowTick >= delay ? remoteNowTick - delay : 0;
         if (targetTick <= _states[0].Tick)
@@ -93,6 +99,7 @@ public sealed class PlayerStateInterpolationBuffer
             return true;
         }
 
+        // Locate the surrounding pair and use velocity-aware interpolation.
         for (var index = 1; index < _states.Count; index++)
         {
             var newer = _states[index];
@@ -124,6 +131,7 @@ public sealed class PlayerStateInterpolationBuffer
         float amount,
         float intervalSeconds)
     {
+        // Use Hermite for position and shortest-angle interpolation for heading so walking around the 0/360-degree boundary does not spin the puppet.
         var headingDelta = NormalizeAngle(newer.Heading - older.Heading);
         return older with
         {

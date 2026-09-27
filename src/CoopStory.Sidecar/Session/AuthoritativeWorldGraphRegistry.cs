@@ -2,6 +2,8 @@ using CoopStory.Protocol;
 
 namespace CoopStory.Sidecar.Session;
 
+// Outcome of applying an authoritative host graph frame to the sidecar cache.
+// Counters for these results feed the graph/desync diagnostics.
 internal enum WorldGraphApplyDisposition
 {
     Applied,
@@ -22,9 +24,9 @@ internal readonly record struct WorldGraphRegistrySnapshot(
     long CascadedDespawns);
 
 /// <summary>
-/// Sidecar copy of the host-authoritative desired world. It never stores RDR2
-/// handles: only stable NetEntityId nodes and their parent edges. The bridge
-/// remains responsible for local ped handles and rendering.
+/// Sidecar copy of the host-authoritative desired world.
+/// It never stores RDR2 handles: only stable NetEntityId nodes and their parent edges.
+/// The bridge remains responsible for local ped handles and rendering.
 /// </summary>
 internal sealed class AuthoritativeWorldGraphRegistry
 {
@@ -33,6 +35,7 @@ internal sealed class AuthoritativeWorldGraphRegistry
         uint Sequence,
         ulong Tick);
 
+    // One lock keeps node topology and per-entity sequence tombstones coherent while network reception and a pipe-reconnect replay happen concurrently.
     private readonly object _sync = new();
     private readonly Dictionary<NetEntityId, Node> _nodes = [];
     private readonly Dictionary<NetEntityId, uint> _sequences = [];
@@ -54,6 +57,8 @@ internal sealed class AuthoritativeWorldGraphRegistry
         _maximumNodes = maximumNodes;
     }
 
+    // Spawn/update is an upsert; despawn removes its dependency subtree.
+    // The cache stores desired wire state only, not native RDR2 proxy handles.
     public WorldGraphApplyDisposition Apply(ProtocolEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
@@ -69,6 +74,7 @@ internal sealed class AuthoritativeWorldGraphRegistry
         }
     }
 
+    // Reconstruct a reliable reconnect snapshot in parent-first order so the guest bridge can create mount/attachment parents before their children.
     public IReadOnlyList<ProtocolEnvelope> CaptureSpawnSnapshot()
     {
         lock (_sync)
@@ -132,6 +138,8 @@ internal sealed class AuthoritativeWorldGraphRegistry
             return sequenceDisposition;
         }
 
+        // Match the bridge's fixed graph budget.
+        // A beyond-budget host entity is intentionally absent rather than causing an unbounded resync replay.
         if (!_nodes.ContainsKey(state.EntityId) &&
             _nodes.Count >= _maximumNodes)
         {
@@ -161,6 +169,7 @@ internal sealed class AuthoritativeWorldGraphRegistry
             return sequenceDisposition;
         }
 
+        // Parent removal must remove every child and tombstone their sequences, preventing a delayed entity update from recreating a floating child.
         var subtree = DescendantsLocked(despawn.EntityId)
             .OrderByDescending(DependencyDepthLocked)
             .ThenBy(static id => id.Value)

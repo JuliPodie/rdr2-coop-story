@@ -12,6 +12,7 @@ MissionBubbleController::MissionBubbleController(
     : action_(action),
       warningMeters_(warningMeters),
       limitMeters_(limitMeters) {
+    // A warning boundary must precede the hard action boundary; invalid config would otherwise teleport/penalize players unpredictably.
     if (!std::isfinite(warningMeters_) || !std::isfinite(limitMeters_) ||
         warningMeters_ < 0.0F || limitMeters_ <= warningMeters_) {
         throw std::invalid_argument(
@@ -34,6 +35,7 @@ MissionBubbleDecision MissionBubbleController::Evaluate(
         }
     }
 
+    // Execute an over-limit action only on entry, not once per frame while the player remains outside the cooperative mission bubble.
     const bool changed = zone != lastZone_;
     const bool execute =
         zone == MissionBubbleZone::Exceeded &&

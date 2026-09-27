@@ -7,9 +7,10 @@
 
 namespace coopstory::bridge {
 
-// These are bridge-owned activities, never names of Rockstar random-event
-// scripts.  A local vanilla event can be proposed, but only this small stable
-// vocabulary may become a cross-peer instance.
+// Rules/state machine for mod-owned free-roam encounters.
+// The host accepts or rejects a guest suggestion, then owns the shared NPCs and final outcome.
+// These are bridge-owned activities, never names of Rockstar random-event scripts.
+// A local vanilla event can be proposed, but only this small stable vocabulary may become a cross-peer instance.
 enum class AmbientEncounterProfile : std::uint8_t {
     RoadsideAmbush = 1,
     HostageRescue = 2,
@@ -19,10 +20,8 @@ enum class AmbientEncounterProfile : std::uint8_t {
 };
 
 // Every free-roam observation is classified before it can enter the network.
-// Only the first lane can be created from ambient evidence. The exact-ID lane
-// is reserved for entries that reuse the campaign barrier after a separately
-// reviewed dialogue and reward contract; unknown vanilla scripts always stay
-// local.
+// Only the first lane can be created from ambient evidence.
+// The exact-ID lane is reserved for entries that reuse the campaign barrier after a separately reviewed dialogue and reward contract; unknown vanilla scripts always stay local.
 enum class EncounterCoopLane : std::uint8_t {
     BridgeOwned = 1,
     ExactIdBarrier = 2,
@@ -61,9 +60,8 @@ enum class AmbientEncounterPhase : std::uint8_t {
     Abandoned = 6,
 };
 
-// The host records the guest's exact-event preflight before activating the
-// common bridge-owned scene.  This is display/reward policy only; it never
-// transfers a save, inventory or corpse-loot state.
+// The host records the guest's exact-event preflight before activating the common bridge-owned scene.
+// This is display/reward policy only; it never transfers a save, inventory or corpse-loot state.
 enum class AmbientEncounterPeerDisposition : std::uint8_t {
     Unknown = 0,
     Participant = 1,
@@ -99,16 +97,14 @@ struct AmbientEncounterInstance final {
     std::uint16_t rosterCount{};
     std::uint64_t hostStartTick{};
     bool hostOriginated{};
-    // This is process-local presentation authority, never transmitted.  The
-    // host creates the encounter actors; guests receive those actors through
-    // the existing bounded world-entity replication lane.
+    // This is process-local presentation authority, never transmitted.
+    // The host creates the encounter actors; guests receive those actors through the existing bounded world-entity replication lane.
     bool localAuthority{};
     std::uint32_t exactEventId{};
     AmbientEncounterPeerDisposition guestDisposition{
         AmbientEncounterPeerDisposition::Unknown};
-    // Host-local discovery evidence.  Generic bridge scenes use this only to
-    // identify which local source actors may be masked during presentation;
-    // it is not a reward key and is not needed by the guest proxy scene.
+    // Host-local discovery evidence.
+    // Generic bridge scenes use this only to identify which local source actors may be masked during presentation; it is not a reward key and is not needed by the guest proxy scene.
     std::uint32_t sourceEvidenceHash{};
 };
 
@@ -131,9 +127,8 @@ struct AmbientEncounterHostContext final {
         phase == AmbientEncounterPhase::Abandoned;
 }
 
-// Pure host authority policy.  It deliberately refuses to adopt while either
-// player is in Story/cinematic ownership; the guest then keeps their ordinary
-// local encounter and no world state is copied.
+// Pure host authority policy.
+// It deliberately refuses to adopt while either player is in Story/cinematic ownership; the guest then keeps their ordinary local encounter and no world state is copied.
 [[nodiscard]] constexpr AmbientEncounterRejection CanHostAdoptAmbientEncounter(
     const AmbientEncounterProposal& proposal,
     const AmbientEncounterHostContext& context,

@@ -4,6 +4,8 @@ using CoopStory.Sidecar.Session;
 
 namespace CoopStory.Sidecar.Persistence;
 
+// Saves/loads the completion journal atomically.
+// The backup copy matters when a PC closes during a save and the host later retries the same completion.
 public sealed class MissionProgressionJournalStore
 {
     public async Task SaveAsync(

@@ -1,5 +1,6 @@
 namespace CoopStory.Sidecar.Simulation;
 
+// Settings for deliberately making a test network worse: delay, uneven delay, packet loss, and packets arriving in the wrong order.
 public sealed record NetworkImpairmentProfile
 {
     public int LatencyMs { get; init; }

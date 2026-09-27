@@ -33,6 +33,8 @@ public readonly record struct SessionMenuStatusPayload(
     string Message,
     string InviteCode = "");
 
+// Small local-IPC payloads for the in-game HOST/JOIN menu.
+// These messages never cross the LAN; SidecarRuntime rejects them if a remote peer sends one.
 public static class SessionMenuPayloadCodec
 {
     public const int MaximumInviteCodeBytes = 768;
@@ -47,6 +49,8 @@ public static class SessionMenuPayloadCodec
             throw new ProtocolException("Session menu request has an unknown action.");
         }
 
+        // A request contains one action byte plus an optional bounded invite.
+        // Bounds protect the pipe/UI from an unexpectedly huge clipboard value.
         var invite = EncodeBounded(
             payload.InviteCode.Trim(),
             MaximumInviteCodeBytes,
@@ -83,6 +87,7 @@ public static class SessionMenuPayloadCodec
             throw new ProtocolException("Session menu status has an unknown kind.");
         }
 
+        // Status provides the menu with a short human-readable progress/error message and optionally the host's generated invite code.
         var message = EncodeBounded(
             payload.Message,
             MaximumMessageBytes,

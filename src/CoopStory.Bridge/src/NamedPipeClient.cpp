@@ -106,6 +106,7 @@ using UniqueHandle = std::unique_ptr<void, HandleCloser>;
 }  // namespace
 
 std::wstring BuildCurrentUserPipeName(const std::wstring_view stem) {
+    // Include the Windows SID in the local IPC name, matching the sidecar's CurrentUserOnly policy and avoiding a cross-user pipe collision.
     std::vector<std::uint8_t> tokenBytes;
     PSID sid{};
     std::string error;
@@ -150,6 +151,7 @@ bool NamedPipeClient::Connect(std::string& error) {
         return true;
     }
 
+    // The sidecar can restart while the ASI remains loaded; wait only a bounded interval so the game tick can keep attempting reconnects without hanging.
     if (!::WaitNamedPipeW(pipeName_.c_str(), connectTimeoutMs_)) {
         error = WindowsError("WaitNamedPipeW");
         return false;
@@ -177,6 +179,8 @@ bool NamedPipeClient::Connect(std::string& error) {
         Disconnect();
         return false;
     }
+    // A matching pipe name is not enough.
+    // Verify the server process runs as this Windows user before allowing any session traffic across local IPC.
     if (!VerifyServerOwner(error)) {
         Disconnect();
         return false;
@@ -186,6 +190,7 @@ bool NamedPipeClient::Connect(std::string& error) {
 }
 
 void NamedPipeClient::Disconnect() noexcept {
+    // Cancel outstanding overlapped I/O before closing so a late completion cannot write through a handle that has been recycled by Windows.
     if (!IsConnected()) {
         return;
     }
@@ -249,6 +254,7 @@ bool NamedPipeClient::WriteAll(
     const std::size_t size,
     std::string& error) {
     std::size_t offset{};
+    // Named pipes are byte streams: complete the full encoded frame even when Windows performs one write in multiple chunks.
     while (offset < size) {
         const auto chunkSize = static_cast<DWORD>(
             std::min<std::size_t>(
@@ -320,6 +326,7 @@ bool NamedPipeClient::Send(const Frame& frame, std::string& error) {
         error = exception.what();
         return false;
     }
+    // A partial failed frame poisons this stream; drop it and reconnect rather than letting the next frame be decoded against an invalid byte boundary.
     if (!WriteAll(bytes.data(), bytes.size(), error)) {
         Disconnect();
         return false;
@@ -334,6 +341,7 @@ std::vector<Frame> NamedPipeClient::Poll(std::string& error) {
         return frames;
     }
 
+    // Drain every currently available chunk during this game tick, while the streaming decoder preserves incomplete bytes for the next poll.
     for (;;) {
         DWORD available{};
         if (!::PeekNamedPipe(

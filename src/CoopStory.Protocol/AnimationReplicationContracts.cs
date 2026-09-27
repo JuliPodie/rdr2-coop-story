@@ -1,10 +1,8 @@
 namespace CoopStory.Protocol;
 
 /// <summary>
-/// Describes which internal animation-graph values the sender can read for
-/// the current executable. Capabilities do not imply that a value is present
-/// in every sample; <see cref="PlayerAnimationStateFlags"/> carries per-sample
-/// validity.
+/// Describes which internal animation-graph values the sender can read for the current executable.
+/// Capabilities do not imply that a value is present in every sample; <see cref="PlayerAnimationStateFlags"/> carries per-sample validity.
 /// </summary>
 [Flags]
 public enum PlayerAnimationCapabilities : uint
@@ -21,8 +19,8 @@ public enum PlayerAnimationCapabilities : uint
 }
 
 /// <summary>
-/// Per-sample validity and graph state. A sender must leave unavailable
-/// identifiers and numeric values at their canonical zero representation.
+/// Per-sample validity and graph state.
+/// A sender must leave unavailable identifiers and numeric values at their canonical zero representation.
 /// </summary>
 [Flags]
 public enum PlayerAnimationStateFlags : uint
@@ -45,9 +43,8 @@ public enum PlayerAnimationStateFlags : uint
 }
 
 /// <summary>
-/// Identifies where the sample was obtained. In particular, graph/state/clip
-/// hashes from a versioned memory reader are not confused with higher-level
-/// locomotion values exposed by public natives.
+/// Identifies where the sample was obtained.
+/// In particular, graph/state/clip hashes from a versioned memory reader are not confused with higher-level locomotion values exposed by public natives.
 /// </summary>
 public enum PlayerAnimationSampleSource : byte
 {
@@ -58,9 +55,8 @@ public enum PlayerAnimationSampleSource : byte
 }
 
 /// <summary>
-/// Optional exact animation-graph sample. Hash fields deliberately contain
-/// no assumed RDR2 identifiers: an implementation may set them only after a
-/// version-specific reader has positively resolved the corresponding value.
+/// Optional exact animation-graph sample.
+/// Hash fields deliberately contain no assumed RDR2 identifiers: an implementation may set them only after a version-specific reader has positively resolved the corresponding value.
 /// </summary>
 public readonly record struct PlayerAnimationStatePayload(
     NetEntityId EntityId,
@@ -83,8 +79,8 @@ public readonly record struct PlayerAnimationStatePayload(
     float SecondaryBlendWeight,
     float TransitionProgress);
 
-// The "Wire" suffix intentionally avoids colliding with the sidecar and
-// launcher configuration enums, which live at a different abstraction layer.
+// The "Wire" suffix intentionally avoids colliding with the sidecar and launcher configuration enums, which live at a different abstraction layer.
+// The negotiated wire mode determines how the native bridge presents remote movement; it is distinct from protocol frame transport/reliability choice.
 public enum MotionReplicationWireMode : byte
 {
     TaskNavmesh = 0,
@@ -92,6 +88,7 @@ public enum MotionReplicationWireMode : byte
 }
 
 [Flags]
+// Optional feature switches agreed by both peers before a motion configuration is delivered to their native bridges.
 public enum MotionReplicationConfigFlags : ushort
 {
     None = 0,
@@ -100,8 +97,8 @@ public enum MotionReplicationConfigFlags : ushort
 }
 
 /// <summary>
-/// Small sidecar-to-bridge control payload. Revision gives the bridge a
-/// deterministic last-write-wins key when the pipe reconnects.
+/// Small sidecar-to-bridge control payload.
+/// Revision gives the bridge a deterministic last-write-wins key when the pipe reconnects.
 /// </summary>
 public readonly record struct MotionReplicationConfigPayload(
     byte SchemaVersion,
